@@ -173,7 +173,10 @@ afterthought. CI (`.github/workflows/verify.yml`) runs:
 | [typos](https://github.com/crate-ci/typos) | Spelling |
 | [kubeconform](https://github.com/yannh/kubeconform) | Sample manifests |
 
-Dependabot keeps Go modules and Actions current (weekly).
+[Renovate](https://docs.renovatebot.com) keeps Go modules, GitHub Actions, and
+base images current via the shared
+[metio/renovate-config](https://github.com/metio/renovate-config) preset, which
+groups updates per ecosystem into batched PRs.
 
 ## License
 
