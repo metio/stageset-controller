@@ -9,7 +9,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/fluxcd/cli-utils v1.2.1
 	github.com/fluxcd/pkg/apis/kustomize v1.19.0
-	github.com/fluxcd/pkg/apis/meta v1.29.0
+	github.com/fluxcd/pkg/apis/meta v1.30.0
 	github.com/fluxcd/pkg/envsubst v1.7.0
 	github.com/fluxcd/pkg/kustomize v1.34.0
 	github.com/fluxcd/pkg/ssa v0.76.0
