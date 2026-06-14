@@ -3,5 +3,13 @@
 [default]
 extend-ignore-re = ["applyset-[A-Za-z0-9_-]+-v1"]
 
+[default.extend-words]
+# Deliberate spelling used in comments and a test name.
+unparseable = "unparseable"
+# Valid prefix in hyphenated compounds (mis-resolve, mis-deployed, …).
+mis = "mis"
+# POSIX open(2) flag name, not a misspelling of "wrongly".
+wronly = "wronly"
+
 [files]
 extend-exclude = ["LICENSES/", "go.sum"]
