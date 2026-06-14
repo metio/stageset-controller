@@ -65,13 +65,13 @@ jobs:
           body: |
             ## Usage
 
-            Pull the latest container from `ghcr.io/metio/stageset-controller:${{ needs.prepare.outputs.release_version }}`. Check the [migration guide](https://github.com/metio/flux-stageset-controller/blob/main/MIGRATIONS.md) for any required actions on your part.
+            Pull the latest container from `ghcr.io/metio/stageset-controller:${{ needs.prepare.outputs.release_version }}`. Check the [migration guide](https://github.com/metio/stageset-controller/blob/main/MIGRATIONS.md) for any required actions on your part.
 
             The image is a multi-arch manifest (`linux/amd64`, `arm64`, `arm/v7`, `ppc64le`, `riscv64`, `s390x`) and is signed with cosign keyless. Verify it before deploying:
 
             ```shell
             cosign verify ghcr.io/metio/stageset-controller:${{ needs.prepare.outputs.release_version }} \
-              --certificate-identity-regexp '^https://github.com/metio/flux-stageset-controller/' \
+              --certificate-identity-regexp '^https://github.com/metio/stageset-controller/' \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com
             ```
           generate_release_notes: true

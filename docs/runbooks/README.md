@@ -2,7 +2,7 @@
 
 One page per wire-stable `Reason` the controller sets on the `Ready` condition of a `StageSet`. Pages target operators reading `kubectl describe stageset` output: symptom, cause, diagnosis, remediation.
 
-Point the controller at a published copy of these pages with `--runbook-base-url` (e.g. `--runbook-base-url=https://github.com/metio/flux-stageset-controller/blob/main/docs/runbooks`). The reason is then appended to each actionable Ready message as `(runbook: <base>/<reason>.md)`. Healthy reasons (`Succeeded`, `Suspended`) get no link.
+Point the controller at a published copy of these pages with `--runbook-base-url` (e.g. `--runbook-base-url=https://github.com/metio/stageset-controller/blob/main/docs/runbooks`). The reason is then appended to each actionable Ready message as `(runbook: <base>/<reason>.md)`. Healthy reasons (`Succeeded`, `Suspended`) get no link.
 
 | Reason | Page | Meaning |
 |---|---|---|
