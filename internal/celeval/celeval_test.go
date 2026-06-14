@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: The stageset-controller Authors
+// SPDX-License-Identifier: 0BSD
+
+package celeval
+
+import "testing"
+
+func TestEvalBool(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		expr    string
+		obj     map[string]any
+		want    bool
+		evalErr bool
+	}{
+		{
+			name: "int equality true",
+			expr: "status.activeSessions == 0",
+			obj:  map[string]any{"status": map[string]any{"activeSessions": int64(0)}},
+			want: true,
+		},
+		{
+			name: "int equality false",
+			expr: "status.activeSessions == 0",
+			obj:  map[string]any{"status": map[string]any{"activeSessions": int64(3)}},
+			want: false,
+		},
+		{
+			name:    "missing field is an eval error (treated as not-yet-satisfied)",
+			expr:    "status.activeSessions == 0",
+			obj:     map[string]any{"status": map[string]any{}},
+			evalErr: true,
+		},
+		{
+			name: "conditions filter (healthCheckExprs shape)",
+			expr: `status.conditions.filter(c, c.type == 'Ready').exists(c, c.status == 'True')`,
+			obj:  map[string]any{"status": map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": "True"}}}},
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p, err := Compile(tc.expr)
+			if err != nil {
+				t.Fatalf("compile: %v", err)
+			}
+			got, err := p.EvalBool(tc.obj)
+			if tc.evalErr {
+				if err == nil {
+					t.Fatal("expected an evaluation error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("eval: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("EvalBool = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompileError(t *testing.T) {
+	t.Parallel()
+	if _, err := Compile("status.x +"); err == nil {
+		t.Fatal("expected a compile error for a malformed expression")
+	}
+}

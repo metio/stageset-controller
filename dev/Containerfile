@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: The stageset-controller Authors
+# SPDX-License-Identifier: 0BSD
+
+# fluxcd/pkg/apis/* require go >= 1.26, so match jaas's pinned base rather
+# than letting go.mod trigger a toolchain auto-download in the dev shell.
+FROM docker.io/library/golang:1.26.4
+
+# Recent golang base images default GOTOOLCHAIN=local, which blocks
+# auto-download of a higher toolchain directive in go.mod. `auto` lets
+# go.mod pin a newer toolchain than this base image without a rebuild.
+ENV GOTOOLCHAIN=auto
+
+RUN apt-get update && apt-get install -y git curl reuse yamllint
+
+# Standalone static-analysis tools. golangci-lint is intentionally NOT
+# installed (banned project-wide); the verify gate runs these directly.
+RUN go install honnef.co/go/tools/cmd/staticcheck@latest
+RUN go install mvdan.cc/gofumpt@latest
+RUN go install github.com/securego/gosec/v2/cmd/gosec@latest
+RUN go install github.com/arch-go/arch-go@latest
+RUN go install github.com/rhysd/actionlint/cmd/actionlint@latest
+
+# Code generation + envtest assets for controller tests.
+RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+RUN go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+RUN go install github.com/yannh/kubeconform/cmd/kubeconform@latest
+
+# Pre-stage an envtest asset bundle (kube-apiserver + etcd) so envtest-based
+# controller tests run without network access. The `assets` symlink keeps the
+# path stable across image rebuilds; KUBEBUILDER_ASSETS points the
+# controller-runtime envtest package at it.
+ARG ENVTEST_K8S_VERSION=1.31.0
+RUN setup-envtest use ${ENVTEST_K8S_VERSION} --bin-dir /usr/local/kubebuilder/bin \
+    && ln -s "$(setup-envtest use ${ENVTEST_K8S_VERSION} --bin-dir /usr/local/kubebuilder/bin -p path)" /usr/local/kubebuilder/assets
+ENV KUBEBUILDER_ASSETS=/usr/local/kubebuilder/assets

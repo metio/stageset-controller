@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: The stageset-controller Authors
+# SPDX-License-Identifier: 0BSD
+
+version = 1
+SPDX-PackageName = "stageset-controller"
+SPDX-PackageSupplier = "Sebastian Hoß <seb@xn--ho-hia.de>"
+SPDX-PackageDownloadLocation = "https://github.com/metio/stageset-controller"
+
+[[annotations]]
+path = ["go.mod", "go.sum", ".gitignore", "renovate.json", "docs/**", "config/**", "LICENSES/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "The stageset-controller Authors"
+SPDX-License-Identifier = "0BSD"

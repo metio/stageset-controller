@@ -1,0 +1,211 @@
+// SPDX-FileCopyrightText: The stageset-controller Authors
+// SPDX-License-Identifier: 0BSD
+
+// Package stageinv persists a stage's applied-object inventory as sharded
+// StageInventory CRs and diffs the stored inventory against a fresh apply to
+// find prune candidates. The pure planning logic (IDs, sharding) lives in
+// internal/inventory; this package is the Kubernetes-client layer over it.
+package stageinv
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/inventory"
+)
+
+// Recorder reads and writes a stage's StageInventory shards.
+type Recorder struct {
+	Client   client.Client
+	ShardCap int
+}
+
+func (r *Recorder) shardCap() int {
+	if r.ShardCap > 0 {
+		return r.ShardCap
+	}
+	return inventory.DefaultShardCap
+}
+
+// Stored returns the object references currently recorded for a stage across
+// all of its shards (malformed entries are skipped).
+func (r *Recorder) Stored(ctx context.Context, ssName, namespace, stage string) ([]inventory.ObjectRef, error) {
+	var list stagesv1.StageInventoryList
+	if err := r.Client.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{
+		stagesv1.StageSetLabel: ssName,
+		stagesv1.StageLabel:    stage,
+	}); err != nil {
+		return nil, fmt.Errorf("list StageInventory: %w", err)
+	}
+	var refs []inventory.ObjectRef
+	for i := range list.Items {
+		for _, e := range list.Items[i].Spec.Entries {
+			ref, err := inventory.ParseID(e.ID, e.V)
+			if err != nil {
+				continue
+			}
+			refs = append(refs, ref)
+		}
+	}
+	return refs, nil
+}
+
+// Write replaces the stored shards for a stage with refs, owned by the
+// StageSet, and removes any surplus shards left by a larger previous run.
+func (r *Recorder) Write(ctx context.Context, ss *stagesv1.StageSet, stage string, position int, refs []inventory.ObjectRef) error {
+	shards, err := inventory.PlanShards(refs, r.shardCap())
+	if err != nil {
+		return fmt.Errorf("plan shards: %w", err)
+	}
+	for i, shard := range shards {
+		si := &stagesv1.StageInventory{ObjectMeta: metav1.ObjectMeta{
+			Name:      inventory.ShardName(ss.Name, stage, i),
+			Namespace: ss.Namespace,
+		}}
+		shardIndex := i
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, si, func() error {
+			si.Labels = map[string]string{
+				stagesv1.StageSetLabel: ss.Name,
+				stagesv1.StageLabel:    stage,
+				stagesv1.ShardLabel:    strconv.Itoa(shardIndex),
+			}
+			// #nosec G115 -- a stage position is bounded by spec.stages (small).
+			si.Spec.StagePosition = int32(position)
+			si.Spec.Entries = entriesOf(shard)
+			return controllerutil.SetControllerReference(ss, si, r.Client.Scheme())
+		}); err != nil {
+			return fmt.Errorf("write shard %s: %w", si.Name, err)
+		}
+	}
+	return r.deleteSurplusShards(ctx, ss.Namespace, ss.Name, stage, len(shards))
+}
+
+// deleteSurplusShards removes shards whose index is >= keep (so shrinking a
+// stage's object set drops the no-longer-needed shards).
+func (r *Recorder) deleteSurplusShards(ctx context.Context, namespace, ssName, stage string, keep int) error {
+	var list stagesv1.StageInventoryList
+	if err := r.Client.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{
+		stagesv1.StageSetLabel: ssName,
+		stagesv1.StageLabel:    stage,
+	}); err != nil {
+		return fmt.Errorf("list StageInventory for cleanup: %w", err)
+	}
+	for i := range list.Items {
+		idx, err := strconv.Atoi(list.Items[i].Labels[stagesv1.ShardLabel])
+		if err != nil || idx < keep {
+			continue
+		}
+		if err := r.Client.Delete(ctx, &list.Items[i]); err != nil && client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("delete surplus shard %s: %w", list.Items[i].Name, err)
+		}
+	}
+	return nil
+}
+
+func entriesOf(shard []inventory.ObjectRef) []stagesv1.InventoryEntry {
+	entries := make([]stagesv1.InventoryEntry, 0, len(shard))
+	for _, ref := range shard {
+		entries = append(entries, stagesv1.InventoryEntry{ID: ref.ID(), V: ref.Version})
+	}
+	return entries
+}
+
+// StageRecord is a stored stage's recorded position and object references.
+type StageRecord struct {
+	Position int
+	Refs     []inventory.ObjectRef
+}
+
+// StageRecords groups all stored inventory of a StageSet by stage name (used
+// for teardown of removed stages and of the whole StageSet on deletion).
+func (r *Recorder) StageRecords(ctx context.Context, ssName, namespace string) (map[string]StageRecord, error) {
+	var list stagesv1.StageInventoryList
+	if err := r.Client.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{
+		stagesv1.StageSetLabel: ssName,
+	}); err != nil {
+		return nil, fmt.Errorf("list StageInventory: %w", err)
+	}
+	records := map[string]StageRecord{}
+	for i := range list.Items {
+		item := &list.Items[i]
+		stage := item.Labels[stagesv1.StageLabel]
+		rec := records[stage]
+		rec.Position = int(item.Spec.StagePosition)
+		for _, e := range item.Spec.Entries {
+			if ref, err := inventory.ParseID(e.ID, e.V); err == nil {
+				rec.Refs = append(rec.Refs, ref)
+			}
+		}
+		records[stage] = rec
+	}
+	return records, nil
+}
+
+// DeleteStageShards removes all StageInventory shards of a stage (used when a
+// stage is removed from the spec; on StageSet deletion the owner reference GCs
+// them instead).
+func (r *Recorder) DeleteStageShards(ctx context.Context, namespace, ssName, stage string) error {
+	var list stagesv1.StageInventoryList
+	if err := r.Client.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{
+		stagesv1.StageSetLabel: ssName,
+		stagesv1.StageLabel:    stage,
+	}); err != nil {
+		return fmt.Errorf("list StageInventory: %w", err)
+	}
+	for i := range list.Items {
+		if err := r.Client.Delete(ctx, &list.Items[i]); err != nil && client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("delete shard %s: %w", list.Items[i].Name, err)
+		}
+	}
+	return nil
+}
+
+// Diff returns the refs present in stored but not in current — the objects
+// that fell out of a stage and are prune candidates.
+func Diff(stored, current []inventory.ObjectRef) []inventory.ObjectRef {
+	keep := make(map[string]struct{}, len(current))
+	for _, ref := range current {
+		keep[ref.ID()] = struct{}{}
+	}
+	var pruned []inventory.ObjectRef
+	for _, ref := range stored {
+		if _, ok := keep[ref.ID()]; !ok {
+			pruned = append(pruned, ref)
+		}
+	}
+	return pruned
+}
+
+// RefOf builds an ObjectRef from an applied object.
+func RefOf(o *unstructured.Unstructured) inventory.ObjectRef {
+	gvk := o.GroupVersionKind()
+	return inventory.ObjectRef{
+		Group:     gvk.Group,
+		Kind:      gvk.Kind,
+		Namespace: o.GetNamespace(),
+		Name:      o.GetName(),
+		Version:   gvk.Version,
+	}
+}
+
+// Objects builds the minimal unstructured objects (GVK + name/namespace) for a
+// set of refs, suitable for a delete request.
+func Objects(refs []inventory.ObjectRef) []*unstructured.Unstructured {
+	out := make([]*unstructured.Unstructured, 0, len(refs))
+	for _, ref := range refs {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(schema.GroupVersionKind{Group: ref.Group, Version: ref.Version, Kind: ref.Kind})
+		u.SetNamespace(ref.Namespace)
+		u.SetName(ref.Name)
+		out = append(out, u)
+	}
+	return out
+}

@@ -1,0 +1,84 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.3
+  name: stageinventories.stages.metio.wtf
+spec:
+  group: stages.metio.wtf
+  names:
+    kind: StageInventory
+    listKind: StageInventoryList
+    plural: stageinventories
+    singular: stageinventory
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.labels.stages\.metio\.wtf/stage
+      name: Stage
+      type: string
+    - jsonPath: .spec.entries[*]
+      name: Entries
+      priority: 1
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: StageInventory is one shard of a stage's recorded inventory.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              StageInventorySpec holds one shard of a stage's inventory. Entries live
+              in spec (not status) deliberately: backup tooling restores spec, so prune
+              history survives disaster recovery. Shard zero additionally acts as the
+              ApplySet (KEP-3659) parent object for the stage.
+            properties:
+              entries:
+                description: Entries lists the objects this shard accounts for.
+                items:
+                  description: InventoryEntry identifies one tracked object.
+                  properties:
+                    id:
+                      description: ID in the form namespace_name_group_kind.
+                      type: string
+                    v:
+                      description: V is the API version the object was last applied
+                        with.
+                      type: string
+                  required:
+                  - id
+                  - v
+                  type: object
+                type: array
+              stagePosition:
+                description: |-
+                  StagePosition records the stage's position in spec.stages at write
+                  time, used for reverse-order teardown of removed stages.
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

@@ -1,0 +1,974 @@
+// SPDX-FileCopyrightText: The stageset-controller Authors
+// SPDX-License-Identifier: 0BSD
+
+// Package controller implements the StageSet reconciler.
+package controller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/ssa"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/events"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/actions"
+	"github.com/metio/stageset-controller/internal/apply"
+	"github.com/metio/stageset-controller/internal/artifact"
+	"github.com/metio/stageset-controller/internal/build"
+	"github.com/metio/stageset-controller/internal/inventory"
+	"github.com/metio/stageset-controller/internal/metrics"
+	"github.com/metio/stageset-controller/internal/stageinv"
+)
+
+// StageSetReconciler reconciles StageSet objects. The reconciliation model —
+// resolve and pin artifacts, then BUILD -> APPLY -> PRUNE -> VERIFY each stage
+// in order, with a finalizer for teardown — is documented in
+// docs/content/design/stageset.md.
+type StageSetReconciler struct {
+	client.Client
+
+	// Config is the manager's rest config, cloned per tenant to build the
+	// impersonating clients spec.serviceAccountName requires. Set in
+	// SetupWithManager; leaving it nil disables impersonation (tests that
+	// never set serviceAccountName).
+	Config *rest.Config
+
+	// RESTMapper resolves GVKs for the SSA status poller. Defaults to the
+	// manager's mapper in SetupWithManager.
+	RESTMapper apimeta.RESTMapper
+	// Fetcher downloads and digest-verifies stage artifacts. Defaults to
+	// artifact.New().
+	Fetcher *artifact.Fetcher
+	// Recorder emits Kubernetes Events (events.v1) on run/stage transitions;
+	// nil disables event emission (tests that do not need events leave it
+	// unset).
+	Recorder events.EventRecorder
+
+	// InventoryMode is the global --inventory-mode flag
+	// (entries|hybrid|applyset).
+	InventoryMode string
+	// ShardCap is the global --inventory-shard-cap flag.
+	ShardCap int
+	// AllowedActionHosts is the global --allowed-action-hosts flag.
+	AllowedActionHosts []string
+	// NoCrossNamespaceRefs is the global --no-cross-namespace-refs flag.
+	NoCrossNamespaceRefs bool
+	// RunbookBaseURL is the global --runbook-base-url flag: a URL prefix
+	// appended to actionable Ready-condition messages as a runbook link.
+	RunbookBaseURL string
+	// RollbackStore is the optional external store for rendered output, making
+	// rollbackOnFailure bit-exact and independent of producer retention. Nil
+	// falls back to re-fetching the producer artifact.
+	RollbackStore RollbackStore
+	// Now returns the current time for update-window evaluation; nil defaults
+	// to time.Now. Tests inject a fixed clock.
+	Now func() time.Time
+
+	// targets memoizes the per-run target connection (client + RESTMapper) for
+	// the impersonated and/or remote cluster a StageSet applies to; client.New
+	// and remote discovery are costly to repeat each reconcile. Keyed by
+	// cluster+SA+kubeconfig identity, guarded by tenantMu.
+	tenantMu sync.Mutex
+	targets  map[string]clusterTarget
+}
+
+// +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets/finalizers,verbs=update
+// +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageinventories,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=externalartifacts,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=impersonate
+// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
+
+// Reconcile drives one StageSet through the design's state machine: resolve +
+// pin artifacts, then BUILD -> APPLY -> PRUNE + RECORD -> VERIFY each stage in
+// order; a finalizer tears the applied objects down on deletion.
+func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	var ss stagesv1.StageSet
+	if err := r.Get(ctx, req.NamespacedName, &ss); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if !ss.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, &ss)
+	}
+	if controllerutil.AddFinalizer(&ss, FinalizerName) {
+		if err := r.Update(ctx, &ss); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if ss.Spec.Suspend {
+		r.setReady(&ss, metav1.ConditionFalse, ReasonSuspended, "Reconciliation is suspended")
+		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+	}
+
+	// Record that this run handled the current reconcile.fluxcd.io/requestedAt
+	// token, so `flux reconcile`/kubectl-annotate force-reconciles can detect
+	// completion. Stamped on the object now so every status write below
+	// persists it, regardless of which path the run takes. (Suspended objects
+	// are intentionally not stamped — the request was not acted on.)
+	ss.Status.SetLastHandledReconcileRequest(ss.Annotations[fluxmeta.ReconcileRequestAnnotation])
+
+	// Spec invariants the CRD schema cannot express cheaply (the action oneof)
+	// plus reserved post-v1 fields. The admission webhook normally rejects
+	// these at write time; this is the fallback for a bypassed or disabled
+	// webhook. Terminal: wait for a spec change rather than requeuing.
+	if err := ValidateSpec(&ss); err != nil {
+		r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec, err.Error())
+		ss.Status.ObservedGeneration = ss.Generation
+		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+	}
+
+	// Dependency gating: every spec.dependsOn StageSet must be Ready at its
+	// observed generation before this one runs. A dependsOn cycle is terminal.
+	if ready, why, err := r.dependenciesReady(ctx, &ss); err != nil {
+		return ctrl.Result{}, err
+	} else if !ready {
+		reason, terminal := ReasonDependencyNotReady, false
+		if why == cycleSentinel {
+			reason, terminal, why = ReasonStalled, true, "spec.dependsOn forms a cycle"
+		}
+		r.setReady(&ss, metav1.ConditionFalse, reason, why)
+		ss.Status.ObservedGeneration = ss.Generation
+		if uerr := r.Status().Update(ctx, &ss); uerr != nil {
+			return ctrl.Result{}, uerr
+		}
+		if terminal {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{RequeueAfter: retryInterval(&ss)}, nil
+	}
+
+	// Producer-aware source resolution + revision pinning: resolve every
+	// stage's ExternalArtifact (directly or through the RFC-0012 back-pointer)
+	// and pin the run snapshot in status.lastAttemptedRevisions before anything
+	// touches the cluster. Resolution always lands on an ExternalArtifact, so
+	// the data plane stays single-kind.
+	resolver := &artifact.Resolver{NoCrossNamespace: r.NoCrossNamespaceRefs}
+	resolved := make([]artifact.ResolvedArtifact, len(ss.Spec.Stages))
+	pinned := make(map[string]string, len(ss.Spec.Stages))
+	for i := range ss.Spec.Stages {
+		ra, err := resolver.Resolve(ctx, r.Client, ss.Spec.Stages[i].SourceRef, ss.Namespace)
+		if err != nil {
+			return r.failResolution(ctx, &ss, ss.Spec.Stages[i].Name, err)
+		}
+		resolved[i] = ra
+		pinned[ra.Key()] = ra.Revision
+	}
+	ss.Status.LastAttemptedRevisions = pinned
+
+	// Time-based delivery: hold a new-revision rollout (or, under
+	// windowScope=All, any reconcile) while update windows are closed, unless
+	// a one-shot update-now override is present. A held-but-deployed StageSet
+	// stays Ready; the held revisions and next window are surfaced on status.
+	if res, deferred, derr := r.gateUpdateWindows(ctx, &ss, resolved); derr != nil {
+		return ctrl.Result{}, derr
+	} else if deferred {
+		return res, nil
+	}
+
+	// Stage state machine: for each stage in order — run PRE actions, fetch +
+	// BUILD the pinned artifact, APPLY (SSA), PRUNE + RECORD (StageInventory
+	// diff), VERIFY (kstatus), then POST actions. Failures from APPLY onward run
+	// onFailure best-effort. The action idempotency ledger lives in the stage
+	// status, keyed by the pinned revision.
+	// All cluster writes for this run — SSA apply, health-check reads, prune,
+	// and the typed actions — go through the target connection: the remote
+	// cluster when spec.kubeConfig is set, impersonating spec.serviceAccountName
+	// when set, else the controller's own client. Bookkeeping (StageInventory,
+	// status) always stays on the controller client and cluster.
+	target, targetMapper, err := r.targetCluster(ctx, ss.Namespace, ss.Spec.ServiceAccountName, ss.Spec.KubeConfig)
+	if err != nil {
+		return r.failStage(ctx, &ss, ss.Spec.Stages[0].Name, "connect to target cluster", err, nil, "", nil)
+	}
+	applier := apply.New(target, targetMapper, stagesv1.GroupVersion.Group)
+	recorder := &stageinv.Recorder{Client: r.Client, ShardCap: r.ShardCap}
+	fetcher := r.fetcher()
+	executor := &actions.Executor{
+		Client:       target,
+		AllowedHosts: r.AllowedActionHosts,
+		Resolver:     &artifact.Resolver{NoCrossNamespace: r.NoCrossNamespaceRefs},
+		Fetcher:      fetcher,
+		Applier:      &manifestApplier{applier: applier, name: ss.Name, namespace: ss.Namespace},
+	}
+	// Versioned migrations: resolve the desired version and the migrations the
+	// current transition crosses, before any stage runs. Terminal version
+	// failures (InvalidVersion, downgrade) short-circuit here; the ordered
+	// pending migrations are surfaced on status and run anchored to their
+	// stages inside the loop.
+	migPlan, mreason, mmsg, merr := r.planVersionMigrations(ctx, &ss, resolved, fetcher)
+	if merr != nil {
+		return ctrl.Result{}, merr // transient fetch
+	}
+	if mreason != "" {
+		r.setReady(&ss, metav1.ConditionFalse, mreason, mmsg)
+		ss.Status.ObservedGeneration = ss.Generation
+		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+	}
+	ss.Status.PendingMigrations = migPlan.pendingNames()
+
+	priorStages := indexStageStatuses(ss.Status.Stages)
+	previousMap, perr := recorder.StageRecords(ctx, ss.Name, ss.Namespace)
+	if perr != nil {
+		return ctrl.Result{}, perr
+	}
+	previousRecords := toInventoryRecords(previousMap)
+	desiredRecords := make([]inventory.StageRecord, 0, len(ss.Spec.Stages))
+	applied := make(map[string]string, len(ss.Spec.Stages))
+	stageStatuses := make([]stagesv1.StageStatus, 0, len(ss.Spec.Stages))
+	// The stage loop runs in a closure so a stage failure can be intercepted
+	// for rollbackOnFailure before it is finalized; failStage's returns become
+	// the closure's result.
+	loopResult, loopErr := func() (ctrl.Result, error) {
+		for i := range ss.Spec.Stages {
+			stage := &ss.Spec.Stages[i]
+			ra := resolved[i]
+
+			// Idempotency ledger: carry actions already run for this pinned
+			// revision; a new revision resets it. record appends in memory and is
+			// persisted by failStage / the final stage status. priorRevision is the
+			// revision this stage last applied, used to tell a content change apart
+			// from out-of-band drift after the apply.
+			var executed []string
+			priorRevision := ""
+			if prior, ok := priorStages[stage.Name]; ok {
+				priorRevision = prior.AppliedRevision
+				if prior.LedgerRevision == ra.Revision {
+					executed = append(executed, prior.ExecutedActions...)
+				}
+			}
+			record := func(name string) error { executed = append(executed, name); return nil }
+
+			// Migrations anchored to this stage run before its pre-actions, so
+			// version-conditional work (data conversions, immutable-object
+			// recreation) happens before the stage applies its content.
+			if merr := r.runStageMigrations(ctx, &ss, stage.Name, migPlan, executor); merr != nil {
+				return r.failStage(ctx, &ss, stage.Name, "migration", merr, stageStatuses, ra.Revision, executed)
+			}
+
+			// PRE actions: before BUILD; a failure aborts the stage untouched
+			// (nothing has been applied), so no onFailure runs.
+			if stage.Actions != nil {
+				if err := executor.Run(ctx, ss.Namespace, stage.Actions.Pre, toStringSet(executed), record); err != nil {
+					return r.failStage(ctx, &ss, stage.Name, "pre-action", err, stageStatuses, ra.Revision, executed)
+				}
+			}
+
+			files, err := fetcher.Fetch(ctx, ra.URL, ra.Digest, "")
+			if err != nil {
+				return r.failStage(ctx, &ss, stage.Name, "fetch artifact", err, stageStatuses, ra.Revision, executed)
+			}
+			vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
+			if err != nil {
+				return r.failStage(ctx, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, ra.Revision, executed)
+			}
+			objects, err := build.Build(files, build.Options{Path: stage.Path, Patches: stage.Patches}, vars)
+			if err != nil {
+				return r.failStage(ctx, &ss, stage.Name, "build", err, stageStatuses, ra.Revision, executed)
+			}
+			// In hybrid/applyset modes every applied object also carries the
+			// ApplySet (KEP-3659) member label, so `kubectl get -l
+			// applyset.kubernetes.io/part-of=<id>` answers "what does this stage
+			// own" with no project-specific tooling.
+			if mode := r.InventoryMode; mode == "hybrid" || mode == "applyset" {
+				id := inventory.ApplySetID(inventory.ShardName(ss.Name, stage.Name, 0), ss.Namespace, "StageInventory", stagesv1.GroupVersion.Group)
+				for _, o := range objects {
+					labels := o.GetLabels()
+					if labels == nil {
+						labels = map[string]string{}
+					}
+					labels[inventory.PartOfLabel] = id
+					o.SetLabels(labels)
+				}
+			}
+			conflicts, cerr := resolveConflictHandling(objects, stage)
+			if cerr != nil {
+				return r.failStage(ctx, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
+			}
+			changeSet, err := applier.Apply(ctx, ss.Name, ss.Namespace, objects, conflicts)
+			if err != nil {
+				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+				return r.failStage(ctx, &ss, stage.Name, "apply", err, stageStatuses, ra.Revision, executed)
+			}
+			r.reportDrift(&ss, stage, changeSet, priorRevision, ra.Revision)
+			if r.RollbackStore != nil && ss.Spec.RollbackOnFailure {
+				r.storeRendered(ctx, &ss, stage.Name, ra.Digest, objects)
+			}
+
+			// RECORD the applied set as the stage's inventory (write-ahead, before
+			// VERIFY). Pruning is deferred to a single cross-stage pass after all
+			// stages apply, so an object moved between stages transfers ownership
+			// instead of being deleted then re-created.
+			newRefs := make([]inventory.ObjectRef, 0, len(objects))
+			for _, o := range objects {
+				newRefs = append(newRefs, stageinv.RefOf(o))
+			}
+			desiredRecords = append(desiredRecords, inventory.StageRecord{Name: stage.Name, Position: i, Entries: newRefs})
+			if werr := recorder.Write(ctx, &ss, stage.Name, i, newRefs); werr != nil {
+				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+				return r.failStage(ctx, &ss, stage.Name, "record inventory", werr, stageStatuses, ra.Revision, executed)
+			}
+
+			if !disableWait(stage) {
+				if err := applier.Wait(ctx, changeSet.ToObjMetadataSet(), stageTimeout(&ss, stage)); err != nil {
+					r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+					return r.failStage(ctx, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
+				}
+			}
+
+			// POST actions: the stage (and any downstream gate) is Ready only once
+			// these succeed.
+			if stage.Actions != nil {
+				if err := executor.Run(ctx, ss.Namespace, stage.Actions.Post, toStringSet(executed), record); err != nil {
+					r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+					return r.failStage(ctx, &ss, stage.Name, "post-action", err, stageStatuses, ra.Revision, executed)
+				}
+			}
+
+			applied[ra.Key()] = ra.Revision
+			stageStatuses = append(stageStatuses, stagesv1.StageStatus{
+				Name:            stage.Name,
+				Phase:           stagesv1.StageReady,
+				AppliedRevision: ra.Revision,
+				EntriesCount:    int64(len(newRefs)),
+				ExecutedActions: executed,
+				LedgerRevision:  ra.Revision,
+			})
+			metrics.StageAppliedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Inc()
+		}
+		return ctrl.Result{}, nil
+	}()
+	if loopErr != nil {
+		// A stage failed. failStage has already written the failure status. If
+		// rollbackOnFailure is set, restore the last-good snapshot; a snapshot
+		// no longer fetchable surfaces as a terminal PreviousRevisionUnavailable.
+		if ss.Spec.RollbackOnFailure {
+			if rbReason, rbMsg := r.attemptRollback(ctx, &ss, applier, fetcher); rbReason != "" {
+				r.setReady(&ss, metav1.ConditionFalse, rbReason, rbMsg)
+				ss.Status.ObservedGeneration = ss.Generation
+				return ctrl.Result{}, r.Status().Update(ctx, &ss)
+			}
+			r.event(&ss, corev1.EventTypeWarning, eventReasonRolledBack,
+				"rolled back to the last-applied revisions after a failed run")
+		}
+		return loopResult, loopErr
+	}
+
+	// Cross-stage prune: diff the previous inventory against this run's with
+	// ownership transfer — an object moved to another stage is kept, an object
+	// gone from every stage is pruned (honoring stage.prune), and stages removed
+	// from the spec are torn down in reverse recorded order. A single object
+	// claimed by two stages is an ambiguous spec and stalls the run.
+	if dups := inventory.DuplicateClaims(desiredRecords); len(dups) > 0 {
+		r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec,
+			fmt.Sprintf("%d object(s) are claimed by more than one stage", len(dups)))
+		ss.Status.ObservedGeneration = ss.Generation
+		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+	}
+	plan := inventory.ComputePlan(previousRecords, desiredRecords)
+	prunes := stagePruneByName(&ss)
+	for stageName, refs := range plan.PrunePerStage {
+		if allowed, known := prunes[stageName]; known && !allowed {
+			continue
+		}
+		if len(refs) > 0 {
+			if _, derr := applier.Delete(ctx, stageinv.Objects(refs)); derr != nil {
+				return ctrl.Result{}, derr
+			}
+		}
+	}
+	for _, removed := range plan.RemovedStages {
+		if len(removed.Entries) > 0 {
+			if _, derr := applier.Delete(ctx, stageinv.Objects(removed.Entries)); derr != nil {
+				return ctrl.Result{}, derr
+			}
+		}
+		if derr := recorder.DeleteStageShards(ctx, ss.Namespace, ss.Name, removed.Name); derr != nil {
+			return ctrl.Result{}, derr
+		}
+	}
+
+	ss.Status.LastAppliedRevisions = applied
+	ss.Status.Stages = stageStatuses
+	ss.Status.InventoryMode = r.InventoryMode
+	ss.Status.ObservedGeneration = ss.Generation
+	// A fully successful run advances the recorded version and clears the
+	// in-flight migration ledger (baselining records the version, having run
+	// no migrations).
+	if migPlan.versionSet {
+		ss.Status.Version = migPlan.desired
+		ss.Status.ExecutedMigrations = nil
+		ss.Status.PendingMigrations = nil
+	}
+	// Record this run as the rollback target: per-stage artifact pointers in
+	// status (no rendered output, no Secret). The status update below persists
+	// it. When an external rollback store is configured, also push the
+	// bit-exact rendered output for GC-independent rollback.
+	if ss.Spec.RollbackOnFailure {
+		ss.Status.LastAppliedSnapshot = snapshotStages(&ss, resolved)
+	}
+	r.setReady(&ss, metav1.ConditionTrue, ReasonReady,
+		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
+	if err := r.Status().Update(ctx, &ss); err != nil {
+		return ctrl.Result{}, err
+	}
+	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonReady).Inc()
+	r.event(&ss, corev1.EventTypeNormal, ReasonReady,
+		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
+
+	return ctrl.Result{RequeueAfter: ss.Spec.Interval.Duration}, nil
+}
+
+// failResolution records the resolution failure on the Ready condition and
+// chooses a requeue strategy: transient waits (artifact not yet present or not
+// Ready) requeue at RetryInterval; spec/config errors wait for a spec change;
+// unexpected API errors are returned so controller-runtime backs off.
+func (r *StageSetReconciler) failResolution(ctx context.Context, ss *stagesv1.StageSet, stage string, err error) (ctrl.Result, error) {
+	var (
+		reason    = ReasonResolveFailed
+		transient bool
+		apiError  bool
+	)
+	switch {
+	case errors.Is(err, artifact.ErrSourceNotReady):
+		reason, transient = ReasonSourceNotReady, true
+	case errors.Is(err, artifact.ErrArtifactNotFound), errors.Is(err, artifact.ErrArtifactMissing):
+		reason, transient = ReasonArtifactNotFound, true
+	case errors.Is(err, artifact.ErrAmbiguousProducer), errors.Is(err, artifact.ErrCrossNamespaceForbidden):
+		reason = ReasonResolveFailed
+	default:
+		// Unexpected (API/list/get failure): report and back off.
+		reason, apiError = ReasonResolveFailed, true
+	}
+
+	r.setReady(ss, metav1.ConditionFalse, reason, fmt.Sprintf("stage %q: %v", stage, err))
+	ss.Status.ObservedGeneration = ss.Generation
+	if uerr := r.Status().Update(ctx, ss); uerr != nil {
+		return ctrl.Result{}, uerr
+	}
+	switch {
+	case apiError:
+		return ctrl.Result{}, err
+	case transient:
+		return ctrl.Result{RequeueAfter: retryInterval(ss)}, nil
+	default:
+		return ctrl.Result{}, nil
+	}
+}
+
+func (r *StageSetReconciler) setReady(ss *stagesv1.StageSet, status metav1.ConditionStatus, reason, message string) {
+	apimeta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
+		Type:               ConditionReady,
+		Status:             status,
+		Reason:             reason,
+		Message:            r.decorateMessage(reason, message),
+		ObservedGeneration: ss.Generation,
+	})
+}
+
+// happyReasonsNoRunbook names Ready reasons describing a healthy or
+// intentionally-operator-set state, which therefore carry no runbook link:
+// there is nothing to remediate. They still have a runbook page (the drift gate
+// requires one) — it just documents that the state is expected.
+var happyReasonsNoRunbook = map[string]bool{
+	ReasonReady:     true,
+	ReasonSuspended: true,
+}
+
+// decorateMessage appends a "(runbook: <base>/<reason>.md)" suffix when
+// RunbookBaseURL is set, so kubectl describe surfaces a direct link to the
+// per-reason remediation page. The base URL is treated as a directory; the
+// reason is lower-cased into the path segment. Happy reasons get no suffix.
+func (r *StageSetReconciler) decorateMessage(reason, message string) string {
+	if r.RunbookBaseURL == "" || happyReasonsNoRunbook[reason] {
+		return message
+	}
+	base := strings.TrimRight(r.RunbookBaseURL, "/")
+	return message + " (runbook: " + base + "/" + strings.ToLower(reason) + ".md)"
+}
+
+func retryInterval(ss *stagesv1.StageSet) time.Duration {
+	if ss.Spec.RetryInterval != nil {
+		return ss.Spec.RetryInterval.Duration
+	}
+	return ss.Spec.Interval.Duration
+}
+
+func (r *StageSetReconciler) fetcher() *artifact.Fetcher {
+	if r.Fetcher != nil {
+		return r.Fetcher
+	}
+	return artifact.New()
+}
+
+// failStage records a stage failure on both the Ready condition and the
+// per-stage status — including the action ledger (executed) so a retry skips
+// the side effects already performed — then returns the error so
+// controller-runtime backs off and retries.
+func (r *StageSetReconciler) failStage(ctx context.Context, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, revision string, executed []string) (ctrl.Result, error) {
+	ss.Status.Stages = append(prior, stagesv1.StageStatus{
+		Name:            stage,
+		Phase:           stagesv1.StageFailed,
+		AppliedRevision: revision,
+		Message:         fmt.Sprintf("%s: %v", op, cause),
+		ExecutedActions: executed,
+		LedgerRevision:  revision,
+	})
+	ss.Status.ObservedGeneration = ss.Generation
+	msg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
+	r.setReady(ss, metav1.ConditionFalse, ReasonStageFailed, msg)
+	if uerr := r.Status().Update(ctx, ss); uerr != nil {
+		return ctrl.Result{}, uerr
+	}
+	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonStageFailed).Inc()
+	r.event(ss, corev1.EventTypeWarning, ReasonStageFailed, msg)
+	return ctrl.Result{}, cause
+}
+
+// runOnFailure runs a stage's onFailure actions best-effort (failures are
+// evented, never blocking the failure report). The ledger gates them so a
+// repeatedly-failing run fires them only once per pinned revision.
+func (r *StageSetReconciler) runOnFailure(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, executor *actions.Executor, done map[string]bool, record func(string) error) {
+	if stage.Actions == nil || len(stage.Actions.OnFailure) == 0 {
+		return
+	}
+	if err := executor.Run(ctx, ss.Namespace, stage.Actions.OnFailure, done, record); err != nil {
+		r.event(ss, corev1.EventTypeWarning, "OnFailureAction", fmt.Sprintf("stage %q onFailure: %v", stage.Name, err))
+	}
+}
+
+func indexStageStatuses(stages []stagesv1.StageStatus) map[string]stagesv1.StageStatus {
+	m := make(map[string]stagesv1.StageStatus, len(stages))
+	for _, s := range stages {
+		m[s.Name] = s
+	}
+	return m
+}
+
+func toStringSet(items []string) map[string]bool {
+	m := make(map[string]bool, len(items))
+	for _, s := range items {
+		m[s] = true
+	}
+	return m
+}
+
+// event emits an events.v1 Event; the reason fills both the reason and action
+// slots (we have no separate machine-readable action vocabulary).
+func (r *StageSetReconciler) event(ss *stagesv1.StageSet, eventtype, reason, message string) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(ss, nil, eventtype, reason, reason, "%s", message)
+	}
+}
+
+// eventReasonDriftCorrected is the Event reason for out-of-band drift that the
+// apply corrected. It is an Event reason only — the run is still Succeeded
+// (the drift was fixed), so it is not a Ready-condition reason.
+const eventReasonDriftCorrected = "DriftCorrected"
+
+// eventReasonRolledBack is the Event reason emitted when rollbackOnFailure
+// restored the last-good revisions after a failed run.
+const eventReasonRolledBack = "RolledBack"
+
+// reportDrift emits a DriftCorrected Warning Event and bumps a metric when SSA
+// changed or recreated an already-managed object on a reconcile that applied
+// the SAME revision as last time — i.e. the live object was mutated or deleted
+// out-of-band and the apply corrected it. On a new-revision apply, changes are
+// the expected rollout (not drift); on the first apply (empty priorRevision)
+// there is nothing to compare against.
+func (r *StageSetReconciler) reportDrift(ss *stagesv1.StageSet, stage *stagesv1.Stage, cs *ssa.ChangeSet, priorRevision, currentRevision string) {
+	if cs == nil || priorRevision == "" || priorRevision != currentRevision {
+		return
+	}
+	var drifted []string
+	for _, e := range cs.Entries {
+		if e.Action == ssa.CreatedAction || e.Action == ssa.ConfiguredAction {
+			drifted = append(drifted, e.Subject)
+		}
+	}
+	if len(drifted) == 0 {
+		return
+	}
+	metrics.DriftCorrectedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Add(float64(len(drifted)))
+	r.event(ss, corev1.EventTypeWarning, eventReasonDriftCorrected,
+		fmt.Sprintf("stage %q corrected out-of-band drift on %d object(s): %s",
+			stage.Name, len(drifted), strings.Join(drifted, ", ")))
+}
+
+// manifestApplier adapts the apply engine to the actions.ManifestApplier seam,
+// so an apply action can SSA-apply transient manifests (and optionally wait for
+// readiness) without the actions package depending on internal/apply. The
+// objects get owner labels like any applied object but are never recorded in a
+// StageInventory, so the inventory diff never prunes them.
+type manifestApplier struct {
+	applier         *apply.Applier
+	name, namespace string
+}
+
+func (m *manifestApplier) Apply(ctx context.Context, objects []*unstructured.Unstructured, wait bool, timeout time.Duration) error {
+	cs, err := m.applier.Apply(ctx, m.name, m.namespace, objects, apply.ConflictHandling{})
+	if err != nil {
+		return err
+	}
+	if wait {
+		return m.applier.Wait(ctx, cs.ToObjMetadataSet(), timeout)
+	}
+	return nil
+}
+
+func disableWait(stage *stagesv1.Stage) bool {
+	return stage.ReadyChecks != nil && stage.ReadyChecks.DisableWait
+}
+
+// stagePrune reports whether a stage garbage-collects objects that fell out of
+// its inventory (default true).
+func stagePrune(stage *stagesv1.Stage) bool {
+	return stage.Prune == nil || *stage.Prune
+}
+
+// reconcileDelete tears the StageSet's applied objects down in reverse stage
+// order (skipping prune:false stages, whose objects are deliberately
+// orphaned), then drops the finalizer so the apiserver can complete deletion —
+// the owned StageInventory shards are GC'd by their owner reference.
+func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.StageSet) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(ss, FinalizerName) {
+		return ctrl.Result{}, nil
+	}
+	// Teardown deletes the target's objects, so it runs against the same
+	// cluster and identity that applied them.
+	target, targetMapper, err := r.targetCluster(ctx, ss.Namespace, ss.Spec.ServiceAccountName, ss.Spec.KubeConfig)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	applier := apply.New(target, targetMapper, stagesv1.GroupVersion.Group)
+	recorder := &stageinv.Recorder{Client: r.Client, ShardCap: r.ShardCap}
+	records, err := recorder.StageRecords(ctx, ss.Name, ss.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	prune := stagePruneByName(ss)
+	for _, stage := range stagesByPositionDesc(records) {
+		if allowed, known := prune[stage]; known && !allowed {
+			continue // prune:false: objects orphaned deliberately
+		}
+		if refs := records[stage].Refs; len(refs) > 0 {
+			if _, derr := applier.Delete(ctx, stageinv.Objects(refs)); derr != nil {
+				return ctrl.Result{}, derr // retry; finalizer stays
+			}
+		}
+	}
+	controllerutil.RemoveFinalizer(ss, FinalizerName)
+	return ctrl.Result{}, r.Update(ctx, ss)
+}
+
+// toInventoryRecords converts stored stage records into the inventory
+// package's record type for ownership-transfer planning.
+func toInventoryRecords(m map[string]stageinv.StageRecord) []inventory.StageRecord {
+	out := make([]inventory.StageRecord, 0, len(m))
+	for name, rec := range m {
+		out = append(out, inventory.StageRecord{Name: name, Position: rec.Position, Entries: rec.Refs})
+	}
+	return out
+}
+
+// stagesByPositionDesc orders stage names by recorded position descending
+// (later stages first), with name as a stable tie-break.
+func stagesByPositionDesc(records map[string]stageinv.StageRecord) []string {
+	names := make([]string, 0, len(records))
+	for name := range records {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if pi, pj := records[names[i]].Position, records[names[j]].Position; pi != pj {
+			return pi > pj
+		}
+		return names[i] < names[j]
+	})
+	return names
+}
+
+// stagePruneByName maps each spec stage to whether it prunes (default true).
+func stagePruneByName(ss *stagesv1.StageSet) map[string]bool {
+	m := make(map[string]bool, len(ss.Spec.Stages))
+	for i := range ss.Spec.Stages {
+		m[ss.Spec.Stages[i].Name] = stagePrune(&ss.Spec.Stages[i])
+	}
+	return m
+}
+
+// cycleSentinel is the dependenciesReady "why" value signalling a dependsOn
+// cycle (kept out of the normal message space).
+const cycleSentinel = "\x00cycle"
+
+// dependenciesReady reports whether every spec.dependsOn StageSet is Ready at
+// its observed generation. A non-empty why explains a not-ready result;
+// cycleSentinel signals a terminal dependsOn cycle.
+func (r *StageSetReconciler) dependenciesReady(ctx context.Context, ss *stagesv1.StageSet) (bool, string, error) {
+	if len(ss.Spec.DependsOn) == 0 {
+		return true, "", nil
+	}
+	cyclic, err := r.hasDependencyCycle(ctx, ss)
+	if err != nil {
+		return false, "", err
+	}
+	if cyclic {
+		return false, cycleSentinel, nil
+	}
+	for _, dep := range ss.Spec.DependsOn {
+		ns := dep.Namespace
+		if ns == "" {
+			ns = ss.Namespace
+		}
+		if ns != ss.Namespace && r.NoCrossNamespaceRefs {
+			return false, fmt.Sprintf("cross-namespace dependsOn %s/%s rejected", ns, dep.Name), nil
+		}
+		var d stagesv1.StageSet
+		if gerr := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: dep.Name}, &d); gerr != nil {
+			if apierrors.IsNotFound(gerr) {
+				return false, fmt.Sprintf("dependency %s/%s not found", ns, dep.Name), nil
+			}
+			return false, "", gerr
+		}
+		if !isReady(&d) || d.Status.ObservedGeneration != d.Generation {
+			return false, fmt.Sprintf("dependency %s/%s is not ready", ns, dep.Name), nil
+		}
+	}
+	return true, "", nil
+}
+
+// hasDependencyCycle walks the dependsOn graph breadth-first and reports
+// whether a path leads back to the starting StageSet.
+func (r *StageSetReconciler) hasDependencyCycle(ctx context.Context, ss *stagesv1.StageSet) (bool, error) {
+	start := ss.Namespace + "/" + ss.Name
+	seen := map[string]bool{}
+	queue := dependsOnKeys(ss)
+	for len(queue) > 0 {
+		k := queue[0]
+		queue = queue[1:]
+		if k == start {
+			return true, nil
+		}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		ns, name, ok := splitKey(k)
+		if !ok {
+			continue
+		}
+		var d stagesv1.StageSet
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &d); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return false, err
+		}
+		queue = append(queue, dependsOnKeys(&d)...)
+	}
+	return false, nil
+}
+
+func dependsOnKeys(ss *stagesv1.StageSet) []string {
+	keys := make([]string, 0, len(ss.Spec.DependsOn))
+	for _, dep := range ss.Spec.DependsOn {
+		ns := dep.Namespace
+		if ns == "" {
+			ns = ss.Namespace
+		}
+		keys = append(keys, ns+"/"+dep.Name)
+	}
+	return keys
+}
+
+func splitKey(k string) (ns, name string, ok bool) {
+	i := strings.IndexByte(k, '/')
+	if i < 0 {
+		return "", "", false
+	}
+	return k[:i], k[i+1:], true
+}
+
+func isReady(ss *stagesv1.StageSet) bool {
+	c := apimeta.FindStatusCondition(ss.Status.Conditions, ConditionReady)
+	return c != nil && c.Status == metav1.ConditionTrue
+}
+
+func stageTimeout(ss *stagesv1.StageSet, stage *stagesv1.Stage) time.Duration {
+	if stage.Timeout != nil {
+		return stage.Timeout.Duration
+	}
+	if ss.Spec.Timeout != nil {
+		return ss.Spec.Timeout.Duration
+	}
+	return 5 * time.Minute
+}
+
+// resolvePostBuildVars assembles the substitution map from substituteFrom
+// (ConfigMaps/Secrets in the StageSet's namespace) overlaid with inline
+// substitute values, which take precedence.
+func (r *StageSetReconciler) resolvePostBuildVars(ctx context.Context, ns string, pb *stagesv1.PostBuild) (map[string]string, error) {
+	if pb == nil {
+		return nil, nil
+	}
+	vars := map[string]string{}
+	for _, ref := range pb.SubstituteFrom {
+		key := types.NamespacedName{Namespace: ns, Name: ref.Name}
+		switch ref.Kind {
+		case "ConfigMap":
+			var cm corev1.ConfigMap
+			if err := r.Get(ctx, key, &cm); err != nil {
+				if ref.Optional && apierrors.IsNotFound(err) {
+					continue
+				}
+				return nil, fmt.Errorf("substituteFrom ConfigMap %q: %w", ref.Name, err)
+			}
+			for k, v := range cm.Data {
+				vars[k] = v
+			}
+		case "Secret":
+			var sec corev1.Secret
+			if err := r.Get(ctx, key, &sec); err != nil {
+				if ref.Optional && apierrors.IsNotFound(err) {
+					continue
+				}
+				return nil, fmt.Errorf("substituteFrom Secret %q: %w", ref.Name, err)
+			}
+			for k, v := range sec.Data {
+				vars[k] = string(v)
+			}
+		}
+	}
+	for k, v := range pb.Substitute {
+		vars[k] = v
+	}
+	return vars, nil
+}
+
+// SetupWithManager wires the watches: the StageSet itself, owned
+// StageInventory shards, StageSet dependents (dependsOn wake-ups), and — when
+// the ExternalArtifact kind is installed — ExternalArtifact changes mapped back
+// to the StageSets that reference them, so a new artifact revision triggers an
+// immediate reconcile instead of waiting for the interval.
+func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.RESTMapper == nil {
+		r.RESTMapper = mgr.GetRESTMapper()
+	}
+	if r.Config == nil {
+		r.Config = mgr.GetConfig()
+	}
+	if r.Recorder == nil {
+		r.Recorder = mgr.GetEventRecorder("stageset-controller")
+	}
+
+	b := ctrl.NewControllerManagedBy(mgr).
+		For(&stagesv1.StageSet{}).
+		Owns(&stagesv1.StageInventory{}).
+		Watches(&stagesv1.StageSet{}, handler.EnqueueRequestsFromMapFunc(r.mapStageSetDependents))
+
+	// Gate the ExternalArtifact watch on the kind being installed so the
+	// controller boots cleanly in clusters without source-controller.
+	eaGVK := artifact.ExternalArtifactGVK
+	if _, err := mgr.GetRESTMapper().RESTMapping(eaGVK.GroupKind(), eaGVK.Version); err == nil {
+		ea := &unstructured.Unstructured{}
+		ea.SetGroupVersionKind(eaGVK)
+		b = b.Watches(ea, handler.EnqueueRequestsFromMapFunc(r.mapExternalArtifact))
+	}
+	return b.Complete(r)
+}
+
+// mapExternalArtifact maps an ExternalArtifact change to the StageSets (in the
+// same namespace) whose stages reference it — directly or through the RFC-0012
+// producer back-pointer.
+func (r *StageSetReconciler) mapExternalArtifact(ctx context.Context, obj client.Object) []reconcile.Request {
+	ea, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil
+	}
+	var list stagesv1.StageSetList
+	if err := r.List(ctx, &list, client.InNamespace(ea.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range list.Items {
+		ss := &list.Items[i]
+		for j := range ss.Spec.Stages {
+			if sourceRefMatchesEA(ss.Spec.Stages[j].SourceRef, ea) {
+				reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+				break
+			}
+		}
+	}
+	return reqs
+}
+
+// mapStageSetDependents maps a StageSet change to the StageSets that dependOn
+// it, so a dependency becoming Ready wakes its dependents immediately.
+func (r *StageSetReconciler) mapStageSetDependents(ctx context.Context, obj client.Object) []reconcile.Request {
+	dep, ok := obj.(*stagesv1.StageSet)
+	if !ok {
+		return nil
+	}
+	var list stagesv1.StageSetList
+	if err := r.List(ctx, &list, client.InNamespace(dep.Namespace)); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range list.Items {
+		ss := &list.Items[i]
+		for _, d := range ss.Spec.DependsOn {
+			dns := d.Namespace
+			if dns == "" {
+				dns = ss.Namespace
+			}
+			if d.Name == dep.Name && dns == dep.Namespace {
+				reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+				break
+			}
+		}
+	}
+	return reqs
+}
+
+// sourceRefMatchesEA reports whether a stage sourceRef resolves to the given
+// ExternalArtifact (directly by name, or via its producer back-pointer).
+func sourceRefMatchesEA(ref stagesv1.SourceReference, ea *unstructured.Unstructured) bool {
+	kind := ref.Kind
+	if kind == "" {
+		kind = "ExternalArtifact"
+	}
+	if kind == "ExternalArtifact" {
+		return ref.Name == ea.GetName()
+	}
+	bp, found, err := unstructured.NestedStringMap(ea.Object, "spec", "sourceRef")
+	if err != nil || !found {
+		return false
+	}
+	return bp["kind"] == ref.Kind && bp["name"] == ref.Name && groupOf(bp["apiVersion"]) == groupOf(ref.APIVersion)
+}
+
+func groupOf(apiVersion string) string {
+	if i := strings.IndexByte(apiVersion, '/'); i >= 0 {
+		return apiVersion[:i]
+	}
+	return ""
+}

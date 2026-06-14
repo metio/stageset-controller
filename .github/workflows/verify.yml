@@ -1,0 +1,96 @@
+# SPDX-FileCopyrightText: The stageset-controller Authors
+# SPDX-License-Identifier: 0BSD
+name: Verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      # Scaffold phase: go.mod has no pinned deps yet. Once go.sum is
+      # committed, replace the tidy step with `go mod verify`.
+      - run: go mod tidy
+      - run: go build ./...
+      - run: go test -race -shuffle=on -coverprofile=cover.out ./...
+  lint-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go mod tidy
+      - run: go vet ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - run: go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
+      - name: gofumpt formatting
+        run: |
+          unformatted="$(go run mvdan.cc/gofumpt@latest -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofumpt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+  vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go mod tidy
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go mod tidy
+      - run: go run github.com/arch-go/arch-go@latest
+  reuse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: fsfe/reuse-action@v5
+  yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx install yamllint && yamllint .
+  github-actions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: reviewdog/action-actionlint@v1
+  markdown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: "**/*.md"
+  typos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crate-ci/typos@v1
+  kubernetes-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # CRD schemas are generated, not committed yet; validate structure only.
+      - run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@latest
+          ~/go/bin/kubeconform -ignore-missing-schemas -summary config/samples/
+        env:
+          GOTOOLCHAIN: auto

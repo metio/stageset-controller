@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: The stageset-controller Authors
+# SPDX-License-Identifier: 0BSD
+# Architecture rules enforced by arch-go (https://github.com/arch-go/arch-go).
+# Compliance must be perfect; coverage is not gated (most packages carry
+# no architectural constraint, only the few below do).
+threshold:
+  compliance: 100
+  coverage: 0
+dependenciesRules:
+  # The inventory package is deliberately dependency-free: pure logic,
+  # testable without a cluster or any Kubernetes libraries. No internal
+  # and no external imports — standard library only.
+  - package: "**.internal.inventory"
+    shouldNotDependsOn:
+      internal:
+        - "**.internal.**"
+      external:
+        - "**"
+  # API types must never reach into controller internals, and stay free of
+  # controller-runtime (scheme registration uses apimachinery's
+  # runtime.NewSchemeBuilder) so the CRD types import cheaply.
+  - package: "**.api.**"
+    shouldNotDependsOn:
+      internal:
+        - "**.internal.**"
+      external:
+        - "sigs.k8s.io.controller-runtime.**"

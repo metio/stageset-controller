@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: The stageset-controller Authors
+# SPDX-License-Identifier: 0BSD
+default: true
+MD010:
+  code_blocks: false # verbatim CLI --help / tool output legitimately uses tabs
+MD013: false # line length: tables and links exceed any sane limit
+MD024:
+  siblings_only: true
+MD025:
+  # Hugo content carries a frontmatter `title:` plus a content `# h1`; don't
+  # count the frontmatter title as a heading so the single h1 is allowed.
+  front_matter_title: ""
+MD033: false # inline HTML: needed for Hugo
+MD060: false # table-column-style: pedantic; flags readable, valid tables

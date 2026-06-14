@@ -1,0 +1,429 @@
+# SPDX-FileCopyrightText: The stageset-controller Authors
+# SPDX-License-Identifier: 0BSD
+
+name: Kind smoke test
+on:
+  pull_request:
+    paths:
+      - api/**
+      - cmd/**
+      - config/**
+      - internal/**
+      - Dockerfile
+      - .github/workflows/kind-smoke.yml
+  workflow_dispatch:
+
+# The smoke is deliberately self-contained: it plants an ExternalArtifact whose
+# tarball bytes this job controls, so the resolve -> fetch -> digest-verify ->
+# kustomize-build -> apply -> prune pipeline runs deterministically in a real
+# cluster. The JaaS producer-aware sourceRef resolution (JsonnetSnippet ->
+# ExternalArtifact) is exercised separately by the envtest suite, which does not
+# need a live source-controller. fail-fast is OFF so one bad k8s minor does not
+# mask the others.
+jobs:
+  smoke:
+    name: k8s ${{ matrix.k8s_version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s_version:
+          - v1.31.4
+          - v1.32.2
+          - v1.33.1
+          - v1.34.0
+    steps:
+      - name: Clone Git Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build container image
+        run: docker build -t ghcr.io/metio/stageset-controller:smoke .
+
+      - name: Create kind cluster (k8s ${{ matrix.k8s_version }})
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: stageset-smoke
+          node_image: kindest/node:${{ matrix.k8s_version }}
+
+      - name: Load image into kind
+        run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-smoke
+
+      - name: Install StageSet CRDs
+        run: kubectl apply -f config/crd/
+
+      - name: Install ExternalArtifact stub CRD
+        run: |
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: apiextensions.k8s.io/v1
+          kind: CustomResourceDefinition
+          metadata:
+            name: externalartifacts.source.toolkit.fluxcd.io
+          spec:
+            group: source.toolkit.fluxcd.io
+            scope: Namespaced
+            names:
+              kind: ExternalArtifact
+              listKind: ExternalArtifactList
+              plural: externalartifacts
+              singular: externalartifact
+            versions:
+              - name: v1
+                served: true
+                storage: true
+                subresources:
+                  status: {}
+                schema:
+                  openAPIV3Schema:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+          EOF
+          kubectl wait --for=condition=Established crd/externalartifacts.source.toolkit.fluxcd.io --timeout=60s
+
+      - name: Deploy the controller
+        run: |
+          kubectl apply -f config/rbac/role.yaml
+          # Smoke-only broad grant: the committed manifests assume per-tenant
+          # impersonation for cluster writes, but this smoke applies with the
+          # controller's own ServiceAccount, so it needs to create the manifests
+          # the StageSet renders plus emit Events.
+          kubectl create clusterrolebinding stageset-smoke-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=stageset-system:stageset-controller
+          sed 's#ghcr.io/metio/stageset-controller:latest#ghcr.io/metio/stageset-controller:smoke#' \
+            config/manager/manager.yaml | kubectl apply -f -
+          kubectl -n stageset-system rollout status deploy/stageset-controller --timeout=180s
+
+      - name: Build and serve an artifact tarball in-cluster
+        run: |
+          mkdir manifests
+          cat > manifests/configmap.yaml <<'EOF'
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: smoke-applied
+            namespace: default
+          data:
+            from: stageset-controller-smoke
+          EOF
+          tar czf artifact.tar.gz -C manifests .
+          DIGEST="sha256:$(sha256sum artifact.tar.gz | cut -d' ' -f1)"
+          echo "DIGEST=${DIGEST}" >> "$GITHUB_ENV"
+          # kubectl stores a binary --from-file under binaryData (base64); the
+          # mount decodes it back to the original tarball bytes.
+          kubectl -n default create configmap artifact-data --from-file=artifact.tar.gz
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: artifact-server
+            namespace: default
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: artifact-server
+            template:
+              metadata:
+                labels:
+                  app: artifact-server
+              spec:
+                containers:
+                  - name: server
+                    image: docker.io/library/python:3.13-alpine
+                    command: ["python", "-m", "http.server", "80", "--directory", "/srv"]
+                    ports:
+                      - containerPort: 80
+                    volumeMounts:
+                      - name: data
+                        mountPath: /srv
+                volumes:
+                  - name: data
+                    configMap:
+                      name: artifact-data
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: artifact-server
+            namespace: default
+          spec:
+            selector:
+              app: artifact-server
+            ports:
+              - port: 80
+                targetPort: 80
+          EOF
+          kubectl -n default rollout status deploy/artifact-server --timeout=120s
+
+      - name: Plant the ExternalArtifact
+        run: |
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: source.toolkit.fluxcd.io/v1
+          kind: ExternalArtifact
+          metadata:
+            name: smoke-artifact
+            namespace: default
+          spec: {}
+          EOF
+          kubectl -n default patch externalartifact smoke-artifact --subresource=status --type=merge -p "{
+            \"status\": {
+              \"artifact\": {
+                \"url\": \"http://artifact-server.default.svc.cluster.local/artifact.tar.gz\",
+                \"revision\": \"smoke@${DIGEST}\",
+                \"digest\": \"${DIGEST}\"
+              },
+              \"conditions\": [{
+                \"type\": \"Ready\",
+                \"status\": \"True\",
+                \"reason\": \"Succeeded\",
+                \"message\": \"artifact ready\",
+                \"lastTransitionTime\": \"2026-01-01T00:00:00Z\"
+              }]
+            }
+          }"
+
+      - name: Create a StageSet consuming the artifact
+        run: |
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: stages.metio.wtf/v1
+          kind: StageSet
+          metadata:
+            name: smoke
+            namespace: default
+          spec:
+            interval: 1m
+            stages:
+              - name: app
+                sourceRef:
+                  name: smoke-artifact
+          EOF
+
+      - name: Wait for StageSet Ready=True
+        run: |
+          for i in $(seq 1 60); do
+            status=$(kubectl -n default get stageset smoke \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            if [ "${status}" = "True" ]; then
+              echo "StageSet is Ready after ${i} attempts"
+              break
+            fi
+            sleep 5
+          done
+          kubectl -n default describe stageset smoke
+          test "$(kubectl -n default get stageset smoke \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" = "True"
+
+      - name: Verify the rendered manifest was applied
+        run: |
+          kubectl -n default get configmap smoke-applied -o yaml
+          test "$(kubectl -n default get configmap smoke-applied -o jsonpath='{.data.from}')" \
+            = "stageset-controller-smoke"
+
+      - name: Verify a StageInventory was recorded
+        run: |
+          kubectl -n default get stageinventories -o wide
+          test "$(kubectl -n default get stageinventories \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | wc -l)" -ge 1
+
+      - name: Impersonation — apply runs under spec.serviceAccountName
+        run: |
+          kubectl create namespace tenant
+          # A ServiceAccount whose only namespace power is ConfigMaps — not Secrets.
+          kubectl -n tenant create serviceaccount deployer
+          kubectl -n tenant create role deployer-configmaps \
+            --verb=get,list,watch,create,update,patch,delete --resource=configmaps
+          kubectl -n tenant create rolebinding deployer-configmaps \
+            --role=deployer-configmaps --serviceaccount=tenant:deployer
+
+          # Two artifacts: a ConfigMap the SA may apply, a Secret it may not.
+          mkdir -p cm sec
+          cat > cm/cm.yaml <<'EOF'
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: tenant-cm
+            namespace: tenant
+          data:
+            from: impersonated-deployer
+          EOF
+          cat > sec/sec.yaml <<'EOF'
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: tenant-secret
+            namespace: tenant
+          stringData:
+            key: value
+          EOF
+          tar czf tenant-cm.tar.gz -C cm .
+          tar czf tenant-secret.tar.gz -C sec .
+          CM_DIGEST="sha256:$(sha256sum tenant-cm.tar.gz | cut -d' ' -f1)"
+          SEC_DIGEST="sha256:$(sha256sum tenant-secret.tar.gz | cut -d' ' -f1)"
+          kubectl -n tenant create configmap tenant-artifacts \
+            --from-file=tenant-cm.tar.gz --from-file=tenant-secret.tar.gz
+
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: tenant-artifact-server
+            namespace: tenant
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: tenant-artifact-server
+            template:
+              metadata:
+                labels:
+                  app: tenant-artifact-server
+              spec:
+                containers:
+                  - name: server
+                    image: docker.io/library/python:3.13-alpine
+                    command: ["python", "-m", "http.server", "80", "--directory", "/srv"]
+                    ports:
+                      - containerPort: 80
+                    volumeMounts:
+                      - name: data
+                        mountPath: /srv
+                volumes:
+                  - name: data
+                    configMap:
+                      name: tenant-artifacts
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: tenant-artifact-server
+            namespace: tenant
+          spec:
+            selector:
+              app: tenant-artifact-server
+            ports:
+              - port: 80
+                targetPort: 80
+          EOF
+          kubectl -n tenant rollout status deploy/tenant-artifact-server --timeout=120s
+
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: source.toolkit.fluxcd.io/v1
+          kind: ExternalArtifact
+          metadata:
+            name: imp-ok-art
+            namespace: tenant
+          spec: {}
+          ---
+          apiVersion: source.toolkit.fluxcd.io/v1
+          kind: ExternalArtifact
+          metadata:
+            name: imp-denied-art
+            namespace: tenant
+          spec: {}
+          EOF
+          kubectl -n tenant patch externalartifact imp-ok-art --subresource=status --type=merge -p "{
+            \"status\": {
+              \"artifact\": {
+                \"url\": \"http://tenant-artifact-server.tenant.svc.cluster.local/tenant-cm.tar.gz\",
+                \"revision\": \"imp-ok@${CM_DIGEST}\", \"digest\": \"${CM_DIGEST}\"
+              },
+              \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\", \"reason\": \"Succeeded\",
+                \"message\": \"ready\", \"lastTransitionTime\": \"2026-01-01T00:00:00Z\"}]
+            }
+          }"
+          kubectl -n tenant patch externalartifact imp-denied-art --subresource=status --type=merge -p "{
+            \"status\": {
+              \"artifact\": {
+                \"url\": \"http://tenant-artifact-server.tenant.svc.cluster.local/tenant-secret.tar.gz\",
+                \"revision\": \"imp-denied@${SEC_DIGEST}\", \"digest\": \"${SEC_DIGEST}\"
+              },
+              \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\", \"reason\": \"Succeeded\",
+                \"message\": \"ready\", \"lastTransitionTime\": \"2026-01-01T00:00:00Z\"}]
+            }
+          }"
+
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: stages.metio.wtf/v1
+          kind: StageSet
+          metadata:
+            name: imp-ok
+            namespace: tenant
+          spec:
+            interval: 1m
+            serviceAccountName: deployer
+            stages:
+              - name: app
+                sourceRef:
+                  name: imp-ok-art
+          ---
+          apiVersion: stages.metio.wtf/v1
+          kind: StageSet
+          metadata:
+            name: imp-denied
+            namespace: tenant
+          spec:
+            interval: 1m
+            serviceAccountName: deployer
+            stages:
+              - name: app
+                sourceRef:
+                  name: imp-denied-art
+          EOF
+
+          # Positive: the granted SA applies the ConfigMap, so the run goes Ready.
+          for i in $(seq 1 60); do
+            s=$(kubectl -n tenant get stageset imp-ok \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            if [ "${s}" = "True" ]; then break; fi
+            sleep 5
+          done
+          kubectl -n tenant describe stageset imp-ok
+          test "$(kubectl -n tenant get stageset imp-ok \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" = "True"
+          test "$(kubectl -n tenant get configmap tenant-cm -o jsonpath='{.data.from}')" \
+            = "impersonated-deployer"
+
+          # Negative: the SA cannot create Secrets, so the apply is denied and the
+          # Secret never appears. The controller itself is cluster-admin in this
+          # smoke, so a denial proves the apply truly runs as the impersonated SA.
+          for i in $(seq 1 30); do
+            r=$(kubectl -n tenant get stageset imp-denied \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}' 2>/dev/null || true)
+            if [ "${r}" = "StageFailed" ]; then break; fi
+            sleep 5
+          done
+          kubectl -n tenant describe stageset imp-denied
+          test "$(kubectl -n tenant get stageset imp-denied \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')" = "StageFailed"
+          if kubectl -n tenant get secret tenant-secret 2>/dev/null; then
+            echo "::error::impersonated SA without Secret RBAC managed to create a Secret"
+            exit 1
+          fi
+
+      - name: Delete the StageSet — finalizer must prune the applied object
+        run: |
+          kubectl -n default delete stageset smoke --timeout=120s
+          if kubectl -n default get configmap smoke-applied 2>/dev/null; then
+            echo "::error::finalizer teardown left the applied ConfigMap behind"
+            exit 1
+          fi
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl -n stageset-system get all || true
+          kubectl -n stageset-system logs deploy/stageset-controller --tail=300 || true
+          kubectl -n default get all || true
+          kubectl -n default describe stageset smoke || true
+          kubectl -n default get stageinventories -o yaml || true
+          kubectl -n default describe externalartifact smoke-artifact || true
+          kubectl -n tenant get all || true
+          kubectl -n tenant describe stageset imp-ok imp-denied || true
+          kubectl -n tenant get stageinventories -o yaml || true
+          kubectl get crd | grep -E "stages|fluxcd" || true

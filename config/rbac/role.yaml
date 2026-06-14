@@ -1,0 +1,63 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stageset-controller
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - validatingwebhookconfigurations
+  verbs:
+  - get
+  - update
+- apiGroups:
+  - source.toolkit.fluxcd.io
+  resources:
+  - externalartifacts
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - stages.metio.wtf
+  resources:
+  - stageinventories
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - stages.metio.wtf
+  resources:
+  - stagesets
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - stages.metio.wtf
+  resources:
+  - stagesets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - stages.metio.wtf
+  resources:
+  - stagesets/status
+  verbs:
+  - get
+  - patch
+  - update
