@@ -34,10 +34,10 @@ jobs:
           - v1.34.0
     steps:
       - name: Clone Git Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version-file: go.mod
 
@@ -45,7 +45,7 @@ jobs:
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
 
       - name: Create kind cluster (k8s ${{ matrix.k8s_version }})
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
         with:
           cluster_name: stageset-smoke
           node_image: kindest/node:${{ matrix.k8s_version }}
