@@ -5,8 +5,11 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +20,28 @@ import (
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
 )
+
+// substitutionDigest fingerprints a stage's resolved postBuild substitution map
+// so rollback can tell whether the inputs are still the ones that produced the
+// last good apply, WITHOUT storing the (possibly secret) values themselves. An
+// empty map yields the empty string, which disables the rollback check (nothing
+// to verify). Keys are sorted and each pair is length-prefixed so distinct maps
+// can't collide on the concatenation.
+func substitutionDigest(vars map[string]string) string {
+	if len(vars) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(h, "%d:%s=%d:%s\n", len(k), k, len(vars[k]), vars[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 // RollbackStore is the opt-in external store (e.g. S3/OCI) for the rendered
 // output of successful runs. It makes rollback bit-exact and independent of
@@ -74,12 +99,16 @@ func (r *StageSetReconciler) storeRendered(ctx context.Context, ss *stagesv1.Sta
 // producer's immutable, revision-addressed content — never the rendered output,
 // so status stays small (no Helm-style release-size limit) and carries no
 // substituteFrom secret values.
-func snapshotStages(ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact) []stagesv1.StageArtifactRef {
+// subDigests carries the per-stage substitution fingerprint (aligned by stage
+// index) of the same successful run, so rollback can detect a substituteFrom
+// source that changed in the rollback window.
+func snapshotStages(ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact, subDigests []string) []stagesv1.StageArtifactRef {
 	out := make([]stagesv1.StageArtifactRef, 0, len(ss.Spec.Stages))
 	for i := range ss.Spec.Stages {
 		ra := resolved[i]
 		out = append(out, stagesv1.StageArtifactRef{
 			Stage: ss.Spec.Stages[i].Name, URL: ra.URL, Digest: ra.Digest, Revision: ra.Revision,
+			SubstitutionDigest: subDigests[i],
 		})
 	}
 	return out
@@ -142,6 +171,14 @@ func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stage
 	if verr != nil {
 		return nil, ReasonPreviousRevisionUnavailable,
 			fmt.Sprintf("cannot roll back stage %q: resolving postBuild variables failed (%v)", ref.Stage, verr)
+	}
+	// Faithful-or-fail: if the substitution inputs changed since the recorded
+	// run, re-rendering the old artifact would NOT reproduce the previous state.
+	// Refuse rather than silently apply a different result. An empty snapshot
+	// digest (pre-upgrade snapshot, or no substitution) skips the check.
+	if ref.SubstitutionDigest != "" && substitutionDigest(vars) != ref.SubstitutionDigest {
+		return nil, ReasonPreviousRevisionUnavailable,
+			fmt.Sprintf("cannot roll back stage %q: its postBuild substitution inputs changed since the last good apply, so the previous rendered state can no longer be reproduced — fix forward instead", ref.Stage)
 	}
 	objects, berr := build.Build(files, build.Options{Path: stage.Path, Patches: stage.Patches}, vars)
 	if berr != nil {

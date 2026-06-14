@@ -20,14 +20,18 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/actions"
@@ -89,6 +93,15 @@ type StageSetReconciler struct {
 	// cluster+SA+kubeconfig identity, guarded by tenantMu.
 	tenantMu sync.Mutex
 	targets  map[string]clusterTarget
+
+	// controller is the built controller, kept (via Build instead of Complete)
+	// so producer watches can be added dynamically — producer GVKs aren't known
+	// until a StageSet references one. mgrCache constructs their source.Kind
+	// sources. watchedProducers single-flights engagement per GVK.
+	controller       controller.Controller
+	mgrCache         cache.Cache
+	watchMu          sync.Mutex
+	watchedProducers map[schema.GroupVersionKind]struct{}
 }
 
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets,verbs=get;list;watch;update;patch
@@ -96,6 +109,12 @@ type StageSetReconciler struct {
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets/finalizers,verbs=update
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageinventories,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=externalartifacts,verbs=get;list;watch
+// Producer kinds whose failures the controller surfaces via dynamic watches:
+// the Flux artifact-publishing sources and the JaaS snippet producer. A custom
+// producer kind not listed here still works (resolution is via the EA
+// back-pointer), just without the fast-failure watch unless its RBAC is added.
+// +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=gitrepositories;ocirepositories;buckets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=jaas.metio.wtf,resources=jsonnetsnippets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=impersonate
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
 
@@ -166,8 +185,16 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// the data plane stays single-kind.
 	resolver := &artifact.Resolver{NoCrossNamespace: r.NoCrossNamespaceRefs}
 	resolved := make([]artifact.ResolvedArtifact, len(ss.Spec.Stages))
+	// Per-stage substitution fingerprint of this run, recorded in the rollback
+	// snapshot so rollback can detect changed substituteFrom inputs.
+	subDigests := make([]string, len(ss.Spec.Stages))
 	pinned := make(map[string]string, len(ss.Spec.Stages))
 	for i := range ss.Spec.Stages {
+		// Dynamically watch a producer kind the first time it's referenced so its
+		// failures surface here immediately, not at the next retryInterval.
+		if ref := ss.Spec.Stages[i].SourceRef; isProducerRef(ref) {
+			r.engageProducerWatch(producerGVK(ref))
+		}
 		ra, err := resolver.Resolve(ctx, r.Client, ss.Spec.Stages[i].SourceRef, ss.Namespace)
 		if err != nil {
 			return r.failResolution(ctx, &ss, ss.Spec.Stages[i].Name, err)
@@ -282,6 +309,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if err != nil {
 				return r.failStage(ctx, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, ra.Revision, executed)
 			}
+			subDigests[i] = substitutionDigest(vars)
 			objects, err := build.Build(files, build.Options{Path: stage.Path, Patches: stage.Patches}, vars)
 			if err != nil {
 				return r.failStage(ctx, &ss, stage.Name, "build", err, stageStatuses, ra.Revision, executed)
@@ -425,7 +453,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// it. When an external rollback store is configured, also push the
 	// bit-exact rendered output for GC-independent rollback.
 	if ss.Spec.RollbackOnFailure {
-		ss.Status.LastAppliedSnapshot = snapshotStages(&ss, resolved)
+		ss.Status.LastAppliedSnapshot = snapshotStages(&ss, resolved, subDigests)
 	}
 	r.setReady(&ss, metav1.ConditionTrue, ReasonReady,
 		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
@@ -436,7 +464,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	r.event(&ss, corev1.EventTypeNormal, ReasonReady,
 		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
 
-	return ctrl.Result{RequeueAfter: ss.Spec.Interval.Duration}, nil
+	return ctrl.Result{RequeueAfter: steadyInterval(&ss)}, nil
 }
 
 // failResolution records the resolution failure on the Ready condition and
@@ -510,6 +538,18 @@ func (r *StageSetReconciler) decorateMessage(reason, message string) string {
 func retryInterval(ss *stagesv1.StageSet) time.Duration {
 	if ss.Spec.RetryInterval != nil {
 		return ss.Spec.RetryInterval.Duration
+	}
+	return ss.Spec.Interval.Duration
+}
+
+// steadyInterval is the success-path requeue cadence. With a
+// driftDetectionInterval set (and genuinely shorter than Interval) the
+// controller re-asserts the applied state — healing out-of-band drift — on that
+// faster cadence, decoupled from the full reconcile Interval. A zero/negative or
+// not-shorter value is ignored, so it can never become a tight requeue loop.
+func steadyInterval(ss *stagesv1.StageSet) time.Duration {
+	if d := ss.Spec.DriftDetectionInterval; d != nil && d.Duration > 0 && d.Duration < ss.Spec.Interval.Duration {
+		return d.Duration
 	}
 	return ss.Spec.Interval.Duration
 }
@@ -893,7 +933,16 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		ea.SetGroupVersionKind(eaGVK)
 		b = b.Watches(ea, handler.EnqueueRequestsFromMapFunc(r.mapExternalArtifact))
 	}
-	return b.Complete(r)
+	// Build (not Complete) so producer watches can be added at runtime: a
+	// sourceRef can name any producer kind, unknown until reconcile.
+	c, err := b.Build(r)
+	if err != nil {
+		return err
+	}
+	r.controller = c
+	r.mgrCache = mgr.GetCache()
+	r.watchedProducers = map[schema.GroupVersionKind]struct{}{}
+	return nil
 }
 
 // mapExternalArtifact maps an ExternalArtifact change to the StageSets (in the
@@ -964,6 +1013,78 @@ func sourceRefMatchesEA(ref stagesv1.SourceReference, ea *unstructured.Unstructu
 		return false
 	}
 	return bp["kind"] == ref.Kind && bp["name"] == ref.Name && groupOf(bp["apiVersion"]) == groupOf(ref.APIVersion)
+}
+
+// producerGVK derives the GVK of a producer sourceRef. APIVersion defaults to
+// the Flux source group, matching the resolver. A nil GVK (unparseable) is
+// ignored by the watch engagement.
+func producerGVK(ref stagesv1.SourceReference) schema.GroupVersionKind {
+	apiVersion := ref.APIVersion
+	if apiVersion == "" {
+		apiVersion = artifact.ExternalArtifactGVK.GroupVersion().String()
+	}
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return schema.GroupVersionKind{}
+	}
+	return gv.WithKind(ref.Kind)
+}
+
+// isProducerRef reports whether a sourceRef names a producer (anything other
+// than a direct ExternalArtifact), which is what gets a dynamic watch.
+func isProducerRef(ref stagesv1.SourceReference) bool {
+	return ref.Kind != "" && ref.Kind != artifact.ExternalArtifactGVK.Kind
+}
+
+// engageProducerWatch adds a dynamic watch on a producer kind the first time a
+// StageSet references it, so the producer FAILING (a status change that
+// publishes no new artifact) surfaces on the referencing StageSet immediately
+// instead of waiting for retryInterval. ExternalArtifact is already watched
+// statically; an uninstalled producer kind is skipped and retried on a later
+// reconcile once its CRD exists. Idempotent and concurrency-safe; only a
+// successful Watch records the GVK, so a transient failure re-engages.
+func (r *StageSetReconciler) engageProducerWatch(gvk schema.GroupVersionKind) {
+	if r.controller == nil || gvk.Empty() || gvk == artifact.ExternalArtifactGVK {
+		return
+	}
+	r.watchMu.Lock()
+	defer r.watchMu.Unlock()
+	if _, ok := r.watchedProducers[gvk]; ok {
+		return
+	}
+	if _, err := r.RESTMapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+		return // kind not installed yet; engage on a later reconcile
+	}
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	src := source.Kind(r.mgrCache, client.Object(obj), handler.EnqueueRequestsFromMapFunc(r.mapProducer))
+	if err := r.controller.Watch(src); err != nil {
+		return // transient; retried on the next reconcile (still unrecorded)
+	}
+	r.watchedProducers[gvk] = struct{}{}
+}
+
+// mapProducer maps a producer object's change to the StageSets whose sourceRef
+// names it (same namespace, mirroring mapExternalArtifact), so a failing
+// producer surfaces on its consumers without waiting for retryInterval.
+func (r *StageSetReconciler) mapProducer(ctx context.Context, obj client.Object) []reconcile.Request {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	var list stagesv1.StageSetList
+	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range list.Items {
+		ss := &list.Items[i]
+		for j := range ss.Spec.Stages {
+			ref := ss.Spec.Stages[j].SourceRef
+			if isProducerRef(ref) && ref.Name == obj.GetName() && producerGVK(ref) == gvk {
+				reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+				break
+			}
+		}
+	}
+	return reqs
 }
 
 func groupOf(apiVersion string) string {

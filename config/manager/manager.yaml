@@ -91,3 +91,11 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+          # The root filesystem is read-only; the artifact fetcher (and kustomize
+          # build) write tempfiles under /tmp, so back it with a writable emptyDir.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.3
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: stagesets.stages.metio.wtf
 spec:
   group: stages.metio.wtf
@@ -74,6 +74,14 @@ spec:
                   - name
                   type: object
                 type: array
+              driftDetectionInterval:
+                description: |-
+                  DriftDetectionInterval, when set, re-asserts the applied state on this
+                  (typically shorter) cadence to correct out-of-band drift, independently of
+                  the full reconcile Interval. Source changes still reconcile immediately via
+                  watches; this only controls how often the controller re-applies the pinned
+                  state to heal drift. Leave unset to fold drift correction into Interval.
+                type: string
               interval:
                 description: Interval at which to reconcile the StageSet.
                 type: string
@@ -1761,6 +1769,15 @@ spec:
                       type: string
                     stage:
                       description: Stage name this artifact backed.
+                      type: string
+                    substitutionDigest:
+                      description: |-
+                        SubstitutionDigest is a sha256 fingerprint over the resolved postBuild
+                        substitution inputs used for this stage's last good apply. It is a digest
+                        only — it carries no substituteFrom secret VALUES, so it is safe in
+                        status. On rollback the controller re-resolves substitution and, if the
+                        fingerprint no longer matches, refuses to restore (terminal) rather than
+                        silently re-rendering the old artifact with changed inputs.
                       type: string
                     url:
                       description: URL of the artifact tarball.

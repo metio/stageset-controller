@@ -512,11 +512,15 @@ same namespace whose `spec.sourceRef` matches. Properties:
   `JsonnetSnippet/grafana-dashboards: Ready=False reason=ExternalVariableConflict` —
   instead of a dead-end "artifact not found". This requires only a GET at
   reconcile time, not a watch.
-- **Watch surface stays minimal.** Only ExternalArtifact (and StageSet)
-  are watched; a producer publishing a new revision updates its artifact,
-  which triggers reconciliation. Producer failures that update nothing are
-  surfaced on the retryInterval cadence; dynamic per-GVK producer watches
-  are a possible later optimization, not v1 surface.
+- **Watch surface stays small but reactive.** ExternalArtifact and StageSet
+  are watched statically; a producer publishing a new revision updates its
+  artifact, which triggers reconciliation. For a producer that *fails*
+  without publishing (no artifact change), the controller engages a **dynamic
+  per-GVK watch** the first time a StageSet references that producer kind, so
+  the failure surfaces on the referencing StageSet immediately rather than at
+  the retryInterval cadence. Watches are added at runtime (the controller is
+  kept via `Build`, not `Complete`) and single-flighted per GVK; an
+  uninstalled producer kind is skipped and engaged on a later reconcile.
 - `--no-cross-namespace-refs` applies to producer references exactly as to
   direct ones.
 
@@ -546,9 +550,10 @@ on stage failure (APPLY onward):
   retryInterval
 ```
 
-- **No automatic rollback in the first release.** Desired state lives in
-  the artifacts; a failed run halts progression and reports.
-  `rollbackOnFailure` is Future Work.
+- **No automatic rollback by default.** Desired state lives in the artifacts;
+  a failed run halts progression and reports. Restoring the last good
+  revisions is opt-in via `rollbackOnFailure` (implemented — see
+  [rollbackOnFailure design](#rollbackonfailure-design) below).
 - **Idempotent resume.** SSA plus re-evaluated readiness means a
   half-finished rollout resumes at the failed stage; already-Current stages
   converge to fast no-ops.
@@ -640,21 +645,27 @@ We deliberately do **not** store the rendered output the way Helm stores a
 release — that is exactly the in-Secret release-size ceiling we avoid. The
 producer already holds every artifact, revision-addressed and immutable, in
 a content store built for the job. So the default rollback stores only a
-**pointer**: per stage, `{url, digest, revision}` in
+**pointer**: per stage, `{url, digest, revision, substitutionDigest}` in
 `status.lastAppliedSnapshot` — a few hundred bytes, no rendered output, no
-substituteFrom secret values, durable in etcd (HA-safe).
+substituteFrom secret *values* (the digest is a sha256 fingerprint of the
+resolved inputs, not the inputs themselves), durable in etcd (HA-safe).
 
 Semantics:
 
-- Rollback restores **artifact revisions under the current spec**. On
+- Rollback restores **artifact revisions faithfully, or not at all**. On
   failure the controller re-fetches each recorded revision (digest-verified)
-  and re-renders it under the live spec — current path, patches, and a
-  fresh read of `postBuild` substitution — then re-applies in forward order.
-  "Under the current spec" is the contract: a `substituteFrom` source that
-  *also* changed in the rollback window is not reproduced (fix-forward for
-  that case), but the common trigger — a bad *artifact* with stable config —
-  rolls back faithfully. Pruning needs no special code: converging back to
-  old content is an ordinary inventory diff.
+  and re-renders it under the live spec — current path, patches, and
+  `postBuild` substitution — then re-applies in forward order. The
+  substitution inputs of the last good run are fingerprinted into the
+  snapshot (`substitutionDigest`); if a `substituteFrom` source *also*
+  changed in the rollback window the fingerprint no longer matches, and
+  rollback is **terminal `PreviousRevisionUnavailable`** rather than silently
+  re-rendering the old artifact with different config — fix forward in that
+  case. The common trigger — a bad *artifact* with stable config — rolls back
+  faithfully. Pruning needs no special code: converging back to old content
+  is an ordinary inventory diff. (When the optional external store holds the
+  rendered output, rollback is already bit-exact and skips the re-render and
+  this check entirely.)
 - Failure mode: if a producer has garbage-collected the previous revision,
   rollback is terminal `PreviousRevisionUnavailable`. Best-effort by
   contract: it works exactly while producers retain. JaaS satisfies this
@@ -940,8 +951,12 @@ entry store. It is not reduced to a thin hint-only parent.)
   the apply corrected it. Those entries raise a `DriftCorrected` Event and
   increment `stageset_drift_corrected_total`. This reuses the existing apply
   and the interval reconcile — no extra LIST-every-group-kind pass — and
-  catches both out-of-band edits and deletions. A label-discovery pass
-  (for stripped membership labels) remains possible future work.
+  catches both out-of-band edits and deletions. The optional
+  `spec.driftDetectionInterval` decouples this re-assert from the full
+  reconcile `Interval`: set it shorter than `Interval` to heal drift more
+  often without re-resolving sources that often (source changes still
+  reconcile immediately via watches). A label-discovery pass (for stripped
+  membership labels) remains possible future work.
 - **Remote clusters without CRD installs.** The spec permits
   ConfigMap/Secret parents, and requires the parent to live in the target
   cluster; for `kubeConfig` applies the controller uses ConfigMap parents
@@ -1298,15 +1313,12 @@ recorded here with rationale.
 
 ## Future Work
 
-- DAG execution between stages (parallel branches with join points).
+- DAG execution between stages (parallel branches with join points) — designed
+  in [dag-execution.md](dag-execution.md) (proposal + critical review).
 - `dependsOn[].stage` for fine-grained cross-StageSet gating.
-- `rollbackOnFailure` per the designed semantics in Failure handling and
-  rollback (re-fetch pinned revisions + snapshotted substitution inputs).
-- Drift-detection interval decoupled from artifact-change reconciliation.
 - A CLI plugin (`flux`-style trace/status) for readable rollout progress.
 - A maintained Kustomize component library (blue/green, canary) for
   team-facing progressive-delivery boilerplate.
-- Dynamic per-GVK watches on producer objects for faster failure surfacing.
 - Explicit down-migrations (`direction: Down`) for declared, reviewed
   downgrade paths.
 - A shared SSRF-guard module extracted with JaaS's `internal/urlguard`, so

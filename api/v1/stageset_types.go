@@ -20,6 +20,14 @@ type StageSetSpec struct {
 	// +optional
 	RetryInterval *metav1.Duration `json:"retryInterval,omitempty"`
 
+	// DriftDetectionInterval, when set, re-asserts the applied state on this
+	// (typically shorter) cadence to correct out-of-band drift, independently of
+	// the full reconcile Interval. Source changes still reconcile immediately via
+	// watches; this only controls how often the controller re-applies the pinned
+	// state to heal drift. Leave unset to fold drift correction into Interval.
+	// +optional
+	DriftDetectionInterval *metav1.Duration `json:"driftDetectionInterval,omitempty"`
+
 	// Timeout is the default per-stage timeout, overridable per stage.
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
@@ -624,6 +632,15 @@ type StageArtifactRef struct {
 	// Revision is the human-readable revision identifier.
 	// +optional
 	Revision string `json:"revision,omitempty"`
+
+	// SubstitutionDigest is a sha256 fingerprint over the resolved postBuild
+	// substitution inputs used for this stage's last good apply. It is a digest
+	// only — it carries no substituteFrom secret VALUES, so it is safe in
+	// status. On rollback the controller re-resolves substitution and, if the
+	// fingerprint no longer matches, refuses to restore (terminal) rather than
+	// silently re-rendering the old artifact with changed inputs.
+	// +optional
+	SubstitutionDigest string `json:"substitutionDigest,omitempty"`
 }
 
 // StagePhase enumerates the lifecycle phases of a stage.

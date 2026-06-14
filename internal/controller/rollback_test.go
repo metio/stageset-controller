@@ -18,6 +18,29 @@ func cmValManifest(ns, name, val string) string {
 	return "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: " + name + "\n  namespace: " + ns + "\ndata:\n  key: " + val + "\n"
 }
 
+// substitutionDigest fingerprints the resolved substitution inputs so rollback
+// can refuse to restore when they changed. The fingerprint must be empty for an
+// empty map (disables the check), deterministic and order-independent, and free
+// of key/value-boundary collisions.
+func TestSubstitutionDigest(t *testing.T) {
+	if d := substitutionDigest(nil); d != "" {
+		t.Errorf("nil map digest = %q, want empty (check disabled)", d)
+	}
+	if d := substitutionDigest(map[string]string{}); d != "" {
+		t.Errorf("empty map digest = %q, want empty", d)
+	}
+	if a, b := substitutionDigest(map[string]string{"x": "1", "y": "2"}),
+		substitutionDigest(map[string]string{"y": "2", "x": "1"}); a == "" || a != b {
+		t.Errorf("digest must be deterministic and order-independent: %q vs %q", a, b)
+	}
+	if substitutionDigest(map[string]string{"ab": "c"}) == substitutionDigest(map[string]string{"a": "bc"}) {
+		t.Error("length-prefixing must prevent a key/value-boundary collision")
+	}
+	if substitutionDigest(map[string]string{"x": "1"}) == substitutionDigest(map[string]string{"x": "2"}) {
+		t.Error("a changed value must change the digest")
+	}
+}
+
 // A failure after an earlier stage already applied new content rolls the whole
 // run back to the last-good snapshot, so the earlier stage's object returns to
 // its previous value.

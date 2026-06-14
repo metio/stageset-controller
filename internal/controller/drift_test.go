@@ -22,6 +22,37 @@ func driftCount(t *testing.T, ns, name, stage string) float64 {
 	return testutil.ToFloat64(metrics.DriftCorrectedTotal.WithLabelValues(ns, name, stage))
 }
 
+// steadyInterval picks the success-path requeue cadence: a shorter
+// driftDetectionInterval when set, otherwise Interval. A non-shorter or
+// non-positive drift value falls back to Interval so the drift-correction pass
+// can never become a tight requeue loop.
+func TestSteadyInterval(t *testing.T) {
+	dur := func(d time.Duration) *metav1.Duration { return &metav1.Duration{Duration: d} }
+	mk := func(interval time.Duration, drift *metav1.Duration) *stagesv1.StageSet {
+		return &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{
+			Interval:               metav1.Duration{Duration: interval},
+			DriftDetectionInterval: drift,
+		}}
+	}
+	cases := []struct {
+		name     string
+		interval time.Duration
+		drift    *metav1.Duration
+		want     time.Duration
+	}{
+		{"unset uses Interval", 10 * time.Minute, nil, 10 * time.Minute},
+		{"shorter drift wins", 10 * time.Minute, dur(time.Minute), time.Minute},
+		{"drift >= Interval ignored", time.Minute, dur(10 * time.Minute), time.Minute},
+		{"zero drift ignored", time.Minute, dur(0), time.Minute},
+		{"negative drift ignored", time.Minute, dur(-time.Second), time.Minute},
+	}
+	for _, tc := range cases {
+		if got := steadyInterval(mk(tc.interval, tc.drift)); got != tc.want {
+			t.Errorf("%s: steadyInterval = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // An object mutated out-of-band and corrected on a steady-state reconcile (same
 // revision as last applied) is reported as drift: the value is restored and the
 // drift metric increments.

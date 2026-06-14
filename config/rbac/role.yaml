@@ -18,9 +18,20 @@ rules:
   - get
   - update
 - apiGroups:
+  - jaas.metio.wtf
+  resources:
+  - jsonnetsnippets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - source.toolkit.fluxcd.io
   resources:
+  - buckets
   - externalartifacts
+  - gitrepositories
+  - ocirepositories
   verbs:
   - get
   - list
