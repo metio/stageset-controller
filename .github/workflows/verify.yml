@@ -94,3 +94,31 @@ jobs:
           ~/go/bin/kubeconform -ignore-missing-schemas -summary config/samples/
         env:
           GOTOOLCHAIN: auto
+  container-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - id: buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+      - id: image
+        name: Build image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: ghcr.io/metio/stageset-controller:${{ github.sha }}
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ghcr.io/metio/stageset-controller:${{ github.sha }}
+          format: table
+          # Hard gate on any fixable CRITICAL/HIGH in the distroless image:
+          # the base is slim and patched, so findings are rare and worth
+          # investigating before merge.
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
