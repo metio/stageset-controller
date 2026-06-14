@@ -21,17 +21,38 @@ on:
 # need a live source-controller. fail-fast is OFF so one bad k8s minor does not
 # mask the others.
 jobs:
+  discover:
+    name: Discover Kubernetes versions to test against
+    runs-on: ubuntu-latest
+    outputs:
+      k8s_versions: ${{ steps.versions.outputs.k8s }}
+    steps:
+      - id: versions
+        name: Discover the newest kindest/node minors
+        run: |
+          set -uo pipefail
+          # Newest 4 kindest/node minors, latest patch each. A new k8s release is
+          # tested automatically; if kind can't run a brand-new minor yet, that
+          # surfaces as a failure — the signal to bump kind, not silent staleness.
+          k8s=$(curl -fsSL "https://hub.docker.com/v2/repositories/kindest/node/tags?page_size=100" \
+            | jq -r '.results[].name' | grep -E '^v1\.[0-9]+\.[0-9]+$' \
+            | awk -F. '{print $1"."$2" "$0}' | sort -k1,1V -k2,2V \
+            | awk '{l[$1]=$2} END{for(m in l)print l[m]}' | sort -V | tail -4 \
+            | jq -R . | jq -cs . 2>/dev/null || echo '[]')
+          [ "$(jq 'length' <<<"$k8s" 2>/dev/null || echo 0)" -gt 0 ] || k8s='["v1.33.1"]'
+          echo "k8s=$k8s" >> "$GITHUB_OUTPUT"
+          echo "k8s=$k8s"
+
   smoke:
     name: k8s ${{ matrix.k8s_version }}
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        k8s_version:
-          - v1.31.4
-          - v1.32.2
-          - v1.33.1
-          - v1.34.0
+        # Swept across the newest Kubernetes versions the discover job found — no
+        # hardcoded versions, so a new k8s release is tested with no manual edit.
+        k8s_version: ${{ fromJSON(needs.discover.outputs.k8s_versions) }}
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
