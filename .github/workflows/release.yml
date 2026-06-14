@@ -34,7 +34,14 @@ jobs:
         run: echo "version=$(date +'%Y.%-m.%-d')" >> $GITHUB_OUTPUT
   github:
     name: GitHub Release
-    needs: prepare
+    # Gate the release on a green image build: the release notes advertise
+    # ghcr.io/metio/stageset-controller:<version>, so that tag must exist before
+    # the release is published. Depending on `container` serializes the release
+    # after the build+push+sign (job order in this file is irrelevant — `needs`
+    # drives execution), so a failed build skips the release instead of leaving
+    # a published release that points at a non-existent image. The cost is a
+    # longer wall-clock release; the benefit is no dangling releases.
+    needs: [prepare, container]
     runs-on: ubuntu-latest
     permissions:
       contents: write
