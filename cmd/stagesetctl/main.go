@@ -17,7 +17,15 @@ import (
 	"github.com/metio/stageset-controller/internal/cli"
 )
 
+// Stamped at build time via -ldflags="-X main.version=… -X main.commit=…",
+// matching the controller binary's convention.
+var (
+	version = "development"
+	commit  = "unknown"
+)
+
 func main() {
+	cli.SetBuildInfo(version, commit)
 	streams := genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}
 	os.Exit(cli.Run(context.Background(), streams, os.Args[1:]))
 }

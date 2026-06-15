@@ -36,6 +36,26 @@ const (
 	exitError = 3 // runtime failure (connection, RBAC, render)
 )
 
+// version and commit are shown by `--version`. They default to development
+// values and are stamped for releases via SetBuildInfo, which main wires from
+// its own -ldflags-set vars.
+var (
+	version = "development"
+	commit  = "unknown"
+)
+
+// SetBuildInfo stamps the version and commit reported by `--version`. main
+// calls it once before Run so the release ldflags (-X main.version, -X
+// main.commit) reach the command tree.
+func SetBuildInfo(v, c string) {
+	if v != "" {
+		version = v
+	}
+	if c != "" {
+		commit = c
+	}
+}
+
 // exitErr carries an explicit exit code out of a command's RunE so Run can map
 // it without re-deriving meaning from the error text.
 type exitErr struct {
@@ -120,6 +140,7 @@ func newRootCommand(o *options) *cobra.Command {
 		Use:           rootUse(),
 		Short:         "Preview and drive StageSets",
 		Long:          "stagesetctl previews what a StageSet would change in the cluster, renders a stage's manifests, forces reconciles, and reports status.",
+		Version:       fmt.Sprintf("%s (commit %s)", version, commit),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

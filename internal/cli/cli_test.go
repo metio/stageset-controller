@@ -35,6 +35,30 @@ func TestRun_Help_ExitsZero(t *testing.T) {
 	}
 }
 
+func TestRun_Version(t *testing.T) {
+	orig := version
+	t.Cleanup(func() { version = orig })
+	SetBuildInfo("2026.6.16", "deadbeef")
+
+	stdout, _, code := runArgs("--version")
+	if code != exitOK {
+		t.Fatalf("--version exit = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stdout, "2026.6.16") || !strings.Contains(stdout, "deadbeef") {
+		t.Errorf("version output missing stamped values:\n%s", stdout)
+	}
+}
+
+func TestSetBuildInfo_IgnoresEmpty(t *testing.T) {
+	origV, origC := version, commit
+	t.Cleanup(func() { version, commit = origV, origC })
+	SetBuildInfo("1.2.3", "abc")
+	SetBuildInfo("", "") // empty must not clobber a previously stamped value
+	if version != "1.2.3" || commit != "abc" {
+		t.Errorf("empty SetBuildInfo clobbered values: %s/%s", version, commit)
+	}
+}
+
 func TestRun_UnknownCommand_ExitsUsage(t *testing.T) {
 	_, stderr, code := runArgs("frobnicate")
 	if code != exitUsage {
