@@ -62,7 +62,7 @@ source, with:
 | `internal/controller/`| The `StageSet` reconciler, validating webhook, conditions, and target-cluster (impersonation + kubeConfig) wiring |
 | `internal/{artifact,build,apply,stageinv,actions,celeval,gate,metrics}/` | Resolve/fetch, kustomize build, SSA apply, inventory recording, typed actions, CEL eval, Flagger gate, metrics |
 | `cmd/`                | Manager entrypoint with all controller flags                      |
-| `config/`             | Generated CRDs + RBAC, controller `Deployment` (`config/manager/`), samples |
+| `config/`             | controller-gen output: CRDs (`config/crd/`), RBAC (`config/rbac/`), webhook (`config/webhook/`). The deployment lives in the helm chart, not here. |
 | `docs/`               | Hugo design site (`docs/content/design/`) and operator [runbooks](docs/runbooks/) (`docs/runbooks/`) |
 
 ## Getting started

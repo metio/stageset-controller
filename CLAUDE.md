@@ -55,7 +55,6 @@ ilo bash -c 'govulncheck ./...'
 ilo bash -c 'go test -count=1 -race -shuffle=on -cover ./...'   # full suite (envtest assets prestaged in the image)
 ilo bash -c 'controller-gen object paths=./api/v1/...'         # regenerate deepcopy
 ilo bash -c 'controller-gen crd paths=./api/v1/... output:crd:dir=./config/crd'  # regenerate CRDs
-ilo bash -c 'kubeconform -ignore-missing-schemas -summary config/samples/'
 ```
 
 **Static analysis is the standalone tools above — never golangci-lint** (banned

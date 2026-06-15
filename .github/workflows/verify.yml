@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: The stageset-controller Authors
 # SPDX-License-Identifier: 0BSD
+
 name: Verify
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
@@ -14,10 +14,8 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: stable
-      # Scaffold phase: go.mod has no pinned deps yet. Once go.sum is
-      # committed, replace the tidy step with `go mod verify`.
-      - run: go mod tidy
+          go-version-file: go.mod
+          cache: true
       - run: go build ./...
       - run: go test -race -shuffle=on -coverprofile=cover.out ./...
   lint-go:
@@ -26,8 +24,8 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: stable
-      - run: go mod tidy
+          go-version-file: go.mod
+          cache: true
       - run: go vet ./...
       - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
       - run: go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
@@ -45,8 +43,11 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: stable
-      - run: go mod tidy
+          go-version-file: go.mod
+          cache: true
+      # Hard gate: a reachable-from-code advisory blocks merge. Resolution is
+      # usually a bump of the `toolchain` directive in go.mod (stdlib advisories)
+      # or `go get -u` (deps).
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
   architecture:
     runs-on: ubuntu-latest
@@ -54,8 +55,8 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: stable
-      - run: go mod tidy
+          go-version-file: go.mod
+          cache: true
       - run: go run github.com/arch-go/arch-go@latest
   reuse:
     runs-on: ubuntu-latest
@@ -84,16 +85,6 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89 # v1
-  kubernetes-manifests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      # CRD schemas are generated, not committed yet; validate structure only.
-      - run: |
-          go install github.com/yannh/kubeconform/cmd/kubeconform@latest
-          ~/go/bin/kubeconform -ignore-missing-schemas -summary config/samples/
-        env:
-          GOTOOLCHAIN: auto
   container-image:
     runs-on: ubuntu-latest
     steps:
@@ -122,3 +113,17 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
+  all-green:
+    # Single required check covering every job above: mark only this one
+    # required in branch protection and new jobs are covered automatically.
+    name: Verify — all checks passed
+    needs: [test, lint-go, vulnerabilities, architecture, reuse, yaml, github-actions, markdown, typos, container-image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every job succeeded or skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          bad=$(echo "$NEEDS" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"')
+          [ -z "$bad" ] || { echo "::error::$bad"; exit 1; }

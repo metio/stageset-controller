@@ -8,11 +8,12 @@ on:
   workflow_dispatch:
 
 # Angle 1 of the two-angle e2e strategy: the DEV binary (this PR's HEAD build)
-# is deployed via the committed manifests and run through the shared
-# hack/smoke/*.sh scenarios. Angle 2 lives in metio/helm-charts
-# (stageset-smoke.yml): the DEV chart deploys the LATEST RELEASED binary and
-# runs the SAME scripts (checked out from this repo at the released tag). Each
-# angle holds one moving part and tests it against the released counterpart.
+# deployed via the LATEST RELEASED chart (oci://ghcr.io/metio/helm-charts/stageset-controller),
+# run through the shared hack/smoke/*.sh scenarios. Angle 2 lives in
+# metio/helm-charts (stageset-smoke.yml): the DEV chart deploys the LATEST
+# RELEASED binary and runs the SAME scripts. Each angle holds one moving part
+# and tests it against the released counterpart. The chart is the single source
+# of deployment manifests — there is no committed kustomize Deployment to drift.
 #
 # The smoke is deliberately self-contained: it plants ExternalArtifacts whose
 # tarball bytes these scenarios control (an in-cluster static file server), so
@@ -22,12 +23,14 @@ on:
 #
 # No paths filter: the workflow runs on every PR and self-gates on the
 # `relevant` output so the `all-green` aggregate is always reportable (a single
-# required check covers the dynamically-named matrix legs).
+# required check covers the dynamically-named matrix legs). Both the kind jobs
+# and the gate stay green-by-skip until the first stageset chart release exists.
 jobs:
   discover:
-    name: Discover Kubernetes versions to test against
+    name: Discover released chart + Kubernetes versions
     runs-on: ubuntu-latest
     outputs:
+      chart_version: ${{ steps.find.outputs.version }}
       k8s_versions: ${{ steps.versions.outputs.k8s }}
       kind_latest: ${{ steps.kind.outputs.kind_latest }}
       relevant: ${{ steps.scope.outputs.relevant }}
@@ -37,7 +40,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: scope
-        name: Did this PR touch the binary, manifests, or smoke wiring?
+        name: Did this PR touch the binary, CRDs, or smoke wiring?
         run: |
           set -uo pipefail
           base="origin/${{ github.base_ref || 'main' }}"
@@ -47,8 +50,25 @@ jobs:
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No binary / manifest / smoke changes in this PR — kind jobs skip (gate stays green)."
+            echo "::notice::No binary / CRD / smoke changes in this PR — kind jobs skip (gate stays green)."
           fi
+      - id: find
+        name: Find newest stageset chart release in metio/helm-charts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The helm-charts release pipeline tags each chart release
+          # `<chart>-<version>`; releases sort newest-first.
+          tag="$(gh release list --repo metio/helm-charts --limit 100 \
+                  --json tagName \
+                  --jq '[.[] | select(.tagName | startswith("stageset-controller-")) | .tagName] | .[0] // ""' 2>/dev/null || true)"
+          v="${tag#stageset-controller-}"
+          if [ -z "$v" ]; then
+            echo "::notice::No released stageset chart yet (metio/helm-charts has no stageset-controller-* release); smoke jobs skip until the first release."
+          else
+            echo "latest released chart version: $v"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
       - id: versions
         name: Discover the newest kindest/node minors
         run: |
@@ -84,7 +104,7 @@ jobs:
   smoke:
     name: k8s ${{ matrix.k8s_version }}
     needs: discover
-    if: needs.discover.outputs.relevant == 'true'
+    if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -96,11 +116,6 @@ jobs:
       - name: Clone Git Repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
-        with:
-          go-version-file: go.mod
-
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
 
@@ -110,29 +125,37 @@ jobs:
           version: ${{ needs.discover.outputs.kind_latest }}
           cluster_name: stageset-smoke
           node_image: kindest/node:${{ matrix.k8s_version }}
+          wait: 180s
 
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-smoke
 
-      - name: Install StageSet CRDs
-        run: kubectl apply -f config/crd/
-
-      - name: Install ExternalArtifact stub CRD
+      - name: Install the ExternalArtifact stub CRD
         run: hack/smoke/setup-externalartifact-crd.sh
 
-      - name: Deploy the controller (dev image)
+      - name: Install the released chart with the dev image
         run: |
-          kubectl apply -f config/rbac/role.yaml
-          # Smoke-only broad grant: the committed manifests assume per-tenant
-          # impersonation for cluster writes, but this smoke applies with the
-          # controller's own ServiceAccount, so it needs to create the manifests
-          # the StageSet renders plus emit Events.
+          # Webhook disabled: the shared scenarios test the data plane
+          # (resolve/fetch/build/apply/prune/impersonate), not admission, and
+          # would otherwise hit the webhook's cert + readiness race. Admission
+          # is covered by the binary's envtest suite. image.pullPolicy defaults
+          # to IfNotPresent, so the kind-loaded :smoke image is used as-is.
+          helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
+            --version "${{ needs.discover.outputs.chart_version }}" \
+            --namespace stageset-system --create-namespace \
+            --set-string image.tag=smoke \
+            --set webhook.enabled=false \
+            --wait --timeout 5m
+          # The released chart's vendored CRDs lag HEAD; the dev binary must run
+          # against its current schema, so overlay config/crd (README.md in that
+          # dir is ignored by kubectl's extension filter).
+          kubectl apply --server-side --force-conflicts -f config/crd/
+          # Smoke-only broad grant: scenarios without a spec.serviceAccountName
+          # apply under the controller's own identity, so it needs to create the
+          # rendered objects and emit Events cluster-wide.
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
-          sed 's#ghcr.io/metio/stageset-controller:latest#ghcr.io/metio/stageset-controller:smoke#' \
-            config/manager/manager.yaml | kubectl apply -f -
-          kubectl -n stageset-system rollout status deploy/stageset-controller --timeout=180s
 
       - name: Scenario — basic apply + inventory + finalizer prune
         run: hack/smoke/scenario-basic.sh
@@ -149,6 +172,7 @@ jobs:
         if: failure()
         run: |
           kubectl get nodes -o wide || true
+          helm -n stageset-system status stageset || true
           kubectl -n stageset-system get all || true
           kubectl -n stageset-system logs deploy/stageset-controller --tail=300 || true
           kubectl -n default get all || true
