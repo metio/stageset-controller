@@ -1,0 +1,364 @@
+// SPDX-FileCopyrightText: The stageset-controller Authors
+// SPDX-License-Identifier: 0BSD
+
+package cli
+
+import (
+	"context"
+	"fmt"
+	"sort"
+
+	"github.com/spf13/cobra"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/apply"
+	"github.com/metio/stageset-controller/internal/diffrender"
+	"github.com/metio/stageset-controller/internal/inventory"
+	"github.com/metio/stageset-controller/internal/preview"
+	"github.com/metio/stageset-controller/internal/stageinv"
+)
+
+type diffOptions struct {
+	name          string
+	stages        []string
+	sourceDirs    []string
+	serverSide    bool
+	asTenant      bool
+	showSecrets   bool
+	showUnchanged bool
+	prune         bool
+	color         string
+	exitCode      bool
+}
+
+func newDiffCommand(o *options) *cobra.Command {
+	opts := diffOptions{serverSide: true, prune: true, exitCode: true, color: "auto"}
+	cmd := &cobra.Command{
+		Use:   "diff NAME",
+		Short: "Preview what a StageSet would change in the cluster",
+		Long: "Render a StageSet's stages and show, per object, what a reconcile would create, configure, or delete — " +
+			"including resources pruned because they fell out of the inventory. By default the diff is a server-side " +
+			"dry-run apply (webhook- and defaulting-faithful) using the controller's field manager. Secret values are " +
+			"masked unless --show-secrets is given. Exit code is 0 when clean, 1 when changes are found, >2 on error.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.name = args[0]
+			return runDiff(cmd.Context(), o, opts)
+		},
+	}
+	cmd.Flags().StringSliceVar(&opts.stages, "stage", nil, "Diff only the named stage(s); repeatable.")
+	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
+	cmd.Flags().BoolVar(&opts.serverSide, "server-side", true, "Server-side dry-run apply diff (needs update/patch RBAC). False compares the render against live objects client-side.")
+	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render and dry-run as the StageSet's spec.serviceAccountName.")
+	cmd.Flags().BoolVar(&opts.showSecrets, "show-secrets", false, "Reveal Secret values instead of masking them.")
+	cmd.Flags().BoolVar(&opts.showUnchanged, "show-unchanged", false, "Include objects with no change.")
+	cmd.Flags().BoolVar(&opts.prune, "prune", true, "Show resources that would be deleted because they fell out of the inventory.")
+	cmd.Flags().StringVar(&opts.color, "color", "auto", "Colorize output: auto, always, or never.")
+	cmd.Flags().BoolVar(&opts.exitCode, "exit-code", true, "Exit 1 when changes are found. False always exits 0 on a clean run.")
+	return cmd
+}
+
+func runDiff(ctx context.Context, o *options, opts diffOptions) error {
+	color, err := colorEnabled(opts.color, o.streams.Out)
+	if err != nil {
+		return runtimeErr(err)
+	}
+	sourceDirs, err := parseSourceDirs(opts.sourceDirs)
+	if err != nil {
+		return runtimeErr(err)
+	}
+
+	c, mapper, err := o.newClient()
+	if err != nil {
+		return runtimeErr(err)
+	}
+	var ss stagesv1.StageSet
+	if err := c.Get(ctx, client.ObjectKey{Namespace: o.namespace(), Name: opts.name}, &ss); err != nil {
+		return runtimeErr(err)
+	}
+
+	renderClient := c
+	if opts.asTenant && ss.Spec.ServiceAccountName != "" {
+		renderClient, err = o.impersonatedClient(ss.Namespace, ss.Spec.ServiceAccountName)
+		if err != nil {
+			return runtimeErr(err)
+		}
+	}
+
+	selected, err := preview.SelectStages(&ss, opts.stages)
+	if err != nil {
+		return runtimeErr(err)
+	}
+
+	engine := preview.NewEngine(renderClient, false)
+	engine.SourceDirs = sourceDirs
+	applier := apply.New(renderClient, mapper, stagesv1.GroupVersion.Group)
+
+	priorStages := indexStageStatuses(ss.Status.Stages)
+	diffByStage := map[string][]diffrender.Change{}
+	renderedRefs := map[string][]inventory.ObjectRef{}
+	var actions []diffrender.ActionPreview
+	for i := range selected {
+		stage := &selected[i]
+		render, rerr := engine.RenderStage(ctx, &ss, stage)
+		if rerr != nil {
+			return runtimeErr(rerr)
+		}
+		refs := make([]inventory.ObjectRef, 0, len(render.Objects))
+		for _, obj := range render.Objects {
+			refs = append(refs, stageinv.RefOf(obj))
+		}
+		renderedRefs[stage.Name] = refs
+
+		changes, cerr := stageChanges(ctx, applier, renderClient, &ss, stage.Name, render.Objects, opts.serverSide)
+		if cerr != nil {
+			return runtimeErr(cerr)
+		}
+		diffByStage[stage.Name] = changes
+		actions = append(actions, stageActionsToRun(stage, render.Revision, priorStages[stage.Name])...)
+	}
+
+	pruneByStage := map[string][]diffrender.Change{}
+	if opts.prune {
+		items, perr := engine.PrunePlan(ctx, &ss, renderedRefs)
+		if perr != nil {
+			return runtimeErr(perr)
+		}
+		for _, it := range items {
+			pruneByStage[it.Stage] = append(pruneByStage[it.Stage], pruneChange(it))
+		}
+	}
+
+	changes := assembleChanges(selected, diffByStage, pruneByStage)
+
+	masker := diffrender.NewSecretMasker(opts.showSecrets)
+	sum, err := diffrender.RenderDiff(o.streams.Out, changes, diffrender.RenderOptions{
+		ShowUnchanged: opts.showUnchanged,
+		Color:         color,
+		Masker:        masker,
+	})
+	if err != nil {
+		return runtimeErr(err)
+	}
+
+	diffrender.WriteActions(o.streams.Out, actions, color)
+	diffrender.WriteMigrations(o.streams.Out, pendingMigrations(&ss), color)
+	diffrender.WriteSummary(o.streams.Out, sum)
+
+	if sum.Changed() && opts.exitCode {
+		return &exitErr{code: exitDiff}
+	}
+	return nil
+}
+
+// indexStageStatuses maps a StageSet's per-stage status by stage name, so the
+// diff can tell which actions the idempotency ledger has already satisfied.
+func indexStageStatuses(stages []stagesv1.StageStatus) map[string]stagesv1.StageStatus {
+	out := make(map[string]stagesv1.StageStatus, len(stages))
+	for _, s := range stages {
+		out[s.Name] = s
+	}
+	return out
+}
+
+// stageActionsToRun lists the actions a stage would run on the next reconcile,
+// omitting those the ledger already satisfied at the rendered revision. A local
+// render (no revision) cannot consult the ledger, so every action is listed.
+func stageActionsToRun(stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus) []diffrender.ActionPreview {
+	if stage.Actions == nil {
+		return nil
+	}
+	executed := map[string]bool{}
+	if revision != "" && prior.LedgerRevision == revision {
+		for _, name := range prior.ExecutedActions {
+			executed[name] = true
+		}
+	}
+	var out []diffrender.ActionPreview
+	add := func(phase string, list []stagesv1.Action) {
+		for i := range list {
+			if executed[list[i].Name] {
+				continue
+			}
+			kind, detail := describeAction(&list[i])
+			out = append(out, diffrender.ActionPreview{
+				Stage: stage.Name, Phase: phase, Name: list[i].Name, Type: kind, Detail: detail,
+			})
+		}
+	}
+	add("pre", stage.Actions.Pre)
+	add("post", stage.Actions.Post)
+	add("onFailure", stage.Actions.OnFailure)
+	return out
+}
+
+// describeAction returns the action's type and a short, human-readable detail.
+func describeAction(a *stagesv1.Action) (kind, detail string) {
+	switch {
+	case a.Patch != nil:
+		t := a.Patch.Target
+		return "patch", fmt.Sprintf("%s/%s", t.Kind, t.Name)
+	case a.HTTP != nil:
+		method := a.HTTP.Method
+		if method == "" {
+			method = "POST"
+		}
+		return "http", method + " " + a.HTTP.URL
+	case a.Wait != nil:
+		if a.Wait.Expr != "" {
+			return "wait", "expr"
+		}
+		if a.Wait.Duration != nil {
+			return "wait", a.Wait.Duration.Duration.String()
+		}
+		return "wait", ""
+	case a.Job != nil:
+		return "job", a.Job.SourceRef.Name
+	case a.Delete != nil:
+		return "delete", fmt.Sprintf("%s/%s", a.Delete.Target.Kind, a.Delete.Target.Name)
+	case a.Apply != nil:
+		return "apply", a.Apply.SourceRef.Name
+	default:
+		return "action", ""
+	}
+}
+
+// pendingMigrations maps the controller-computed status.pendingMigrations to
+// previews, joining each name to its spec for the version boundary and action
+// count. It returns entries only for migrations the next run will execute.
+func pendingMigrations(ss *stagesv1.StageSet) []diffrender.MigrationPreview {
+	if len(ss.Status.PendingMigrations) == 0 {
+		return nil
+	}
+	bySpec := map[string]stagesv1.Migration{}
+	for _, m := range ss.Spec.Migrations {
+		bySpec[m.Name] = m
+	}
+	var out []diffrender.MigrationPreview
+	for _, name := range ss.Status.PendingMigrations {
+		m := bySpec[name]
+		out = append(out, diffrender.MigrationPreview{
+			Name: name, To: m.To, From: m.From, Stage: m.Stage, Actions: len(m.Actions),
+		})
+	}
+	return out
+}
+
+// stageChanges turns a stage's rendered objects into per-object Changes, via a
+// server-side dry-run apply (default) or a client-side render-vs-live compare.
+func stageChanges(ctx context.Context, applier *apply.Applier, c client.Client, ss *stagesv1.StageSet, stage string, objects []*unstructured.Unstructured, serverSide bool) ([]diffrender.Change, error) {
+	if serverSide {
+		entries, err := applier.Diff(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]diffrender.Change, 0, len(entries))
+		for _, e := range entries {
+			out = append(out, diffrender.Change{
+				Stage:     stage,
+				Kind:      diffKind(e.Action),
+				GVK:       e.GVK,
+				Namespace: e.Namespace,
+				Name:      e.Name,
+				Before:    e.Existing,
+				After:     e.Merged,
+			})
+		}
+		return out, nil
+	}
+	return clientSideChanges(ctx, c, stage, objects)
+}
+
+// clientSideChanges compares each rendered object against its live counterpart
+// without a dry-run apply. Less faithful — it cannot show mutating-webhook or
+// apiserver-defaulting effects — but needs only read access.
+func clientSideChanges(ctx context.Context, c client.Client, stage string, objects []*unstructured.Unstructured) ([]diffrender.Change, error) {
+	out := make([]diffrender.Change, 0, len(objects))
+	for _, obj := range objects {
+		live := &unstructured.Unstructured{}
+		live.SetGroupVersionKind(obj.GroupVersionKind())
+		err := c.Get(ctx, client.ObjectKeyFromObject(obj), live)
+		ch := diffrender.Change{Stage: stage, GVK: obj.GroupVersionKind(), Namespace: obj.GetNamespace(), Name: obj.GetName(), After: obj}
+		switch {
+		case apierrors.IsNotFound(err):
+			ch.Kind = diffrender.ChangeCreate
+		case err != nil:
+			return nil, err
+		default:
+			ch.Before = live
+			if equalRender(live, obj) {
+				ch.Kind = diffrender.ChangeUnchanged
+				ch.Before, ch.After = nil, nil
+			} else {
+				ch.Kind = diffrender.ChangeConfigure
+			}
+		}
+		out = append(out, ch)
+	}
+	return out, nil
+}
+
+// equalRender reports whether two objects render identically after noise is
+// stripped — the client-side notion of "unchanged".
+func equalRender(a, b *unstructured.Unstructured) bool {
+	ac, bc := a.DeepCopy(), b.DeepCopy()
+	diffrender.StripNoise(ac)
+	diffrender.StripNoise(bc)
+	ay, _ := diffrender.ToYAML(ac)
+	by, _ := diffrender.ToYAML(bc)
+	return string(ay) == string(by)
+}
+
+func pruneChange(it preview.PruneItem) diffrender.Change {
+	gvk := schema.GroupVersionKind{Group: it.Ref.Group, Version: it.Ref.Version, Kind: it.Ref.Kind}
+	return diffrender.Change{
+		Stage:     it.Stage,
+		Kind:      diffrender.ChangeDelete,
+		GVK:       gvk,
+		Namespace: it.Ref.Namespace,
+		Name:      it.Ref.Name,
+		Before:    it.Object,
+	}
+}
+
+// assembleChanges orders output by spec stage order — each stage's diffs then
+// its deletions — with deletions for removed stages (not in the selected set)
+// emitted last.
+func assembleChanges(selected []stagesv1.Stage, diffByStage, pruneByStage map[string][]diffrender.Change) []diffrender.Change {
+	var changes []diffrender.Change
+	emitted := map[string]bool{}
+	for i := range selected {
+		name := selected[i].Name
+		changes = append(changes, diffByStage[name]...)
+		changes = append(changes, pruneByStage[name]...)
+		emitted[name] = true
+	}
+	var leftover []string
+	for stage := range pruneByStage {
+		if !emitted[stage] {
+			leftover = append(leftover, stage)
+		}
+	}
+	sort.Strings(leftover)
+	for _, stage := range leftover {
+		changes = append(changes, pruneByStage[stage]...)
+	}
+	return changes
+}
+
+func diffKind(a apply.DiffAction) diffrender.ChangeKind {
+	switch a {
+	case apply.DiffCreate:
+		return diffrender.ChangeCreate
+	case apply.DiffConfigure:
+		return diffrender.ChangeConfigure
+	case apply.DiffSkipped:
+		return diffrender.ChangeSkip
+	default:
+		return diffrender.ChangeUnchanged
+	}
+}

@@ -255,6 +255,29 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	ss.Status.PendingMigrations = migPlan.pendingNames()
 
 	priorStages := indexStageStatuses(ss.Status.Stages)
+
+	// Single-stage force-reconcile: when the stages.metio.wtf/reconcile-stage
+	// token is unhandled for a known stage, clear that stage's action ledger so
+	// its pre/post actions and stage-anchored migrations re-run this pass, even
+	// though the pinned revision is unchanged. The token is recorded on the
+	// stage's status only on success (lastHandledFor), so a forced stage that
+	// fails retries on the next reconcile.
+	forceStage, forceToken := parseReconcileStage(&ss)
+	if prior, ok := priorStages[forceStage]; forceStage == "" || !ok || prior.LastHandledReconcileAt == forceToken {
+		forceStage, forceToken = "", ""
+	} else {
+		cleared := prior
+		cleared.ExecutedActions = nil
+		cleared.LedgerRevision = ""
+		priorStages[forceStage] = cleared
+	}
+	lastHandledFor := func(name string) string {
+		if name == forceStage {
+			return forceToken
+		}
+		return priorStages[name].LastHandledReconcileAt
+	}
+
 	previousMap, perr := recorder.StageRecords(ctx, ss.Name, ss.Namespace)
 	if perr != nil {
 		return ctrl.Result{}, perr
@@ -375,12 +398,13 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 			applied[ra.Key()] = ra.Revision
 			stageStatuses = append(stageStatuses, stagesv1.StageStatus{
-				Name:            stage.Name,
-				Phase:           stagesv1.StageReady,
-				AppliedRevision: ra.Revision,
-				EntriesCount:    int64(len(newRefs)),
-				ExecutedActions: executed,
-				LedgerRevision:  ra.Revision,
+				Name:                   stage.Name,
+				Phase:                  stagesv1.StageReady,
+				AppliedRevision:        ra.Revision,
+				EntriesCount:           int64(len(newRefs)),
+				ExecutedActions:        executed,
+				LedgerRevision:         ra.Revision,
+				LastHandledReconcileAt: lastHandledFor(stage.Name),
 			})
 			metrics.StageAppliedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Inc()
 		}

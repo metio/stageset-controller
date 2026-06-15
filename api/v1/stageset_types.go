@@ -693,6 +693,13 @@ type StageStatus struct {
 	// applies to; a new revision resets the ledger.
 	// +optional
 	LedgerRevision string `json:"ledgerRevision,omitempty"`
+
+	// LastHandledReconcileAt is the value of the stages.metio.wtf/reconcile-stage
+	// token this stage most recently acted on. A single-stage force-reconcile
+	// clears this stage's action ledger and re-runs its actions exactly once per
+	// new token, the per-stage analogue of lastHandledReconcileAt.
+	// +optional
+	LastHandledReconcileAt string `json:"lastHandledReconcileAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

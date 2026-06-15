@@ -116,6 +116,11 @@ jobs:
       - name: Clone Git Repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
 
@@ -167,6 +172,9 @@ jobs:
         run: hack/smoke/scenario-networkpolicy.sh
         env:
           CONTROLLER_NS: stageset-system
+
+      - name: Scenario — stagesetctl CLI (get, build, diff, reconcile)
+        run: hack/smoke/scenario-cli.sh
 
       - name: Diagnostics on failure
         if: failure()

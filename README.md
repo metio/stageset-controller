@@ -153,6 +153,37 @@ out-of-band tampering is visible rather than silently healed.
 The design rationale for the cross-cutting decisions is recorded under
 [`docs/decisions/`](docs/decisions/).
 
+## CLI (`stagesetctl`)
+
+`stagesetctl` is a client-side companion to the controller — placed on `PATH`
+as `kubectl-stageset` it also runs as `kubectl stageset …`. It imports the
+controller's own render path, so a preview matches what the controller applies.
+Build it with `go build ./cmd/stagesetctl`. Its design and rationale live in
+[`docs/content/design/cli.md`](docs/content/design/cli.md).
+
+It uses the standard kubectl connection flags (`--kubeconfig`, `--context`,
+`-n/--namespace`). Commands:
+
+| Command | Purpose |
+|---------|---------|
+| `diff NAME` | Preview what a reconcile would create, configure, or **delete** (prunes included), plus the **actions** and **migrations** the run would execute. Server-side dry-run by default; Secret values masked; exit `0` clean / `1` changes / `>2` error. |
+| `build NAME` | Render a stage's manifests to stdout (the StageSet analogue of `flux build`). |
+| `reconcile NAME` | Force an out-of-band reconcile (the `reconcile.fluxcd.io/requestedAt` mechanism). |
+| `get [NAME]` | Human-readable status: per-stage phase and revision, held updates and the next window, deployed version and pending migrations. |
+
+Key `diff` flags: `--stage` (one or more stages), `--source-dir [STAGE=]PATH`
+(render from a local artifact tree when in-cluster storage is unreachable),
+`--server-side=false` (client-side compare, no `update`/`patch` RBAC),
+`--as-tenant` (render as `spec.serviceAccountName`), `--show-secrets`,
+`--show-unchanged`, `--prune=false`, `--color=auto|always|never`,
+`--exit-code=false`.
+
+Key `reconcile` flags: `--stage NAME` (force a **single** stage to re-run its
+actions, via `stages.metio.wtf/reconcile-stage` +
+`status.stages[].lastHandledReconcileAt`), `--update-now` (apply a window-held
+rollout immediately), `--with-source` (re-request the stage sources first),
+`--wait`/`--timeout`, `--force` (proceed when suspended).
+
 ## Static analysis
 
 The project treats static analysis as part of the build, not an

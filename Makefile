@@ -71,9 +71,25 @@ reuse: ## Verify REUSE compliance (pipx install reuse)
 yamllint: ## Lint YAML files (pipx install yamllint)
 	yamllint .
 
+.PHONY: markdownlint
+markdownlint: ## Lint Markdown against .markdownlint.yaml (npm i -g markdownlint-cli2)
+	markdownlint-cli2 '**/*.md'
+
+.PHONY: actionlint
+actionlint: ## Lint GitHub Actions workflows
+	actionlint
+
+.PHONY: typos
+typos: ## Spell-check the tree against .typos.toml
+	typos
+
 .PHONY: build
 build: ## Build the controller binary
 	go build -o bin/stageset-controller ./cmd
+
+.PHONY: build-cli
+build-cli: ## Build the stagesetctl CLI binary
+	go build -o bin/stagesetctl ./cmd/stagesetctl
 
 .PHONY: docs
 docs: ## Build the documentation site
@@ -84,4 +100,4 @@ docs-serve: ## Serve the documentation site locally
 	hugo server --source docs
 
 .PHONY: verify
-verify: fmt-check vet staticcheck gosec test arch reuse yamllint ## Run every local check
+verify: fmt-check vet staticcheck gosec test arch reuse yamllint markdownlint actionlint typos ## Run every local check

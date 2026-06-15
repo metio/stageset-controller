@@ -25,3 +25,25 @@ dependenciesRules:
         - "**.internal.**"
       external:
         - "sigs.k8s.io.controller-runtime.**"
+  # diffrender is pure presentation (mask, strip, unified diff, summary). It
+  # takes unstructured objects and writes text — it must not reach into any
+  # other internal package, so its rules stay cluster-free and unit-testable.
+  - package: "**.internal.diffrender"
+    shouldNotDependsOn:
+      internal:
+        - "**.internal.**"
+  # The CLI is a client-side tool: it must never import the controller package,
+  # which would drag the whole manager runtime into the stagesetctl binary. The
+  # preview/apply/diffrender seams it shares with the controller are imported
+  # directly; the reconciler itself is not.
+  - package: "**.internal.cli"
+    shouldNotDependsOn:
+      internal:
+        - "**.internal.controller"
+  # preview renders stages for the CLI; it sits below the command layer and must
+  # not import it, nor the controller's reconcile loop.
+  - package: "**.internal.preview"
+    shouldNotDependsOn:
+      internal:
+        - "**.internal.cli"
+        - "**.internal.controller"
