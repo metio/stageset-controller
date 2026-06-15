@@ -93,4 +93,10 @@ wait_reason stageset imp-denied tenant StageFailed 30 5
 if kubectl -n tenant get secret tenant-secret 2>/dev/null; then
   die "impersonated SA without Secret RBAC managed to create a Secret"
 fi
+
+# Delete the StageSets before returning. imp-denied is a permanent failure that
+# otherwise stays in the workqueue's requeue loop; the controller runs a single
+# worker, so leaving it behind would compete with later scenarios.
+log "Clean up tenant StageSets"
+kubectl -n tenant delete stageset imp-ok imp-denied --timeout=120s --ignore-not-found || true
 log "scenario-impersonation PASSED"

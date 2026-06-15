@@ -74,8 +74,8 @@ spec:
 EOF
 
 if [ "$ENFORCED" = true ]; then
-  log "Negative: with deny in place the cross-namespace fetch fails (StageFailed)"
-  wait_reason stageset np-smoke np-test StageFailed 24 5
+  log "Negative: with deny in place the cross-namespace fetch is blocked — np-smoke must not go Ready"
+  stays_not_ready stageset np-smoke np-test 6 5
 fi
 
 log "Allow ingress from the controller's namespace (${CONTROLLER_NS})"

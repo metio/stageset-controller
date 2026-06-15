@@ -159,6 +159,25 @@ wait_reason() {
   die "$kind/$name Ready reason never became $want"
 }
 
+# stays_not_ready <kind> <name> <ns> [polls] [sleep] — assert the object does NOT
+# reach Ready=True for the whole window, then return. Fails fast if it flips to
+# Ready=True. Used for the blocked-fetch negative: a NetworkPolicy deny drops
+# packets, so the fetch hangs up to the HTTP client timeout rather than failing
+# fast — we can't wait for a specific failure reason in a bounded window, but we
+# CAN assert the StageSet never goes Ready while the path is blocked. The Ready
+# flip after the allow rule is applied is the positive half of the proof.
+stays_not_ready() {
+  local kind=$1 name=$2 ns=$3 polls=${4:-6} s=${5:-5} i
+  for i in $(seq 1 "$polls"); do
+    [ "$(ready_status "$kind" "$name" "$ns")" = "True" ] && {
+      kubectl -n "$ns" describe "$kind" "$name" >&2 || true
+      die "$kind/$name reached Ready=True while ingress to the artifact server was denied"
+    }
+    sleep "$s"
+  done
+  log "$kind/$name stayed non-Ready under the deny policy ($polls polls)"
+}
+
 # curl_reachable <ns> <url> [max_time] — true (0) if a throwaway pod can GET the
 # URL within max_time seconds, false otherwise. Used to detect whether the
 # cluster's CNI actually enforces NetworkPolicies before asserting that a
