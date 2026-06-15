@@ -58,9 +58,21 @@ ilo bash -c 'controller-gen crd paths=./api/v1/... output:crd:dir=./config/crd' 
 ```
 
 **Static analysis is the standalone tools above — never golangci-lint** (banned
-project-wide). The Go gate is `go vet` + `staticcheck` + `gofumpt` + `gosec` +
-`arch-go` + `govulncheck`. These configs are kept **identical to the jaas repo**
-so both projects lint the same way.
+project-wide). The Go gate is `go vet` + `staticcheck` + `gosec` +
+`govulncheck` + `gofumpt` + `arch-go`. These configs are kept **identical to the
+jaas repo** so both projects lint the same way. Text linters mirror the same set: `yamllint`
+(`.yamllint.yaml`), `actionlint`, `markdownlint-cli2` (`.markdownlint.yaml`),
+`typos` (`.typos.toml`) — all installed in `dev/Containerfile` so the local
+shell reproduces every CI gate.
+
+The dev shell pre-stages the envtest asset bundle (kube-apiserver + etcd) and
+exports `KUBEBUILDER_ASSETS`, so the envtest-backed packages run inside `ilo`
+without any network access. Run a single fuzz target's seed-plus-campaign
+locally with:
+
+```shell
+ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
+```
 
 ## Architecture
 
@@ -81,6 +93,96 @@ so both projects lint the same way.
   - `rollbackstore/` — optional RWX-PVC / S3 store for bit-exact rollback.
   - `metrics/` + `webhook/` — Prometheus metrics and the stage-gate webhook.
 
+## Testing
+
+Four distinct test layers, each living in a different place and running at a
+different time. Keep new tests in the layer that fits — a pure-logic check does
+not belong behind envtest, and a webhook contract cannot be exercised without a
+real apiserver.
+
+- **Pure unit tests** — most `*_test.go` under `internal/`. No cluster, no
+  external assets, deterministic. They run everywhere: plain `go test` in CI's
+  Verify gate and inside the dev shell. The dependency-free packages enforced by
+  `arch-go.yml` (`inventory`, `diffrender`, …) are deliberately at this layer so
+  they stay cluster-free and fast.
+- **envtest integration tests** — packages whose `TestMain` boots a real
+  kube-apiserver + etcd via `sigs.k8s.io/controller-runtime/pkg/envtest`
+  (`internal/controller`, `internal/cli`, and the `internal/apply` diff suite).
+  These need `KUBEBUILDER_ASSETS` pointing at an asset bundle. The dev shell
+  pre-stages one in `dev/Containerfile`, so they run under `ilo`. When the
+  variable is **absent**, the package skips cleanly rather than failing:
+  `internal/apply`'s `TestMain` `os.Exit(0)`s and the controller/cli suites lazily
+  `t.Skip` each test — so a bare `go test` on a host without assets still passes
+  green. The controller and cli suites share one envtest environment per package
+  (lazily started, stopped in `TestMain`) to amortize the apiserver boot.
+- **Fuzz tests** — `Fuzz*` functions across several packages (`internal/apply`,
+  `internal/inventory`, `internal/diffrender`, `internal/preview`, `internal/cli`).
+  Each carries inline `f.Add` seeds, so a plain `go test ./...` exercises the
+  **seed corpus** as ordinary cases — the Verify gate gets fuzz coverage for free.
+  Coverage-guided campaigns (`go test -fuzz=…`) run only on the scheduled Fuzz
+  workflow. A fuzz target in an **envtest package** (`internal/apply`) is the
+  trap to remember: `go test -fuzz` re-execs the test binary as worker processes,
+  and each worker would otherwise boot its own apiserver and starve the
+  coordinator. `isFuzzWorker()` (matches the `-test.fuzzworker` arg) short-circuits
+  `TestMain` so workers run the cluster-free fuzz function directly without
+  envtest. Any new fuzz target added to an envtest package must keep that guard
+  intact.
+- **kind smoke e2e** — `hack/smoke/*.sh`: pure-`kubectl` behaviour scenarios
+  (`scenario-basic`, `-impersonation`, `-networkpolicy`, `-cli`) plus a CRD-setup
+  helper, driven by `lib.sh`. They are agnostic to *how* the controller was
+  deployed — the calling workflow owns that — and fake the artifact data plane
+  with an in-cluster static file server (a tarball baked into a ConfigMap, served
+  over HTTP, pointed at by an `ExternalArtifact` whose `status.artifact` digest
+  matches), so the resolve → fetch → digest-verify → build → apply → prune
+  pipeline runs deterministically with no live source-controller.
+
+## CI
+
+`.github/workflows/verify.yml` is the **PR gate**, split into parallel jobs:
+
+- **Go gate** — `test` (`go build` + `go test -race -shuffle=on -coverprofile`),
+  `lint-go` (`go vet`, `staticcheck`, `gosec`, `gofumpt`), `vulnerabilities`
+  (`govulncheck`, a hard merge-blocking gate), `architecture` (`arch-go`). These
+  run on plain `actions/setup-go` runners with **no `KUBEBUILDER_ASSETS`**, so
+  the envtest packages skip — envtest coverage comes from the dev shell and the
+  smoke gate, not Verify.
+- **Text + license gates** — `reuse`, `yaml` (yamllint), `github-actions`
+  (actionlint), `markdown` (markdownlint-cli2), `typos`.
+- **Container gate** — `container-image` builds the image and scans it with
+  Trivy, hard-failing on any fixable CRITICAL/HIGH (`ignore-unfixed`).
+- **`all-green`** — a single aggregate job that `needs` every job above and
+  fails unless each result is `success` or `skipped`. **Mark only `all-green`
+  required in branch protection**; new jobs are covered automatically. Every
+  workflow in this repo follows the same single-required-aggregate convention.
+
+`kind-smoke.yml` is the **e2e gate** and angle 1 of a two-angle strategy: the
+**dev binary** (this PR's HEAD build) deployed via the **latest released chart**
+(`oci://ghcr.io/metio/helm-charts/stageset-controller`), run through the shared
+`hack/smoke/*.sh` scenarios. Angle 2 lives in helm-charts (`stageset-smoke.yml`):
+the **dev chart** deploys the **latest released binary** and runs the same
+scripts. Each angle holds one moving part and tests it against the released
+counterpart, so neither couples to the other repo's `main`. The workflow runs on
+every PR with no paths filter and self-gates on a `relevant` git-diff output
+(binary / CRD / smoke wiring touched), and the kind matrix sweeps the newest few
+`kindest/node` minors discovered at runtime (a new k8s release is tested with no
+manual edit). Both the smoke jobs and the gate stay **green-by-skip until the
+first stageset chart release exists**. HEAD's `config/crd/` is overlaid with
+`kubectl apply --server-side` because the released chart's vendored CRDs lag HEAD.
+
+`fuzz.yml` is a **scheduled** workflow (weekly cron, off the Monday release slot,
+plus `workflow_dispatch` with a `fuzztime` input). A `discover` job greps every
+`Fuzz*` target out of `internal/**/*_test.go` into a `{pkg, func}` matrix, so
+**new targets are fuzzed automatically** — no hand-maintained list. Each matrix
+leg runs its own coverage-guided campaign; this is best-effort coverage, **not a
+release gate**. It stages `KUBEBUILDER_ASSETS` for the envtest packages' initial
+coordinator pass (the `isFuzzWorker` guard keeps the re-exec'd workers
+cluster-free). A discovered crasher is written to `testdata/fuzz/` and printed in
+the job log; commit it as a permanent seed, after which it reproduces
+deterministically in the Verify gate's seed-corpus pass.
+
+`docs.yml` builds the Hugo site under `docs/`. **golangci-lint is banned
+project-wide** and appears nowhere in CI.
+
 ## Build & release
 
 Container image: `gcr.io/distroless/static:nonroot` runtime base, built multi-arch
@@ -88,14 +190,32 @@ for **`linux/amd64,arm64,arm/v7,ppc64le,riscv64,s390x`** (the metio-wide arch
 set). The builder is pinned to `$BUILDPLATFORM` and cross-compiles via Go's
 `GOARCH`, so the multi-arch build needs no QEMU. `VERSION`/`COMMIT` are build args.
 
-`release.yml` is a **calendar-based** weekly release (`date +'%Y.%-m.%-d'`):
-`prepare` (version, gated on commit count) → `github` (GitHub release/tag with
-cosign-verify notes) → `container` (multi-arch push to
-`ghcr.io/metio/stageset-controller` + cosign keyless). No standalone CLI binaries
-(this is a controller, not a CLI) and **no chart publish** — the chart lives in
-the [helm-charts](https://github.com/metio/helm-charts/tree/main/charts/stageset-controller)
-monorepo. The bare calendar tag is what helm-charts' `vendor-crds.sh` fetches
-CRDs against.
+`release.yml` is a **calendar-based** weekly release (Monday cron;
+`date +'%Y.%-m.%-d'` — so the next version is the upcoming Monday's date). It is a
+**hand-rolled pipeline — no goreleaser, no GPG**:
+
+- `prepare` computes the version and gates the whole run on the commit count
+  since the last release touching `go.mod cmd internal api config Dockerfile`
+  (zero commits → no release; the first release always proceeds).
+- `build` is a cross-compile matrix (`CGO_ENABLED=0`, `-trimpath`, `-ldflags`
+  stamping `main.version`/`main.commit`) producing **both** binaries — the
+  controller daemon (`./cmd`) and the `stagesetctl` CLI (`./cmd/stagesetctl`,
+  which doubles as a `kubectl-stageset` plugin) — for the six linux arches plus
+  windows and darwin on amd64/arm64. Each is archived: `tar.gz` on linux/darwin,
+  `zip` on windows.
+- `container` builds the multi-arch image and pushes
+  `ghcr.io/metio/stageset-controller:{latest,<version>}` (SBOM + provenance on),
+  then **cosign keyless** `sign`s it (Fulcio OIDC, `id-token: write`).
+- `github` (gated on a green `container`, so a release never points at a
+  non-existent image) computes one `SHA256SUMS` over every archive, **cosign
+  keyless** `sign-blob`s it, and publishes the GitHub release/tag with verify
+  instructions in the notes.
+
+There is **no chart publish** here — the chart lives in the
+[helm-charts](https://github.com/metio/helm-charts/tree/main/charts/stageset-controller)
+monorepo. The handshake is the **bare calendar tag**: helm-charts' `vendor-crds.sh`
+fetches `config/crd/` from this repo at the release tag, so the chart's vendored
+CRDs always trace to a published controller release.
 
 ## Conventions & traps
 

@@ -341,17 +341,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// ApplySet (KEP-3659) member label, so `kubectl get -l
 			// applyset.kubernetes.io/part-of=<id>` answers "what does this stage
 			// own" with no project-specific tooling.
-			if mode := r.InventoryMode; mode == "hybrid" || mode == "applyset" {
-				id := inventory.ApplySetID(inventory.ShardName(ss.Name, stage.Name, 0), ss.Namespace, "StageInventory", stagesv1.GroupVersion.Group)
-				for _, o := range objects {
-					labels := o.GetLabels()
-					if labels == nil {
-						labels = map[string]string{}
-					}
-					labels[inventory.PartOfLabel] = id
-					o.SetLabels(labels)
-				}
-			}
+			apply.StampMemberLabels(objects, r.InventoryMode, ss.Name, stage.Name, ss.Namespace, stagesv1.GroupVersion.Group)
 			conflicts, cerr := resolveConflictHandling(objects, stage)
 			if cerr != nil {
 				return r.failStage(ctx, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)

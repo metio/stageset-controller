@@ -6,6 +6,7 @@ package apply_test
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -19,10 +20,27 @@ import (
 
 var testCfg *rest.Config
 
+// isFuzzWorker reports whether this process is a `go test -fuzz` worker. Workers
+// are re-execs of the test binary that only run the fuzz function; they must not
+// each boot an envtest apiserver, or a dozen workers contend for ports and the
+// fuzz coordinator stalls at zero execs/sec. The cluster-free fuzz targets in
+// this package need no apiserver, so workers skip envtest and run immediately.
+func isFuzzWorker() bool {
+	for _, a := range os.Args {
+		if strings.HasPrefix(a, "-test.fuzzworker") {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMain(m *testing.M) {
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		// Skip the whole package cleanly when envtest assets are unavailable.
 		os.Exit(0)
+	}
+	if isFuzzWorker() {
+		os.Exit(m.Run())
 	}
 	env := &envtest.Environment{}
 	cfg, err := env.Start()
