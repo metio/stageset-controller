@@ -453,11 +453,14 @@ existing `inventory` and `api` rules are unaffected.)
   `gosec` G-rules around the dry-run apply and any temp-file materialization
   get inline `// #nosec <rule> -- <invariant>` justifications, never config
   exclusions.
+<!-- REUSE-IgnoreStart -->
 - **REUSE**: every new `.go` file carries the 0BSD SPDX header
   (`// SPDX-FileCopyrightText: The stageset-controller Authors` /
   `// SPDX-License-Identifier: 0BSD`). `testdata/golden/**` is covered by a
   `REUSE.toml` glob (data files can't carry comments), matching the existing
   `config/**`/`docs/**` overrides.
+<!-- REUSE-IgnoreEnd -->
+
 - **go.mod**: `go mod tidy` promotes cobra/pflag/cli-runtime/go-difflib/jsondiff
   to direct; no new downloads.
 - **arch-go**: no new rule; the `inventory` (stdlib-only) and `api`
