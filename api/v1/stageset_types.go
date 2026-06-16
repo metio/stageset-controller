@@ -12,9 +12,10 @@ import (
 // StageSetSpec defines an ordered, gated, multi-stage deployment of
 // ExternalArtifact contents.
 type StageSetSpec struct {
-	// Interval at which to reconcile the StageSet.
-	// +required
-	Interval metav1.Duration `json:"interval"`
+	// Interval at which to reconcile the StageSet. Optional: when omitted, the
+	// controller's --default-interval is used.
+	// +optional
+	Interval metav1.Duration `json:"interval,omitempty"`
 
 	// RetryInterval overrides Interval after a failed run.
 	// +optional
@@ -50,6 +51,11 @@ type StageSetSpec struct {
 	// KubeConfig selects a remote cluster to apply to.
 	// +optional
 	KubeConfig *meta.KubeConfigReference `json:"kubeConfig,omitempty"`
+
+	// Decryption decrypts SOPS-encrypted files in every stage's source before
+	// the manifests are built, so an encrypted Secret rolls out as plaintext.
+	// +optional
+	Decryption *Decryption `json:"decryption,omitempty"`
 
 	// Version identifies the deployed system's version so versioned
 	// migrations can gate on transitions. Unset disables versioning and
@@ -400,17 +406,74 @@ type ApplyAction struct {
 	Wait bool `json:"wait,omitempty"`
 }
 
+// Decryption configures SOPS decryption of encrypted files in stage sources.
+// Decryption happens at build time, in memory; the rollback store that retains
+// rendered output is encrypted at rest, so plaintext never lands on disk.
+type Decryption struct {
+	// Provider is the decryption backend. Only "sops" is supported.
+	// +kubebuilder:validation:Enum=sops
+	// +required
+	Provider string `json:"provider"`
+
+	// SecretRef names a Secret in the StageSet's namespace holding the
+	// decryption keys, using the SOPS key conventions: age private keys under
+	// data entries suffixed ".agekey", armored PGP private keys under ".asc".
+	// The Secret is read under the StageSet's serviceAccountName, so a tenant
+	// can only decrypt with material its ServiceAccount can read. Optional: omit
+	// for a cloud-KMS-only setup that uses the controller's ambient credentials.
+	// +optional
+	SecretRef *meta.LocalObjectReference `json:"secretRef,omitempty"`
+}
+
 // VersionSource identifies the deployed system's version. Exactly one of
-// FromArtifact or Value is set.
+// Value, FromObject, or FromArtifact is set.
 type VersionSource struct {
 	// FromArtifact reads a single semver string from a file in a stage's
-	// artifact, so the version moves with the content.
+	// artifact (e.g. a VERSION file committed beside the manifests), so the
+	// version moves with the content. Suited to Git/OCI/Bucket sources that can
+	// carry an extra file.
 	// +optional
 	FromArtifact *ArtifactVersionRef `json:"fromArtifact,omitempty"`
+
+	// FromObject reads the version from a field of a rendered object in a stage
+	// — by default the standard app.kubernetes.io/version label. The version
+	// travels inside the manifests themselves, so it works for every source kind
+	// including a single-document renderer like JaaS, which has no room for a
+	// separate version file.
+	// +optional
+	FromObject *ObjectVersionRef `json:"fromObject,omitempty"`
 
 	// Value pins the version inline, for fully pin-tagged setups.
 	// +optional
 	Value string `json:"value,omitempty"`
+}
+
+// ObjectVersionRef reads the version from a field of one rendered object in a
+// stage's built manifests, so the version travels with the content it versions.
+type ObjectVersionRef struct {
+	// Stage whose rendered manifests carry the version.
+	// +required
+	Stage string `json:"stage"`
+
+	// Kind of the object to read (e.g. Deployment).
+	// +required
+	Kind string `json:"kind"`
+
+	// Name of the object to read.
+	// +required
+	Name string `json:"name"`
+
+	// APIVersion of the object; empty matches on Kind and Name alone (the
+	// common case, where one Kind+Name pair is unambiguous within a stage).
+	// +optional
+	APIVersion string `json:"apiVersion,omitempty"`
+
+	// FieldPath is a kubectl-style JSONPath to the version string, e.g.
+	// '{.spec.template.spec.containers[0].image}'. Empty defaults to the
+	// app.kubernetes.io/version label — the Kubernetes-recommended place for an
+	// application's version, which well-formed manifests already set.
+	// +optional
+	FieldPath string `json:"fieldPath,omitempty"`
 }
 
 // ArtifactVersionRef points at a version file inside a stage's artifact.

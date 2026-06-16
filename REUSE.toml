@@ -7,7 +7,7 @@ SPDX-PackageSupplier = "Sebastian Hoß <seb@xn--ho-hia.de>"
 SPDX-PackageDownloadLocation = "https://github.com/metio/stageset-controller"
 
 [[annotations]]
-path = ["go.mod", "go.sum", ".gitignore", "renovate.json", "docs/**", "config/**", "LICENSES/**"]
+path = ["go.mod", "go.sum", ".gitignore", ".gitmodules", "renovate.json", "docs/**", "config/**", "LICENSES/**", "dev/website", "dev/serve", "skills/**", ".claude-plugin/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "The stageset-controller Authors"
 SPDX-License-Identifier = "0BSD"

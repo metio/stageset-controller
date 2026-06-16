@@ -1,0 +1,22 @@
+{
+  "name": "stageset",
+  "displayName": "StageSet",
+  "description": "Teach Claude to author and operate StageSet resources for the stageset-controller — ordered, gated, multi-stage Flux delivery.",
+  "author": {
+    "name": "The stageset-controller Authors",
+    "url": "https://github.com/metio/stageset-controller"
+  },
+  "homepage": "https://stageset.projects.metio.wtf/",
+  "repository": "https://github.com/metio/stageset-controller",
+  "license": "0BSD",
+  "keywords": [
+    "stageset",
+    "flux",
+    "gitops",
+    "kubernetes",
+    "progressive-delivery",
+    "externalartifact",
+    "multi-stage",
+    "deployment"
+  ]
+}

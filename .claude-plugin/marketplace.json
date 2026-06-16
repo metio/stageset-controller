@@ -1,0 +1,23 @@
+{
+  "name": "stageset",
+  "owner": {
+    "name": "The stageset-controller Authors"
+  },
+  "description": "StageSet — ordered, gated, multi-stage Flux delivery for Kubernetes.",
+  "plugins": [
+    {
+      "name": "stageset",
+      "source": "./",
+      "description": "Teach Claude to author and operate StageSet resources.",
+      "homepage": "https://stageset.projects.metio.wtf/",
+      "license": "0BSD",
+      "keywords": [
+        "stageset",
+        "flux",
+        "gitops",
+        "kubernetes",
+        "progressive-delivery"
+      ]
+    }
+  ]
+}

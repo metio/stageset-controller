@@ -85,6 +85,17 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: crate-ci/typos@37bb98842b0d8c4ffebdb75301a13db0267cef89 # v1
+  prose:
+    # Vale prose lint against the shared metio/vale-config style; .vale.ini pulls
+    # the published package. Fails on error-level findings (naming/branding);
+    # inclusive-language findings are warning-level and only annotate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: vale-cli/vale-action@v3 # renovate: pin to a SHA on first run
+        with:
+          files: docs/content
+          fail_on_error: true
   container-image:
     runs-on: ubuntu-latest
     steps:
@@ -113,11 +124,40 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
+  dco:
+    # Developer Certificate of Origin: every commit must carry a Signed-off-by
+    # trailer. Skipped for bot-authored PRs (Renovate/Dependabot cannot sign off);
+    # a skipped job still satisfies the all-green gate below.
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - name: Verify Signed-off-by on every commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status=0
+          for sha in $(git rev-list "$BASE..$HEAD"); do
+            name=$(git show -s --format='%an' "$sha")
+            case "$name" in
+              *'[bot]'*) echo "skip bot commit ${sha:0:8} ($name)"; continue ;;
+            esac
+            if git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>$'; then
+              echo "ok   ${sha:0:8}"
+            else
+              echo "::error::commit ${sha:0:8} by '$name' is missing a Signed-off-by line (use git commit --signoff)"
+              status=1
+            fi
+          done
+          exit $status
   all-green:
     # Single required check covering every job above: mark only this one
     # required in branch protection and new jobs are covered automatically.
     name: Verify — all checks passed
-    needs: [test, lint-go, vulnerabilities, architecture, reuse, yaml, github-actions, markdown, typos, container-image]
+    needs: [test, lint-go, vulnerabilities, architecture, reuse, yaml, github-actions, markdown, typos, prose, container-image, dco]
     if: always()
     runs-on: ubuntu-latest
     steps:

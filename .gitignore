@@ -11,3 +11,5 @@ docs/resources/
 .cache/
 .config/
 .ilo.rc
+docs/.hugo_build.lock
+.vale/

@@ -138,6 +138,9 @@ jobs:
       - name: Install the ExternalArtifact stub CRD
         run: hack/smoke/setup-externalartifact-crd.sh
 
+      - name: Install the classic Flux source stub CRDs
+        run: hack/smoke/setup-flux-source-crds.sh
+
       - name: Install the released chart with the dev image
         run: |
           # Webhook disabled: the shared scenarios test the data plane
@@ -157,7 +160,10 @@ jobs:
           kubectl apply --server-side --force-conflicts -f config/crd/
           # Smoke-only broad grant: scenarios without a spec.serviceAccountName
           # apply under the controller's own identity, so it needs to create the
-          # rendered objects and emit Events cluster-wide.
+          # rendered objects and emit Events cluster-wide. The released chart
+          # predates the rbac.clusterAdmin value (angle 2 sets that instead); once
+          # a chart release carries it, this hand-rolled binding can drop to
+          # --set rbac.clusterAdmin=true above.
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
@@ -175,6 +181,9 @@ jobs:
 
       - name: Scenario — stagesetctl CLI (get, build, diff, reconcile)
         run: hack/smoke/scenario-cli.sh
+
+      - name: Scenario — direct Git/OCI/Bucket sources (+ default-interval)
+        run: hack/smoke/scenario-direct-source.sh
 
       - name: Diagnostics on failure
         if: failure()

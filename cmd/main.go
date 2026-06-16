@@ -11,9 +11,10 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 	// Embed the IANA time zone database: update-window timeZones resolve via
-	// time.LoadLocation, and the chainguard static runtime image ships no
+	// time.LoadLocation, and the distroless static runtime image ships no
 	// /usr/share/zoneinfo.
 	_ "time/tzdata"
 
@@ -23,6 +24,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -81,6 +83,8 @@ func main() {
 		webhookVWCName       string
 		gateAddr             string
 		runbookBaseURL       string
+		watchNamespaces      string
+		defaultInterval      time.Duration
 		rbPath               string
 		rbS3Endpoint         string
 		rbS3Bucket           string
@@ -91,6 +95,8 @@ func main() {
 		rbS3SecretKey        string
 		rbS3SessionToken     string
 		rbS3Anonymous        bool
+		rbS3SSE              string
+		rbS3SSEKMSKey        string
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -108,7 +114,9 @@ func main() {
 	flag.StringVar(&webhookServiceNS, "webhook-service-namespace", "", "Namespace of the webhook Service; empty falls back to the in-cluster ServiceAccount namespace.")
 	flag.StringVar(&webhookVWCName, "webhook-validating-config-name", "", "Name of the ValidatingWebhookConfiguration whose caBundle to patch. Required for self-signed mode.")
 	flag.StringVar(&gateAddr, "gate-bind-address", ":8082", "Address for the read-only Flagger stage-gate endpoint (GET /gate/{namespace}/{stageset}/{stage}). Empty disables it.")
-	flag.StringVar(&runbookBaseURL, "runbook-base-url", "", "Optional URL prefix appended to actionable Ready condition messages as (runbook: <base>/<reason>.md). Empty disables.")
+	flag.StringVar(&runbookBaseURL, "runbook-base-url", "", "Optional URL prefix appended to actionable Ready condition messages as (runbook: <base>/<reason>/). Empty disables.")
+	flag.StringVar(&watchNamespaces, "watch-namespaces", "", "Comma-separated list of namespaces this controller watches. Empty (the default) means cluster-wide. When set, the manager's cache only observes StageSets and sources in these namespaces — the multi-tenant controller-instances pattern. Falls back to STAGESET_WATCH_NAMESPACES env when the flag is empty.")
+	flag.DurationVar(&defaultInterval, "default-interval", 10*time.Minute, "Reconcile cadence for StageSets that omit spec.interval.")
 	flag.StringVar(&rbPath, "rollback-store-path", "", "Filesystem directory (e.g. an RWX PVC mount) for the optional rollback store. Use an RWX volume for HA replicas. Mutually exclusive with the S3 store.")
 	flag.StringVar(&rbS3Endpoint, "rollback-store-s3-endpoint", "", "S3-compatible endpoint for the optional rollback store (host:port). Empty disables the store; rollback falls back to re-fetching the producer artifact.")
 	flag.StringVar(&rbS3Bucket, "rollback-store-s3-bucket", "", "Bucket for the rollback store.")
@@ -119,6 +127,8 @@ func main() {
 	flag.StringVar(&rbS3SecretKey, "rollback-store-s3-secret-key", "", "Secret key for the rollback store.")
 	flag.StringVar(&rbS3SessionToken, "rollback-store-s3-session-token", "", "Optional session token for the rollback store.")
 	flag.BoolVar(&rbS3Anonymous, "rollback-store-s3-anonymous", false, "Use anonymous (unsigned) requests for the rollback store.")
+	flag.StringVar(&rbS3SSE, "rollback-store-s3-sse", "s3", "Server-side encryption at rest for stored objects: none, s3 (SSE-S3), or kms (SSE-KMS). The store holds rendered Secret data, so encryption is on by default; set none only for a bucket whose backend cannot honor an SSE header.")
+	flag.StringVar(&rbS3SSEKMSKey, "rollback-store-s3-sse-kms-key", "", "KMS key ARN/ID for --rollback-store-s3-sse=kms; empty uses the bucket's default KMS key.")
 
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
@@ -129,7 +139,7 @@ func main() {
 	setupLog.Info("starting stageset-controller", "version", version, "commit", commit)
 
 	restCfg := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
+	mgrOpts := ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -137,7 +147,22 @@ func main() {
 		// Webhook serves on every replica (admission must, even non-leaders);
 		// only reconcilers are leader-gated.
 		WebhookServer: webhook.NewServer(webhook.Options{Port: webhookPort, CertDir: webhookCertDir}),
-	})
+	}
+	if watchNS := parseWatchNamespaces(watchNamespaces, os.Environ()); len(watchNS) > 0 {
+		// Restrict the manager's informers to the listed namespaces. StageSets
+		// and sources outside this set never enter the cache, so the reconciler
+		// can't see them even where RBAC would otherwise grant access — the
+		// multi-tenant controller-instances pattern (one deployment per
+		// tenant-group, disjoint watch sets). The chart pivots RBAC to
+		// per-namespace RoleBindings to match.
+		nsCache := make(map[string]cache.Config, len(watchNS))
+		for _, ns := range watchNS {
+			nsCache[ns] = cache.Config{}
+		}
+		mgrOpts.Cache.DefaultNamespaces = nsCache
+		setupLog.Info("watch scope restricted", "namespaces", watchNS)
+	}
+	mgr, err := ctrl.NewManager(restCfg, mgrOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -156,11 +181,16 @@ func main() {
 		}
 		rollbackStore = store
 		setupLog.Info("rollback store enabled", "backend", "filesystem", "path", rbPath)
+		// The file store persists rendered output — including Secret data — to
+		// this directory. Unlike the S3 backend it cannot set encryption at rest
+		// itself, so the volume must provide it.
+		setupLog.Info("ensure the rollback-store volume is encrypted at rest (encrypted StorageClass / LUKS / cloud-disk encryption); the file store writes rendered Secret data in the clear", "path", rbPath)
 	case rbS3Endpoint != "" && rbS3Bucket != "":
 		store, serr := rollbackstore.NewS3(rollbackstore.S3Config{
 			Endpoint: rbS3Endpoint, Bucket: rbS3Bucket, Prefix: rbS3Prefix, Region: rbS3Region,
 			UseSSL: rbS3UseSSL, AccessKey: rbS3AccessKey, SecretKey: rbS3SecretKey,
 			SessionToken: rbS3SessionToken, Anonymous: rbS3Anonymous,
+			SSE: rbS3SSE, SSEKMSKeyID: rbS3SSEKMSKey,
 		})
 		if serr != nil {
 			setupLog.Error(serr, "unable to build S3 rollback store")
@@ -177,6 +207,7 @@ func main() {
 		AllowedActionHosts:   allowedActionHosts,
 		NoCrossNamespaceRefs: noCrossNamespaceRefs,
 		RunbookBaseURL:       runbookBaseURL,
+		DefaultInterval:      defaultInterval,
 		RollbackStore:        rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "StageSet")
@@ -326,6 +357,33 @@ func inClusterNamespace() string {
 		return ""
 	}
 	return string(data)
+}
+
+// parseWatchNamespaces splits a comma-separated list into namespace names,
+// falling back to STAGESET_WATCH_NAMESPACES in env when the flag is empty.
+// Both empty yields nil — the cluster-wide watch. Entries are trimmed and
+// empty entries (trailing/double comma) dropped; DNS-1123 validation is left
+// to the apiserver, which rejects malformed names when the cache lists them.
+func parseWatchNamespaces(flagValue string, env []string) []string {
+	raw := strings.TrimSpace(flagValue)
+	if raw == "" {
+		for _, e := range env {
+			if k, v, ok := strings.Cut(e, "="); ok && k == "STAGESET_WATCH_NAMESPACES" {
+				raw = strings.TrimSpace(v)
+				break
+			}
+		}
+	}
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type stringSlice []string

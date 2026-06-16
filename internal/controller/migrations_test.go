@@ -211,6 +211,35 @@ func TestReconcile_Migration_VersionFromArtifact(t *testing.T) {
 	}
 }
 
+// The version can be read from the app.kubernetes.io/version label of a rendered
+// object, so it travels inside the manifests (the JaaS-rendered / any-source path).
+func TestReconcile_Migration_VersionFromObject(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	labeled := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: stage-obj\n  namespace: " + ns +
+		"\n  labels:\n    app.kubernetes.io/version: \"1.5.0\"\ndata:\n  key: value\n"
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": labeled})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "from-object"},
+		Spec: stagesv1.StageSetSpec{
+			Interval: metav1.Duration{Duration: time.Minute},
+			Version: &stagesv1.VersionSource{FromObject: &stagesv1.ObjectVersionRef{
+				Stage: "stage-a", Kind: "ConfigMap", Name: "stage-obj",
+			}},
+			Stages: []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	reconcileOnce(t, c, ss)
+
+	if v := getStageSet(t, c, ns, "from-object").Status.Version; v != "1.5.0" {
+		t.Fatalf("version should be read from the object's version label, got %q", v)
+	}
+}
+
 // A missing version file is a terminal InvalidVersion.
 func TestReconcile_Migration_MissingVersionFileIsInvalid(t *testing.T) {
 	c := testClient(t)

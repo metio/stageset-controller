@@ -2,9 +2,15 @@
 # SPDX-License-Identifier: 0BSD
 name: Documentation
 on:
+  schedule:
+    - cron: 45 4 * * MON
   push:
     branches: [main]
+    paths:
+      - docs/**
   pull_request:
+    paths:
+      - docs/**
 permissions:
   contents: read
 jobs:
@@ -12,8 +18,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
       - uses: peaceiris/actions-hugo@2752ce1d29631191ea3f27c23495fa06139a5b78 # v3
         with:
           hugo-version: latest
           extended: true
-      - run: hugo --minify --source docs
+      - run: hugo --minify --printI18nWarnings --printPathWarnings --source docs
+      - name: Deploy Website
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/public
+          force_orphan: true
+          cname: stageset.projects.metio.wtf

@@ -44,8 +44,33 @@ var (
 		Name: "stageset_webhook_cert_renewal_failures_total",
 		Help: "Total failed self-signed webhook certificate renewals.",
 	})
+
+	// StageReady reports whether each stage is currently Ready (1) or not (0).
+	// A progressive-delivery controller that gates on metrics rather than a
+	// webhook — e.g. Argo Rollouts' Prometheus metric provider — can hold a
+	// rollout directly on this gauge.
+	StageReady = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "stageset_stage_ready",
+		Help: "Whether a stage is Ready (1) or not (0) at the current observed state.",
+	}, []string{"namespace", "stageset", "stage"})
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, StageReady)
+}
+
+// SetStageReady publishes the readiness gauge for one stage.
+func SetStageReady(namespace, stageset, stage string, ready bool) {
+	v := 0.0
+	if ready {
+		v = 1
+	}
+	StageReady.WithLabelValues(namespace, stageset, stage).Set(v)
+}
+
+// DeleteStageReady removes every stage-readiness series for a StageSet, so a
+// deleted StageSet (or a stage dropped from its spec) does not leave a stale
+// gauge behind.
+func DeleteStageReady(namespace, stageset string) {
+	StageReady.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": stageset})
 }

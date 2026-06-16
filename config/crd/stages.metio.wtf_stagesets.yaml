@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.3
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: stagesets.stages.metio.wtf
 spec:
   group: stages.metio.wtf
@@ -53,6 +53,35 @@ spec:
               StageSetSpec defines an ordered, gated, multi-stage deployment of
               ExternalArtifact contents.
             properties:
+              decryption:
+                description: |-
+                  Decryption decrypts SOPS-encrypted files in every stage's source before
+                  the manifests are built, so an encrypted Secret rolls out as plaintext.
+                properties:
+                  provider:
+                    description: Provider is the decryption backend. Only "sops" is
+                      supported.
+                    enum:
+                    - sops
+                    type: string
+                  secretRef:
+                    description: |-
+                      SecretRef names a Secret in the StageSet's namespace holding the
+                      decryption keys, using the SOPS key conventions: age private keys under
+                      data entries suffixed ".agekey", armored PGP private keys under ".asc".
+                      The Secret is read under the StageSet's serviceAccountName, so a tenant
+                      can only decrypt with material its ServiceAccount can read. Optional: omit
+                      for a cloud-KMS-only setup that uses the controller's ambient credentials.
+                    properties:
+                      name:
+                        description: Name of the referent.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - provider
+                type: object
               dependsOn:
                 description: |-
                   DependsOn lists StageSets that must be Ready (with observed
@@ -83,7 +112,9 @@ spec:
                   state to heal drift. Leave unset to fold drift correction into Interval.
                 type: string
               interval:
-                description: Interval at which to reconcile the StageSet.
+                description: |-
+                  Interval at which to reconcile the StageSet. Optional: when omitted, the
+                  controller's --default-interval is used.
                 type: string
               kubeConfig:
                 description: KubeConfig selects a remote cluster to apply to.
@@ -1639,7 +1670,9 @@ spec:
                   fromArtifact:
                     description: |-
                       FromArtifact reads a single semver string from a file in a stage's
-                      artifact, so the version moves with the content.
+                      artifact (e.g. a VERSION file committed beside the manifests), so the
+                      version moves with the content. Suited to Git/OCI/Bucket sources that can
+                      carry an extra file.
                     properties:
                       path:
                         description: Path of the version file inside the artifact.
@@ -1649,6 +1682,40 @@ spec:
                         type: string
                     required:
                     - path
+                    - stage
+                    type: object
+                  fromObject:
+                    description: |-
+                      FromObject reads the version from a field of a rendered object in a stage
+                      — by default the standard app.kubernetes.io/version label. The version
+                      travels inside the manifests themselves, so it works for every source kind
+                      including a single-document renderer like JaaS, which has no room for a
+                      separate version file.
+                    properties:
+                      apiVersion:
+                        description: |-
+                          APIVersion of the object; empty matches on Kind and Name alone (the
+                          common case, where one Kind+Name pair is unambiguous within a stage).
+                        type: string
+                      fieldPath:
+                        description: |-
+                          FieldPath is a kubectl-style JSONPath to the version string, e.g.
+                          '{.spec.template.spec.containers[0].image}'. Empty defaults to the
+                          app.kubernetes.io/version label — the Kubernetes-recommended place for an
+                          application's version, which well-formed manifests already set.
+                        type: string
+                      kind:
+                        description: Kind of the object to read (e.g. Deployment).
+                        type: string
+                      name:
+                        description: Name of the object to read.
+                        type: string
+                      stage:
+                        description: Stage whose rendered manifests carry the version.
+                        type: string
+                    required:
+                    - kind
+                    - name
                     - stage
                     type: object
                   value:
@@ -1666,7 +1733,6 @@ spec:
                 - All
                 type: string
             required:
-            - interval
             - stages
             type: object
           status:

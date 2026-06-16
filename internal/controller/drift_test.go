@@ -46,8 +46,9 @@ func TestSteadyInterval(t *testing.T) {
 		{"zero drift ignored", time.Minute, dur(0), time.Minute},
 		{"negative drift ignored", time.Minute, dur(-time.Second), time.Minute},
 	}
+	r := &StageSetReconciler{}
 	for _, tc := range cases {
-		if got := steadyInterval(mk(tc.interval, tc.drift)); got != tc.want {
+		if got := r.steadyInterval(mk(tc.interval, tc.drift)); got != tc.want {
 			t.Errorf("%s: steadyInterval = %v, want %v", tc.name, got, tc.want)
 		}
 	}

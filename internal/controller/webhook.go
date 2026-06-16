@@ -60,7 +60,56 @@ func ValidateSpec(ss *stagesv1.StageSet) error {
 	if err := validateMigrations(ss); err != nil {
 		return err
 	}
+	if err := validateVersion(ss); err != nil {
+		return err
+	}
+	if err := validateDecryption(ss); err != nil {
+		return err
+	}
 	return window.Validate(ss.Spec.UpdateWindows)
+}
+
+// validateDecryption enforces that spec.decryption, when set, names the only
+// supported provider, and that a referenced secretRef carries a name. secretRef
+// itself is optional: a cloud-KMS-only setup decrypts through the controller's
+// ambient credentials with no in-cluster key Secret.
+func validateDecryption(ss *stagesv1.StageSet) error {
+	d := ss.Spec.Decryption
+	if d == nil {
+		return nil
+	}
+	if d.Provider != "sops" {
+		return fmt.Errorf("spec.decryption.provider must be \"sops\", got %q", d.Provider)
+	}
+	if d.SecretRef != nil && d.SecretRef.Name == "" {
+		return fmt.Errorf("spec.decryption.secretRef.name must be set when secretRef is given")
+	}
+	return nil
+}
+
+// validateVersion enforces that spec.version, when set, names exactly one
+// source: value, fromObject, or fromArtifact. The reconciler's resolver applies
+// a precedence order as a fallback, but admission rejects an ambiguous or empty
+// version source up front.
+func validateVersion(ss *stagesv1.StageSet) error {
+	v := ss.Spec.Version
+	if v == nil {
+		return nil
+	}
+	n := 0
+	if v.Value != "" {
+		n++
+	}
+	if v.FromObject != nil {
+		n++
+	}
+	if v.FromArtifact != nil {
+		n++
+	}
+	if n != 1 {
+		return fmt.Errorf("spec.version must set exactly one of value, fromObject, or fromArtifact, found %d", n)
+	}
+	return nil
 }
 
 // validateMigrations enforces that migrations require a version, anchor to a
