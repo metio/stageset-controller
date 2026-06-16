@@ -42,6 +42,61 @@ The two are mutually exclusive. With no store configured, rollback can only use 
 prior revision the producer itself still retains; a dedicated store makes rollback
 reliable across producer pruning.
 
+### Bring your own Secret
+
+The chart never bakes credentials into a rendered Secret. It references a Secret
+you provide by name (`rollbackStore.s3.existingSecret`) and consumes it via
+`envFrom`, expecting the keys `accessKey`, `secretKey`, and the optional
+`sessionToken`. The Secret's provenance is yours to choose.
+
+Any of these can produce that Secret, and the chart works with all of them
+unchanged — point the tool at the same name the chart references:
+
+- **External Secrets Operator** — an `ExternalSecret` that syncs from Vault, AWS
+  Secrets Manager, GCP Secret Manager, or Azure Key Vault into a Secret of that
+  name.
+- **Sealed Secrets** — a `SealedSecret` that the controller decrypts in-cluster.
+- **Vault Agent / CSI** — a Secret materialized from Vault.
+- **SOPS** — a Secret decrypted by your GitOps tooling at apply time.
+- **`kubectl create secret`** — a plain hand-managed Secret.
+
+This is why the chart ships no native `ExternalSecret` resource: the reference seam
+already integrates with every secret backend, without coupling the chart to one
+operator's CRDs.
+
+On the cloud, **IAM/IRSA** — leaving `existingSecret` unset so the credentials are
+discovered from the pod's ServiceAccount — avoids a stored secret entirely and is
+preferred where available.
+
+A minimal External Secrets example whose `target.name` matches the referenced
+Secret and whose keys are the ones the controller expects:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: stageset-rollback-s3
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault
+    kind: SecretStore
+  target:
+    name: stageset-rollback-credentials # = rollbackStore.s3.existingSecret
+  data:
+    - secretKey: accessKey
+      remoteRef:
+        key: stageset/rollback-s3
+        property: access_key_id
+    - secretKey: secretKey
+      remoteRef:
+        key: stageset/rollback-s3
+        property: secret_access_key
+```
+
+For the full chart values, see the [Helm values](/installation/helm-values/)
+reference.
+
 ### Encryption at rest
 
 The store keeps each stage's rendered output, which includes any `Secret`'s data —
