@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: vale-cli/vale-action@v3 # renovate: pin to a SHA on first run
+      - uses: vale-cli/vale-action@2.1.2 # renovate: pin to a SHA
         with:
           files: docs/content
           fail_on_error: true

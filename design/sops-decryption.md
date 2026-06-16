@@ -105,7 +105,7 @@ For layer 1, decryption is a discrete transform on the built object set applied 
 the **single apply chokepoint**, immediately before `applier.Apply`, on both the
 forward and rollback paths:
 
-```
+```text
 fetch ─▶ build ─▶ substitute ─▶ [snapshot/store: SOPS-encrypted] ─▶ decrypt ─▶ apply
                                                                        ▲
                                    rollback re-fetch/store ────────────┘ (also encrypted → decrypt → apply)

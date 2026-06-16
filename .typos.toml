@@ -10,6 +10,10 @@ unparseable = "unparseable"
 mis = "mis"
 # POSIX open(2) flag name, not a misspelling of "wrongly".
 wronly = "wronly"
+# The custom-resource kind of pelotech/jsonnet-controller (German "configuration").
+Konfiguration = "Konfiguration"
+# "HashiCorp" (the company) tokenizes to "Hashi".
+Hashi = "Hashi"
 
 [files]
 extend-exclude = ["LICENSES/", "go.sum"]
