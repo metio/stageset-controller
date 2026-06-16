@@ -4,6 +4,7 @@
 package gate
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -86,5 +87,68 @@ func TestGate_MethodNotAllowed(t *testing.T) {
 	h := &Handler{Client: gateClient(t)}
 	if code := gateCode(t, h, http.MethodPost, "/gate/a/b/c"); code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST = %d, want 405", code)
+	}
+}
+
+// gateJSON issues an Accept: application/json request and returns the decoded
+// body plus the response.
+func gateJSON(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Accept", "application/json")
+	h.ServeHTTP(rec, req)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode JSON body %q: %v", rec.Body.String(), err)
+	}
+	return rec, body
+}
+
+func TestGate_JSON_ReadyStage(t *testing.T) {
+	t.Parallel()
+	h := &Handler{Client: gateClient(t, stageSet("flux-system", "platform",
+		stagesv1.StageStatus{Name: "migrations", Phase: stagesv1.StageReady, AppliedRevision: "sha256:abc"}))}
+	rec, body := gateJSON(t, h, "/gate/flux-system/platform/migrations")
+	// JSON callers always get 200; readiness is in the body, not the status.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if body["ready"] != true {
+		t.Fatalf("ready = %v, want true", body["ready"])
+	}
+	if body["stage"] != "migrations" || body["revision"] != "sha256:abc" {
+		t.Fatalf("unexpected body: %v", body)
+	}
+}
+
+func TestGate_JSON_UnreadyStageIs200WithReadyFalse(t *testing.T) {
+	t.Parallel()
+	h := &Handler{Client: gateClient(t, stageSet("flux-system", "platform",
+		stagesv1.StageStatus{Name: "migrations", Phase: stagesv1.StageApplying}))}
+	rec, body := gateJSON(t, h, "/gate/flux-system/platform/migrations")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (Argo web metric needs 2xx)", rec.Code)
+	}
+	if body["ready"] != false {
+		t.Fatalf("ready = %v, want false", body["ready"])
+	}
+	if body["phase"] != string(stagesv1.StageApplying) {
+		t.Fatalf("phase = %v, want %s", body["phase"], stagesv1.StageApplying)
+	}
+}
+
+func TestGate_JSON_MissingStageSet(t *testing.T) {
+	t.Parallel()
+	h := &Handler{Client: gateClient(t)}
+	rec, body := gateJSON(t, h, "/gate/flux-system/nope/x")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if body["ready"] != false {
+		t.Fatalf("ready = %v, want false", body["ready"])
 	}
 }

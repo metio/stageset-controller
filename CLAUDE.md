@@ -76,12 +76,23 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
 
 ## Architecture
 
-- `cmd/main.go` — the manager entrypoint.
+- `cmd/main.go` — the manager entrypoint. `--watch-namespaces` (comma-separated,
+  falls back to `STAGESET_WATCH_NAMESPACES`) scopes `Cache.DefaultNamespaces` —
+  empty (default) is cluster-wide; `parseWatchNamespaces` does the split. The chart
+  mirrors it as `controller.watchNamespaces` and pivots RBAC to per-namespace
+  RoleBindings (the cluster-scoped VWC grant stays a ClusterRoleBinding). Tenancy
+  has two models: **multi-tenant** (default) leans on `spec.serviceAccountName`
+  impersonation, so the chart grants the controller only `impersonate` + reads;
+  **single-tenant** sets the chart's `rbac.clusterAdmin: true` to bind the
+  controller SA to `cluster-admin` (the helm-controller default-install model), so
+  StageSets without `serviceAccountName` apply under the controller's own identity.
 - `api/v1/` — `StageSet` + `StageInventory` types with kubebuilder annotations +
   handwritten `zz_generated.deepcopy.go`.
-- `config/` — kubebuilder-style manifests (`crd/`, `manager/`, `rbac/`,
-  `webhook/`, `samples/`). Unlike jaas, this repo ships deployable raw manifests
-  here; `kind-smoke.yml` applies them with the locally-built image.
+- `config/` — controller-gen output only: `crd/`, `rbac/role.yaml`,
+  `webhook/manifests.yaml`. There is **no** `manager/` Deployment or kustomization
+  here — the deployment lives in the Helm chart (metio/helm-charts), and the chart
+  vendors these CRDs at each release. `kind-smoke.yml` installs the released chart
+  with the locally-built image and overlays HEAD's CRDs.
 - `internal/` — the reconciler and its collaborators:
   - `controller/` — the `StageSet` reconciler, conditions, webhook, tenant
     impersonation, migrations, rollback, windows, conflict handling.
@@ -90,7 +101,19 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
   - `gate/` + `celeval/` — readiness gating and CEL expression evaluation.
   - `window/` — `updateWindows` (cron+duration / absolute ranges, IANA tz).
   - `artifact/` + `build/` — fetch ExternalArtifact tarballs and build stages.
-  - `rollbackstore/` — optional RWX-PVC / S3 store for bit-exact rollback.
+  - `decryptor/` — SOPS decryption of a fetched source's files **before** the
+    kustomize build, driven by `spec.decryption` (provider `sops`). Tenant-scoped
+    **age** (`*.agekey`) and **PGP** (`*.asc`) keys from `secretRef` decrypt via
+    custom in-memory key services (no global `SOPS_AGE_KEY`/no gpg binary/no
+    keyring); **cloud KMS** rides the appended stock local key service via the
+    controller's ambient creds (so `secretRef` is optional for KMS-only). Encrypted
+    files feeding a `secretGenerator` work for free (decrypted pre-build). Wired in
+    both the forward apply and the re-fetch rollback paths; design in
+    `design/sops-decryption.md`.
+  - `rollbackstore/` — optional RWX-PVC / S3 store for bit-exact rollback. The store
+    holds rendered Secret data, so the S3 backend defaults to server-side encryption
+    (`--rollback-store-s3-sse=s3`, KMS optional) and the file backend warns to use an
+    encrypted volume.
   - `metrics/` + `webhook/` — Prometheus metrics and the stage-gate webhook.
 
 ## Testing
@@ -233,8 +256,41 @@ CRDs always trace to a published controller release.
   history. No "previously…/we used to…", no references to review docs or
   bug-tracker IDs. Write as the maintainer, not an outside auditor.
 
+## Documentation site
+
+`docs/` is a [Hugo](https://gohugo.io/) site published to
+`https://stageset.projects.metio.wtf/` (gh-pages, via
+`.github/workflows/docs.yml`). It uses the shared **metio-hugo-theme** pinned as a
+**git submodule** at `docs/themes/metio` (`theme = "metio"` in `docs/hugo.toml`);
+Renovate's `git-submodules` manager keeps it current. This mirrors every metio
+project (`<project>.projects.metio.wtf`, theme submodule, deploy workflow) — there
+are no project-local theme layouts.
+
+The site is **end-user documentation**, authored under `docs/content/`:
+`installation/`, `usage/` (one worked example per feature), `cli/` (one page per
+`stagesetctl` subcommand), `api/` (a detailed field-by-field reference per CR),
+and `comparisons/` (vs Helm/Kustomize/Flux/Tanka). The `docs/runbooks/` markdown
+stays in place — it's pinned by the `conditions_test` drift gate and the files
+double as GitHub-rendered docs — and is surfaced into `content/runbooks/` via a
+`[module.mounts]` entry in `docs/hugo.toml`; `ignoreFiles = ['README\.md$']` keeps
+the GitHub-facing README out of the render. The desktop nav is an explicit
+`[menu.main]` tree — the theme only renders menu entries that have children. There
+are **no** design/decision docs in the tree: that material was folded into the
+end-user docs (every StageSet YAML example is treated as a designed artifact —
+keep them beautiful).
+
+Build/preview locally with ilo argument files; `--no-rc` bypasses the Go-shell
+`.ilo.rc` that would otherwise clash:
+
+```shell
+ilo --no-rc @dev/website   # one-shot build into docs/public/
+ilo --no-rc @dev/serve     # live server on :1313
+```
+
 ## Licensing / REUSE
 
 0BSD, REUSE-compliant. Every file carries an SPDX header (Go via `//`, YAML/shell
-via `#`, markdown via `<!-- -->`) or a `REUSE.toml` glob. The `reuse` workflow
-enforces it.
+via `#`, markdown via `<!-- -->`) or a `REUSE.toml` glob (which covers `docs/**`,
+`.gitmodules`, and the `dev/website` / `dev/serve` ilo argument files). The `reuse`
+workflow enforces it. The `docs/themes/metio` submodule is a separate CC0 repo,
+outside this repo's REUSE scope.

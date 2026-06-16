@@ -12,19 +12,19 @@ import (
 )
 
 // TestAllReasons_HaveRunbookPages is the drift gate: every wire-stable Reason
-// in AllReasons must have a matching docs/runbooks/<reason>.md, so a new Reason
-// cannot ship without its remediation page.
+// in AllReasons must have a matching docs/content/runbooks/<reason>.md content
+// page, so a new Reason cannot ship without its remediation page.
 func TestAllReasons_HaveRunbookPages(t *testing.T) {
 	_, here, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
 	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(here))) // …/internal/controller/<file> → repo root
-	runbookDir := filepath.Join(repoRoot, "docs", "runbooks")
+	runbookDir := filepath.Join(repoRoot, "docs", "content", "runbooks")
 	for _, reason := range AllReasons {
 		name := strings.ToLower(reason) + ".md"
 		if _, err := os.Stat(filepath.Join(runbookDir, name)); err != nil {
-			t.Errorf("Reason %q has no runbook page at docs/runbooks/%s", reason, name)
+			t.Errorf("Reason %q has no runbook page at docs/content/runbooks/%s", reason, name)
 		}
 	}
 }
@@ -66,8 +66,8 @@ func TestDecorateMessage(t *testing.T) {
 		want   string
 	}{
 		{"no base URL: unchanged", "", ReasonStageFailed, "boom"},
-		{"actionable reason gets a link", "https://example/runbooks", ReasonStageFailed, "boom (runbook: https://example/runbooks/stagefailed.md)"},
-		{"trailing slash stripped", "https://example/runbooks/", ReasonStageFailed, "boom (runbook: https://example/runbooks/stagefailed.md)"},
+		{"actionable reason gets a link", "https://example/runbooks", ReasonStageFailed, "boom (runbook: https://example/runbooks/stagefailed/)"},
+		{"trailing slash stripped", "https://example/runbooks/", ReasonStageFailed, "boom (runbook: https://example/runbooks/stagefailed/)"},
 		{"happy reason gets no link", "https://example/runbooks", ReasonReady, "boom"},
 		{"suspended gets no link", "https://example/runbooks", ReasonSuspended, "boom"},
 	}

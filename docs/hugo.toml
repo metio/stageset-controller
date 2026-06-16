@@ -1,11 +1,238 @@
-baseURL = "https://stageset.metio.wtf/"
-languageCode = "en-us"
+baseURL = "https://stageset.projects.metio.wtf/"
+locale = "en"
+defaultContentLanguage = "en"
+theme = "metio"
 title = "StageSet Controller"
-disableKinds = ["taxonomy", "term", "rss"]
 
+enableGitInfo = true
+enableRobotsTXT = true
+enableInlineShortcodes = true
+pygmentsUseClasses = true
+
+# The runbook pages contain inline HTML; Goldmark must pass it through rather than
+# strip it.
 [markup.goldmark.renderer]
-unsafe = true
+  unsafe = true
 
-[markup.highlight]
-style = "github-dark"
-noClasses = true
+[outputs]
+  home = ["HTML", "RSS", "ATOM", "HUMANS", "FOAF", "LLMS"]
+  section = ["HTML", "RSS", "ATOM"]
+  term = ["HTML", "RSS", "ATOM"]
+
+[params]
+  mainSections = ["installation", "tutorials", "usage", "cli", "api", "comparisons", "runbooks", "contributing"]
+  author = "metio.wtf"
+  github = "metio/stageset-controller"
+  # Render the per-page "see history" / "edit this page" icons next to the title.
+  # editContentPath is the repo-root-relative path to this content tree, joined
+  # with each page's .File.Path to build the GitHub URLs.
+  editContentPath = "docs/content"
+  editBranch = "main"
+  work = "stageset.projects.metio.wtf"
+  description = "ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)"
+
+# Desktop navigation. The theme renders a main-menu entry only when it has
+# children, so each section is a parent linking to its list page.
+[menu]
+  [[menu.main]]
+    identifier = "installation"
+    name = "Installation"
+    url = "/installation/"
+    weight = 10
+  [[menu.main]]
+    parent = "installation"
+    name = "Kubernetes"
+    url = "/installation/kubernetes/"
+    weight = 1
+  [[menu.main]]
+    parent = "installation"
+    name = "Production"
+    url = "/installation/production/"
+    weight = 2
+  [[menu.main]]
+    parent = "installation"
+    name = "Operations"
+    url = "/installation/operations/"
+    weight = 3
+
+  [[menu.main]]
+    identifier = "tutorials"
+    name = "Tutorials"
+    url = "/tutorials/"
+    weight = 15
+  [[menu.main]]
+    parent = "tutorials"
+    name = "From Jsonnet to a gated rollout"
+    url = "/tutorials/jsonnet-to-rollout/"
+    weight = 1
+  [[menu.main]]
+    parent = "tutorials"
+    name = "Stage sources (Git/OCI/Bucket)"
+    url = "/tutorials/flux-sources/"
+    weight = 2
+  [[menu.main]]
+    parent = "tutorials"
+    name = "Parameterizing a rollout"
+    url = "/tutorials/parameters/"
+    weight = 3
+  [[menu.main]]
+    parent = "tutorials"
+    name = "Progressive delivery"
+    url = "/tutorials/progressive-delivery/"
+    weight = 4
+
+  [[menu.main]]
+    identifier = "usage"
+    name = "Usage"
+    url = "/usage/"
+    weight = 20
+  [[menu.main]]
+    parent = "usage"
+    name = "Stages and sources"
+    url = "/usage/stages-and-sources/"
+    weight = 1
+  [[menu.main]]
+    parent = "usage"
+    name = "Actions"
+    url = "/usage/actions/"
+    weight = 2
+  [[menu.main]]
+    parent = "usage"
+    name = "Ready checks"
+    url = "/usage/ready-checks/"
+    weight = 3
+  [[menu.main]]
+    parent = "usage"
+    name = "Conflict policies"
+    url = "/usage/conflict-policies/"
+    weight = 4
+  [[menu.main]]
+    parent = "usage"
+    name = "Update windows"
+    url = "/usage/update-windows/"
+    weight = 5
+  [[menu.main]]
+    parent = "usage"
+    name = "Versioned migrations"
+    url = "/usage/versioned-migrations/"
+    weight = 6
+  [[menu.main]]
+    parent = "usage"
+    name = "Rollback"
+    url = "/usage/rollback/"
+    weight = 7
+  [[menu.main]]
+    parent = "usage"
+    name = "Secrets encryption (SOPS)"
+    url = "/usage/encryption/"
+    weight = 8
+  [[menu.main]]
+    parent = "usage"
+    name = "Multi-cluster and tenancy"
+    url = "/usage/multi-cluster/"
+    weight = 9
+  [[menu.main]]
+    parent = "usage"
+    name = "Producer-aware sources"
+    url = "/usage/producer-aware-sources/"
+    weight = 10
+
+  [[menu.main]]
+    identifier = "cli"
+    name = "CLI"
+    url = "/cli/"
+    weight = 30
+  [[menu.main]]
+    parent = "cli"
+    name = "get"
+    url = "/cli/get/"
+    weight = 1
+  [[menu.main]]
+    parent = "cli"
+    name = "build"
+    url = "/cli/build/"
+    weight = 2
+  [[menu.main]]
+    parent = "cli"
+    name = "diff"
+    url = "/cli/diff/"
+    weight = 3
+  [[menu.main]]
+    parent = "cli"
+    name = "reconcile"
+    url = "/cli/reconcile/"
+    weight = 4
+
+  [[menu.main]]
+    identifier = "api"
+    name = "API reference"
+    url = "/api/"
+    weight = 40
+  [[menu.main]]
+    parent = "api"
+    name = "StageSet"
+    url = "/api/stageset/"
+    weight = 1
+  [[menu.main]]
+    parent = "api"
+    name = "StageInventory"
+    url = "/api/stageinventory/"
+    weight = 2
+
+  [[menu.main]]
+    identifier = "comparisons"
+    name = "Comparisons"
+    url = "/comparisons/"
+    weight = 50
+  [[menu.main]]
+    parent = "comparisons"
+    name = "vs Helm"
+    url = "/comparisons/helm/"
+    weight = 1
+  [[menu.main]]
+    parent = "comparisons"
+    name = "vs Kustomize"
+    url = "/comparisons/kustomize/"
+    weight = 2
+  [[menu.main]]
+    parent = "comparisons"
+    name = "vs Flux"
+    url = "/comparisons/flux/"
+    weight = 3
+  [[menu.main]]
+    parent = "comparisons"
+    name = "vs Tanka & kubecfg"
+    url = "/comparisons/tanka-kubecfg/"
+    weight = 4
+  [[menu.main]]
+    parent = "comparisons"
+    name = "vs Argo Rollouts"
+    url = "/comparisons/argo-rollouts/"
+    weight = 5
+  [[menu.main]]
+    parent = "comparisons"
+    name = "vs jsonnet-controller"
+    url = "/comparisons/jsonnet-controller/"
+    weight = 6
+
+  [[menu.main]]
+    identifier = "runbooks"
+    name = "Runbooks"
+    url = "/runbooks/"
+    weight = 60
+
+  [[menu.main]]
+    identifier = "contributing"
+    name = "Contributing"
+    url = "/contributing/"
+    weight = 70
+  [[menu.main]]
+    parent = "contributing"
+    name = "Building and testing"
+    url = "/contributing/building/"
+    weight = 1
+  [[menu.main]]
+    parent = "contributing"
+    name = "CI and releases"
+    url = "/contributing/ci-and-release/"
+    weight = 2

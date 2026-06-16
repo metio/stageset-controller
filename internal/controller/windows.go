@@ -91,7 +91,7 @@ func (r *StageSetReconciler) gateUpdateWindows(ctx context.Context, ss *stagesv1
 	if uerr := r.Status().Update(ctx, ss); uerr != nil {
 		return ctrl.Result{}, true, uerr
 	}
-	return ctrl.Result{RequeueAfter: requeueForWindow(nextChange, r.now(), retryInterval(ss))}, true, nil
+	return ctrl.Result{RequeueAfter: requeueForWindow(nextChange, r.now(), r.retryInterval(ss))}, true, nil
 }
 
 func nextWindowSuffix(t time.Time) string {

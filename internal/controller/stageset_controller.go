@@ -45,8 +45,8 @@ import (
 
 // StageSetReconciler reconciles StageSet objects. The reconciliation model —
 // resolve and pin artifacts, then BUILD -> APPLY -> PRUNE -> VERIFY each stage
-// in order, with a finalizer for teardown — is documented in
-// docs/content/design/stageset.md.
+// in order, with a finalizer for teardown — is the contract documented for users
+// under docs/content/ (the api/ and usage/ sections).
 type StageSetReconciler struct {
 	client.Client
 
@@ -79,6 +79,9 @@ type StageSetReconciler struct {
 	// RunbookBaseURL is the global --runbook-base-url flag: a URL prefix
 	// appended to actionable Ready-condition messages as a runbook link.
 	RunbookBaseURL string
+	// DefaultInterval is the global --default-interval flag: the reconcile
+	// cadence used for StageSets that omit spec.interval.
+	DefaultInterval time.Duration
 	// RollbackStore is the optional external store for rendered output, making
 	// rollbackOnFailure bit-exact and independent of producer retention. Nil
 	// falls back to re-fetching the producer artifact.
@@ -175,7 +178,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if terminal {
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{RequeueAfter: retryInterval(&ss)}, nil
+		return ctrl.Result{RequeueAfter: r.retryInterval(&ss)}, nil
 	}
 
 	// Producer-aware source resolution + revision pinning: resolve every
@@ -254,6 +257,13 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	ss.Status.PendingMigrations = migPlan.pendingNames()
 
+	// SOPS decryptor (nil when spec.decryption is unset). Built once per
+	// reconcile; the key Secret is read under the tenant SA.
+	dec, derr := r.buildDecryptor(ctx, &ss)
+	if derr != nil {
+		return r.failStage(ctx, &ss, ss.Spec.Stages[0].Name, "configure decryption", derr, nil, "", nil)
+	}
+
 	priorStages := indexStageStatuses(ss.Status.Stages)
 
 	// Single-stage force-reconcile: when the stages.metio.wtf/reconcile-stage
@@ -327,6 +337,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			files, err := fetcher.Fetch(ctx, ra.URL, ra.Digest, "")
 			if err != nil {
 				return r.failStage(ctx, &ss, stage.Name, "fetch artifact", err, stageStatuses, ra.Revision, executed)
+			}
+			files, err = decryptFiles(dec, files)
+			if err != nil {
+				return r.failStage(ctx, &ss, stage.Name, "decrypt", err, stageStatuses, ra.Revision, executed)
 			}
 			vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
 			if err != nil {
@@ -452,6 +466,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	ss.Status.LastAppliedRevisions = applied
 	ss.Status.Stages = stageStatuses
+	publishStageReady(&ss)
 	ss.Status.InventoryMode = r.InventoryMode
 	ss.Status.ObservedGeneration = ss.Generation
 	// A fully successful run advances the recorded version and clears the
@@ -478,7 +493,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	r.event(&ss, corev1.EventTypeNormal, ReasonReady,
 		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
 
-	return ctrl.Result{RequeueAfter: steadyInterval(&ss)}, nil
+	return ctrl.Result{RequeueAfter: r.steadyInterval(&ss)}, nil
 }
 
 // failResolution records the resolution failure on the Ready condition and
@@ -512,7 +527,7 @@ func (r *StageSetReconciler) failResolution(ctx context.Context, ss *stagesv1.St
 	case apiError:
 		return ctrl.Result{}, err
 	case transient:
-		return ctrl.Result{RequeueAfter: retryInterval(ss)}, nil
+		return ctrl.Result{RequeueAfter: r.retryInterval(ss)}, nil
 	default:
 		return ctrl.Result{}, nil
 	}
@@ -537,35 +552,47 @@ var happyReasonsNoRunbook = map[string]bool{
 	ReasonSuspended: true,
 }
 
-// decorateMessage appends a "(runbook: <base>/<reason>.md)" suffix when
+// decorateMessage appends a "(runbook: <base>/<reason>/)" suffix when
 // RunbookBaseURL is set, so kubectl describe surfaces a direct link to the
-// per-reason remediation page. The base URL is treated as a directory; the
-// reason is lower-cased into the path segment. Happy reasons get no suffix.
+// per-reason remediation page on the documentation site. The base URL is treated
+// as a directory; the reason is lower-cased into a path segment matching the Hugo
+// page URL. Happy reasons get no suffix.
 func (r *StageSetReconciler) decorateMessage(reason, message string) string {
 	if r.RunbookBaseURL == "" || happyReasonsNoRunbook[reason] {
 		return message
 	}
 	base := strings.TrimRight(r.RunbookBaseURL, "/")
-	return message + " (runbook: " + base + "/" + strings.ToLower(reason) + ".md)"
+	return message + " (runbook: " + base + "/" + strings.ToLower(reason) + "/)"
 }
 
-func retryInterval(ss *stagesv1.StageSet) time.Duration {
+// effectiveInterval is the StageSet's reconcile cadence: spec.interval when set,
+// otherwise the controller-wide --default-interval. spec.interval is optional so
+// most StageSets can omit it and inherit the cluster default.
+func (r *StageSetReconciler) effectiveInterval(ss *stagesv1.StageSet) time.Duration {
+	if ss.Spec.Interval.Duration > 0 {
+		return ss.Spec.Interval.Duration
+	}
+	return r.DefaultInterval
+}
+
+func (r *StageSetReconciler) retryInterval(ss *stagesv1.StageSet) time.Duration {
 	if ss.Spec.RetryInterval != nil {
 		return ss.Spec.RetryInterval.Duration
 	}
-	return ss.Spec.Interval.Duration
+	return r.effectiveInterval(ss)
 }
 
 // steadyInterval is the success-path requeue cadence. With a
-// driftDetectionInterval set (and genuinely shorter than Interval) the
-// controller re-asserts the applied state — healing out-of-band drift — on that
-// faster cadence, decoupled from the full reconcile Interval. A zero/negative or
-// not-shorter value is ignored, so it can never become a tight requeue loop.
-func steadyInterval(ss *stagesv1.StageSet) time.Duration {
-	if d := ss.Spec.DriftDetectionInterval; d != nil && d.Duration > 0 && d.Duration < ss.Spec.Interval.Duration {
+// driftDetectionInterval set (and genuinely shorter than the effective interval)
+// the controller re-asserts the applied state — healing out-of-band drift — on
+// that faster cadence, decoupled from the full reconcile interval. A zero/negative
+// or not-shorter value is ignored, so it can never become a tight requeue loop.
+func (r *StageSetReconciler) steadyInterval(ss *stagesv1.StageSet) time.Duration {
+	base := r.effectiveInterval(ss)
+	if d := ss.Spec.DriftDetectionInterval; d != nil && d.Duration > 0 && d.Duration < base {
 		return d.Duration
 	}
-	return ss.Spec.Interval.Duration
+	return base
 }
 
 func (r *StageSetReconciler) fetcher() *artifact.Fetcher {
@@ -588,6 +615,7 @@ func (r *StageSetReconciler) failStage(ctx context.Context, ss *stagesv1.StageSe
 		ExecutedActions: executed,
 		LedgerRevision:  revision,
 	})
+	publishStageReady(ss)
 	ss.Status.ObservedGeneration = ss.Generation
 	msg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
 	r.setReady(ss, metav1.ConditionFalse, ReasonStageFailed, msg)
@@ -731,8 +759,18 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 			}
 		}
 	}
+	metrics.DeleteStageReady(ss.Namespace, ss.Name)
 	controllerutil.RemoveFinalizer(ss, FinalizerName)
 	return ctrl.Result{}, r.Update(ctx, ss)
+}
+
+// publishStageReady mirrors the StageSet's per-stage phases into the
+// stageset_stage_ready gauge so metric-based progressive-delivery (e.g. Argo
+// Rollouts) can gate on a stage without calling the HTTP gate.
+func publishStageReady(ss *stagesv1.StageSet) {
+	for _, s := range ss.Status.Stages {
+		metrics.SetStageReady(ss.Namespace, ss.Name, s.Name, s.Phase == stagesv1.StageReady)
+	}
 }
 
 // toInventoryRecords converts stored stage records into the inventory

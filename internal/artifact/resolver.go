@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: The stageset-controller Authors
 // SPDX-License-Identifier: 0BSD
 
-// Package artifact resolves a stage's source reference to a ready Flux
-// ExternalArtifact (directly or through an RFC-0012 producer back-pointer)
+// Package artifact resolves a stage's source reference to a ready Flux artifact
 // and fetches the referenced tarball with the source-controller digest and
-// size-cap contract.
+// size-cap contract. A reference resolves to a source that carries a
+// status.artifact — an ExternalArtifact or a classic Flux source
+// (GitRepository / OCIRepository / Bucket) consumed directly, or any other kind
+// treated as a producer and resolved through its RFC-0012 back-pointer.
 package artifact
 
 import (
@@ -79,11 +81,12 @@ type Resolver struct {
 	NoCrossNamespace bool
 }
 
-// Resolve resolves ref (relative to the owning StageSet's namespace) to a
-// ready ExternalArtifact. A ref with no Kind, or Kind=ExternalArtifact, is a
-// direct lookup; any other Kind is a producer whose published artifact is
-// found through the RFC-0012 spec.sourceRef back-pointer. The returned
-// artifact is always Ready with a usable status.artifact.
+// Resolve resolves ref (relative to the owning StageSet's namespace) to a ready
+// artifact. A ref with no Kind, or Kind=ExternalArtifact, and the classic Flux
+// sources (GitRepository / OCIRepository / Bucket) are direct lookups — the CR
+// carries the status.artifact. Any other Kind is a producer whose published
+// artifact is found through the RFC-0012 spec.sourceRef back-pointer. The
+// returned artifact is always Ready with a usable status.artifact.
 func (r *Resolver) Resolve(ctx context.Context, c client.Client, ref stagesv1.SourceReference, ownerNS string) (ResolvedArtifact, error) {
 	ns := ref.Namespace
 	if ns == "" {
@@ -102,9 +105,15 @@ func (r *Resolver) Resolve(ctx context.Context, c client.Client, ref stagesv1.So
 		ea  *unstructured.Unstructured
 		err error
 	)
-	if kind == externalArtifactKind {
-		ea, err = getExternalArtifact(ctx, c, ns, ref.Name)
-	} else {
+	switch {
+	case kind == externalArtifactKind:
+		ea, err = getDirectSource(ctx, c, ref, ns, externalArtifactKind)
+	case isDirectSourceKind(ref):
+		// GitRepository / OCIRepository / Bucket expose the same status.artifact
+		// + Ready-condition contract as ExternalArtifact, so they are consumed
+		// directly rather than through a producer back-pointer.
+		ea, err = getDirectSource(ctx, c, ref, ns, kind)
+	default:
 		ea, err = resolveProducer(ctx, c, ref, ns)
 	}
 	if err != nil {
@@ -112,7 +121,7 @@ func (r *Resolver) Resolve(ctx context.Context, c client.Client, ref stagesv1.So
 	}
 
 	if ok, why := readyState(ea); !ok {
-		return ResolvedArtifact{}, fmt.Errorf("ExternalArtifact %s/%s (%s): %w", ea.GetNamespace(), ea.GetName(), why, ErrSourceNotReady)
+		return ResolvedArtifact{}, fmt.Errorf("%s %s/%s (%s): %w", ea.GetKind(), ea.GetNamespace(), ea.GetName(), why, ErrSourceNotReady)
 	}
 
 	art, err := readArtifact(ea)
@@ -124,16 +133,45 @@ func (r *Resolver) Resolve(ctx context.Context, c client.Client, ref stagesv1.So
 	return art, nil
 }
 
-func getExternalArtifact(ctx context.Context, c client.Client, ns, name string) (*unstructured.Unstructured, error) {
-	ea := newExternalArtifact()
-	key := types.NamespacedName{Namespace: ns, Name: name}
-	if err := c.Get(ctx, key, ea); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			return nil, fmt.Errorf("%w: ExternalArtifact %s/%s", ErrArtifactNotFound, ns, name)
-		}
-		return nil, fmt.Errorf("get ExternalArtifact %s/%s: %w", ns, name, err)
+// directSourceKinds are the classic Flux source kinds (besides ExternalArtifact)
+// that publish a status.artifact on the CR itself, so a stage consumes them
+// directly rather than through a producer back-pointer.
+var directSourceKinds = map[string]bool{
+	"GitRepository": true,
+	"OCIRepository": true,
+	"Bucket":        true,
+}
+
+// isDirectSourceKind reports whether ref names a classic Flux source consumed
+// directly. The group must be the source-controller group (or unset, which
+// defaults to it).
+func isDirectSourceKind(ref stagesv1.SourceReference) bool {
+	if !directSourceKinds[ref.Kind] {
+		return false
 	}
-	return ea, nil
+	g := groupOf(ref.APIVersion)
+	return g == "" || g == externalArtifactGroup
+}
+
+// getDirectSource fetches a CR that carries its own status.artifact (an
+// ExternalArtifact or a classic Flux source) by name. apiVersion defaults to the
+// source-controller group/version.
+func getDirectSource(ctx context.Context, c client.Client, ref stagesv1.SourceReference, ns, kind string) (*unstructured.Unstructured, error) {
+	apiVersion := ref.APIVersion
+	if apiVersion == "" {
+		apiVersion = externalArtifactGroup + "/" + externalArtifactVersion
+	}
+	u := &unstructured.Unstructured{}
+	u.SetAPIVersion(apiVersion)
+	u.SetKind(kind)
+	key := types.NamespacedName{Namespace: ns, Name: ref.Name}
+	if err := c.Get(ctx, key, u); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, fmt.Errorf("%w: %s %s/%s", ErrArtifactNotFound, kind, ns, ref.Name)
+		}
+		return nil, fmt.Errorf("get %s %s/%s: %w", kind, ns, ref.Name, err)
+	}
+	return u, nil
 }
 
 // resolveProducer finds the single ExternalArtifact in ns whose
@@ -230,12 +268,6 @@ func groupOf(apiVersion string) string {
 var ExternalArtifactGVK = schema.GroupVersionKind{Group: externalArtifactGroup, Version: externalArtifactVersion, Kind: externalArtifactKind}
 
 func externalArtifactGVK() schema.GroupVersionKind { return ExternalArtifactGVK }
-
-func newExternalArtifact() *unstructured.Unstructured {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(externalArtifactGVK())
-	return u
-}
 
 func newExternalArtifactList() *unstructured.UnstructuredList {
 	l := &unstructured.UnstructuredList{}

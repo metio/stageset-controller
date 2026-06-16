@@ -1,19 +1,27 @@
 // SPDX-FileCopyrightText: The stageset-controller Authors
 // SPDX-License-Identifier: 0BSD
 
-// Package gate serves the read-only Flagger stage-gate endpoint:
+// Package gate serves the read-only stage-gate endpoint:
 //
 //	GET /gate/{namespace}/{stageset}/{stage}
-//	  200 — the stage is Ready at the currently pinned revision
-//	  403 — otherwise (body carries the phase + message for debugging)
 //
-// Flagger's confirm-rollout / confirm-promotion webhooks block until the URL
-// returns 200, letting one StageSet gate another's Canary promotion. The
-// response leaks only a stage phase, so the endpoint is safe to expose
+// It speaks two dialects so two different progressive-delivery models can consume
+// it directly:
+//
+//   - Plain text (the default, and what Flagger sends): 200 when the stage is
+//     Ready at the currently pinned revision, 403 otherwise. Flagger's
+//     confirm-rollout / confirm-promotion webhooks gate on the HTTP status.
+//   - JSON (Accept: application/json): always 200 with a {"ready": bool, …} body.
+//     This is the shape Argo Rollouts' web metric expects — it parses the body
+//     (successCondition: result.ready == true) and treats a non-2xx as an error,
+//     so readiness has to live in the body, not the status.
+//
+// The response leaks only a stage phase, so the endpoint is safe to expose
 // unauthenticated (optionally fenced by NetworkPolicy).
 package gate
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -29,6 +37,18 @@ type Handler struct {
 	Client client.Client
 }
 
+// gateResult is the JSON body returned to clients that request application/json.
+// Ready is the single field a gate evaluates; the rest are diagnostic.
+type gateResult struct {
+	Ready     bool   `json:"ready"`
+	Namespace string `json:"namespace"`
+	StageSet  string `json:"stageset"`
+	Stage     string `json:"stage"`
+	Phase     string `json:"phase,omitempty"`
+	Revision  string `json:"revision,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -41,11 +61,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	namespace, name, stage := parts[0], parts[1], parts[2]
+	res := gateResult{Namespace: namespace, StageSet: name, Stage: stage}
 
 	var ss stagesv1.StageSet
 	if err := h.Client.Get(req.Context(), types.NamespacedName{Namespace: namespace, Name: name}, &ss); err != nil {
 		// Deny without distinguishing not-found from other errors (leak-safe).
-		writeText(w, http.StatusForbidden, "stageset %s/%s is not gateable\n", namespace, name)
+		respond(w, req, res, http.StatusForbidden, "stageset %s/%s is not gateable\n", namespace, name)
 		return
 	}
 
@@ -53,14 +74,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if s.Name != stage {
 			continue
 		}
+		res.Phase, res.Revision, res.Message = string(s.Phase), s.AppliedRevision, s.Message
 		if s.Phase == stagesv1.StageReady {
-			writeText(w, http.StatusOK, "stage %q is Ready at %s\n", stage, s.AppliedRevision)
+			res.Ready = true
+			respond(w, req, res, http.StatusOK, "stage %q is Ready at %s\n", stage, s.AppliedRevision)
 			return
 		}
-		writeText(w, http.StatusForbidden, "stage %q phase=%s: %s\n", stage, s.Phase, s.Message)
+		respond(w, req, res, http.StatusForbidden, "stage %q phase=%s: %s\n", stage, s.Phase, s.Message)
 		return
 	}
-	writeText(w, http.StatusForbidden, "stage %q not found in stageset %s/%s\n", stage, namespace, name)
+	res.Message = "stage not found"
+	respond(w, req, res, http.StatusForbidden, "stage %q not found in stageset %s/%s\n", stage, namespace, name)
+}
+
+// respond renders one result in whichever dialect the caller asked for. JSON
+// callers always get 200 with the readiness in the body; plain-text callers get
+// textStatus (200 Ready / 403 not) with the diagnostic message.
+func respond(w http.ResponseWriter, req *http.Request, res gateResult, textStatus int, textFormat string, textArgs ...any) {
+	if wantsJSON(req) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(res)
+		return
+	}
+	writeText(w, textStatus, textFormat, textArgs...)
+}
+
+// wantsJSON reports whether the caller accepts a JSON response.
+func wantsJSON(req *http.Request) bool {
+	return strings.Contains(req.Header.Get("Accept"), "application/json")
 }
 
 // writeText sends a plain-text response. text/plain is never interpreted as

@@ -19,6 +19,7 @@ import (
 	"github.com/metio/stageset-controller/internal/apply"
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
+	"github.com/metio/stageset-controller/internal/decryptor"
 )
 
 // substitutionDigest fingerprints a stage's resolved postBuild substitution map
@@ -128,6 +129,13 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 	if len(snap) == 0 {
 		return "", "" // no snapshot (e.g. the first run failed): nothing to roll back to
 	}
+	// Re-fetch rollback rebuilds the source, so it must decrypt the same way the
+	// forward path does. The store path holds already-rendered objects and skips
+	// this.
+	dec, derr := r.buildDecryptor(ctx, ss)
+	if derr != nil {
+		return ReasonPreviousRevisionUnavailable, fmt.Sprintf("cannot roll back: configuring decryption failed (%v)", derr)
+	}
 	stages := make(map[string]*stagesv1.Stage, len(ss.Spec.Stages))
 	for i := range ss.Spec.Stages {
 		stages[ss.Spec.Stages[i].Name] = &ss.Spec.Stages[i]
@@ -137,7 +145,7 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 		if !ok {
 			continue // stage removed from the spec: not restored, pruned normally
 		}
-		objects, rbReason, rbMsg := r.rollbackStageObjects(ctx, ss, stage, ref, fetcher)
+		objects, rbReason, rbMsg := r.rollbackStageObjects(ctx, ss, stage, ref, fetcher, dec)
 		if rbReason != "" {
 			return rbReason, rbMsg
 		}
@@ -151,7 +159,7 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 
 // rollbackStageObjects re-fetches the recorded revision (digest-verified) and
 // re-renders it under the current spec.
-func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, ref stagesv1.StageArtifactRef, fetcher *artifact.Fetcher) ([]*unstructured.Unstructured, string, string) {
+func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, ref stagesv1.StageArtifactRef, fetcher *artifact.Fetcher, dec *decryptor.Decryptor) ([]*unstructured.Unstructured, string, string) {
 	// Bit-exact, GC-independent path: the external store holds the rendered
 	// output from when this revision was last applied.
 	if r.RollbackStore != nil {
@@ -166,6 +174,11 @@ func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stage
 	if ferr != nil {
 		return nil, ReasonPreviousRevisionUnavailable,
 			fmt.Sprintf("cannot roll back: revision %s for stage %q is no longer fetchable (%v)", ref.Revision, ref.Stage, ferr)
+	}
+	files, ferr = decryptFiles(dec, files)
+	if ferr != nil {
+		return nil, ReasonPreviousRevisionUnavailable,
+			fmt.Sprintf("cannot roll back stage %q: decrypting the previous revision failed (%v)", ref.Stage, ferr)
 	}
 	vars, verr := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
 	if verr != nil {

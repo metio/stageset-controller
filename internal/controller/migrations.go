@@ -12,11 +12,18 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/util/jsonpath"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/actions"
 	"github.com/metio/stageset-controller/internal/artifact"
+	"github.com/metio/stageset-controller/internal/build"
 )
+
+// versionLabel is the Kubernetes-recommended label carrying an application's
+// version. It is the default field spec.version.fromObject reads.
+const versionLabel = "app.kubernetes.io/version"
 
 // errInvalidVersion marks a terminal version-resolution failure (missing or
 // unparseable version file / spec), as opposed to a transient fetch error.
@@ -139,40 +146,129 @@ func selectMigrations(migrations []stagesv1.Migration, currentV, desiredV *semve
 }
 
 // resolveDesiredVersion reads the desired version from spec.version: an inline
-// value, or a file inside a named stage's artifact. A missing stage/file or an
-// empty value is a terminal errInvalidVersion; a fetch failure is transient.
+// value, a field of a rendered object (fromObject), or a file inside a named
+// stage's artifact (fromArtifact). A missing stage/file/object or an empty value
+// is a terminal errInvalidVersion; a fetch failure is transient.
 func (r *StageSetReconciler) resolveDesiredVersion(ctx context.Context, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact, fetcher *artifact.Fetcher) (string, error) {
 	v := ss.Spec.Version
-	if v.Value != "" {
+	switch {
+	case v.Value != "":
 		return strings.TrimSpace(v.Value), nil
+	case v.FromObject != nil:
+		return r.versionFromObject(ctx, ss, resolved, fetcher, v.FromObject)
+	case v.FromArtifact != nil:
+		return r.versionFromArtifact(ctx, ss, resolved, fetcher, v.FromArtifact)
+	default:
+		return "", fmt.Errorf("%w: spec.version sets none of value, fromObject, or fromArtifact", errInvalidVersion)
 	}
-	if v.FromArtifact == nil {
-		return "", fmt.Errorf("%w: spec.version sets neither value nor fromArtifact", errInvalidVersion)
-	}
-	idx := -1
+}
+
+// stageIndex returns the index of the named stage, or -1.
+func stageIndex(ss *stagesv1.StageSet, name string) int {
 	for i := range ss.Spec.Stages {
-		if ss.Spec.Stages[i].Name == v.FromArtifact.Stage {
-			idx = i
-			break
+		if ss.Spec.Stages[i].Name == name {
+			return i
 		}
 	}
+	return -1
+}
+
+// versionFromArtifact reads a bare semver string from a file in a stage's
+// fetched artifact.
+func (r *StageSetReconciler) versionFromArtifact(ctx context.Context, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact, fetcher *artifact.Fetcher, ref *stagesv1.ArtifactVersionRef) (string, error) {
+	idx := stageIndex(ss, ref.Stage)
 	if idx < 0 {
-		return "", fmt.Errorf("%w: spec.version.fromArtifact.stage %q is not a stage", errInvalidVersion, v.FromArtifact.Stage)
+		return "", fmt.Errorf("%w: spec.version.fromArtifact.stage %q is not a stage", errInvalidVersion, ref.Stage)
 	}
 	ra := resolved[idx]
 	files, err := fetcher.Fetch(ctx, ra.URL, ra.Digest, "")
 	if err != nil {
-		return "", fmt.Errorf("fetch version artifact for stage %q: %w", v.FromArtifact.Stage, err)
+		return "", fmt.Errorf("fetch version artifact for stage %q: %w", ref.Stage, err)
 	}
-	content, ok := files[v.FromArtifact.Path]
+	content, ok := files[ref.Path]
 	if !ok {
-		return "", fmt.Errorf("%w: version file %q not found in stage %q artifact", errInvalidVersion, v.FromArtifact.Path, v.FromArtifact.Stage)
+		return "", fmt.Errorf("%w: version file %q not found in stage %q artifact", errInvalidVersion, ref.Path, ref.Stage)
 	}
 	ver := strings.TrimSpace(content)
 	if ver == "" {
-		return "", fmt.Errorf("%w: version file %q is empty", errInvalidVersion, v.FromArtifact.Path)
+		return "", fmt.Errorf("%w: version file %q is empty", errInvalidVersion, ref.Path)
 	}
 	return ver, nil
+}
+
+// versionFromObject builds a stage's manifests and reads the version from a
+// field of one rendered object — by default the app.kubernetes.io/version
+// label, so the version travels inside the manifests regardless of source kind.
+func (r *StageSetReconciler) versionFromObject(ctx context.Context, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact, fetcher *artifact.Fetcher, ref *stagesv1.ObjectVersionRef) (string, error) {
+	idx := stageIndex(ss, ref.Stage)
+	if idx < 0 {
+		return "", fmt.Errorf("%w: spec.version.fromObject.stage %q is not a stage", errInvalidVersion, ref.Stage)
+	}
+	ra := resolved[idx]
+	files, err := fetcher.Fetch(ctx, ra.URL, ra.Digest, "")
+	if err != nil {
+		return "", fmt.Errorf("fetch version artifact for stage %q: %w", ref.Stage, err)
+	}
+	stage := &ss.Spec.Stages[idx]
+	vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
+	if err != nil {
+		return "", fmt.Errorf("resolve postBuild variables for version stage %q: %w", ref.Stage, err)
+	}
+	objects, err := build.Build(files, build.Options{Path: stage.Path, Patches: stage.Patches}, vars)
+	if err != nil {
+		return "", fmt.Errorf("%w: building stage %q to read its version failed: %v", errInvalidVersion, ref.Stage, err)
+	}
+	obj := findVersionObject(objects, ref)
+	if obj == nil {
+		return "", fmt.Errorf("%w: version object %s %q not found in stage %q manifests", errInvalidVersion, ref.Kind, ref.Name, ref.Stage)
+	}
+	ver, err := extractVersionField(obj, ref.FieldPath)
+	if err != nil {
+		return "", err
+	}
+	ver = strings.TrimSpace(ver)
+	if ver == "" {
+		return "", fmt.Errorf("%w: version field on %s %q in stage %q resolved to empty", errInvalidVersion, ref.Kind, ref.Name, ref.Stage)
+	}
+	return ver, nil
+}
+
+// findVersionObject returns the rendered object matching the ref's Kind and
+// Name (and APIVersion when set), or nil.
+func findVersionObject(objects []*unstructured.Unstructured, ref *stagesv1.ObjectVersionRef) *unstructured.Unstructured {
+	for _, o := range objects {
+		if o.GetKind() != ref.Kind || o.GetName() != ref.Name {
+			continue
+		}
+		if ref.APIVersion != "" && o.GetAPIVersion() != ref.APIVersion {
+			continue
+		}
+		return o
+	}
+	return nil
+}
+
+// extractVersionField reads the version string from an object. An empty
+// fieldPath reads the app.kubernetes.io/version label; otherwise fieldPath is a
+// kubectl-style JSONPath that must resolve to the bare version string.
+func extractVersionField(obj *unstructured.Unstructured, fieldPath string) (string, error) {
+	if fieldPath == "" {
+		val, found, err := unstructured.NestedString(obj.Object, "metadata", "labels", versionLabel)
+		if err != nil || !found {
+			return "", fmt.Errorf("%w: %s %q has no %s label; set spec.version.fromObject.fieldPath to read the version from a different field",
+				errInvalidVersion, obj.GetKind(), obj.GetName(), versionLabel)
+		}
+		return val, nil
+	}
+	jp := jsonpath.New("version").AllowMissingKeys(false)
+	if err := jp.Parse(fieldPath); err != nil {
+		return "", fmt.Errorf("%w: spec.version.fromObject.fieldPath %q is not valid JSONPath: %v", errInvalidVersion, fieldPath, err)
+	}
+	var buf strings.Builder
+	if err := jp.Execute(&buf, obj.Object); err != nil {
+		return "", fmt.Errorf("%w: evaluating fieldPath %q on %s %q: %v", errInvalidVersion, fieldPath, obj.GetKind(), obj.GetName(), err)
+	}
+	return buf.String(), nil
 }
 
 // runStageMigrations runs the pending migrations anchored to this stage, before

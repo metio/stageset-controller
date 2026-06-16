@@ -124,6 +124,37 @@ EOF
   }"
 }
 
+# plant_flux_source <kind> <ns> <name> <url> <digest> [revision] — create a
+# classic Flux source (GitRepository/OCIRepository/Bucket) and stamp a Ready
+# status.artifact, exactly like an ExternalArtifact, so the resolver consumes it
+# directly as a stage source.
+plant_flux_source() {
+  local kind=$1 ns=$2 name=$3 url=$4 digest=$5 rev=${6:-smoke@$5} plural
+  case "$kind" in
+    GitRepository) plural=gitrepositories ;;
+    OCIRepository) plural=ocirepositories ;;
+    Bucket) plural=buckets ;;
+    *) die "plant_flux_source: unknown kind $kind" ;;
+  esac
+  kubectl apply -f - <<EOF
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: ${kind}
+metadata:
+  name: ${name}
+  namespace: ${ns}
+spec: {}
+EOF
+  kubectl -n "$ns" patch "$plural" "$name" --subresource=status --type=merge -p "{
+    \"status\": {
+      \"artifact\": { \"url\": \"${url}\", \"revision\": \"${rev}\", \"digest\": \"${digest}\" },
+      \"conditions\": [{
+        \"type\": \"Ready\", \"status\": \"True\", \"reason\": \"Succeeded\",
+        \"message\": \"artifact ready\", \"lastTransitionTime\": \"2026-01-01T00:00:00Z\"
+      }]
+    }
+  }"
+}
+
 # ready_status <kind> <name> <ns> — echoes the Ready condition's status (or "").
 ready_status() {
   kubectl -n "$3" get "$1" "$2" \
