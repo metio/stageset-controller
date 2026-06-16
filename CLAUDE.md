@@ -108,8 +108,14 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
     keyring); **cloud KMS** rides the appended stock local key service via the
     controller's ambient creds (so `secretRef` is optional for KMS-only). Encrypted
     files feeding a `secretGenerator` work for free (decrypted pre-build). Wired in
-    both the forward apply and the re-fetch rollback paths; design in
-    `design/sops-decryption.md`.
+    both the forward apply and the re-fetch rollback paths. **Build-time** (not a
+    post-build chokepoint) is deliberate: kustomize never sees a half-stripped `sops`
+    block, and both encryption styles — resource-level Secrets and generator-fed
+    files — decrypt uniformly. The consequence is that the rendered output reaching
+    the rollback store is **plaintext**, so the store's at-rest encryption (below) is
+    the load-bearing confidentiality guarantee, not an in-flight SOPS layer. Rollback
+    re-runs decryption, so it **fails closed** (`PreviousRevisionUnavailable`) if the
+    key Secret was rotated or deleted in the window.
   - `rollbackstore/` — optional RWX-PVC / S3 store for bit-exact rollback. The store
     holds rendered Secret data, so the S3 backend defaults to server-side encryption
     (`--rollback-store-s3-sse=s3`, KMS optional) and the file backend warns to use an
