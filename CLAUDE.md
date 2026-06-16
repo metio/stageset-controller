@@ -302,6 +302,39 @@ ilo --no-rc @dev/website   # one-shot build into docs/public/
 ilo --no-rc @dev/serve     # live server on :1313
 ```
 
+### Generated docs data (flags + chart values)
+
+Two data-driven reference pages are built from source rather than hand-maintained,
+so they can never drift from the runtime contract or the chart schema:
+
+- **Configuration reference** (`docs/content/installation/configuration.md`)
+  renders one `{{< flag-table group="…" >}}` per subsystem. The controller's own
+  CLI flags live in `internal/cliflags/` — `Register(fs *flag.FlagSet)` declares
+  every flag on a stdlib `flag.FlagSet`, co-locates each with its documentation
+  group (`groupByName`, read via `GroupOf`; group order via `Groups()`), and
+  returns a `*Flags` of value pointers. `cmd/main.go` calls
+  `cliflags.Register(flag.CommandLine)` and dereferences `c.*` after `flag.Parse`.
+  The package is importable (not `main`) precisely so `hack/flaggen` can build the
+  same FlagSet and emit `docs/data/flags.json`. The controller-runtime **zap flags
+  stay bound in `cmd/main.go`** via `opts.BindFlags` and are documented as prose in
+  the Logging section — flaggen documents only the controller's own flags. Go's
+  stdlib `flag` exposes no type, so the flag table has no Type column.
+- **Helm chart values** (`docs/content/installation/helm-values.md`) renders
+  `{{< helm-values data="helm-values" >}}` from `docs/data/helm-values.json`, which
+  `hack/flatten-schema.jq` flattens from the stageset-controller chart's
+  `values.schema.json` (fetched from helm-charts' `main`).
+
+`hack/gen-docs-data.sh` regenerates both files (flaggen → `docs/data/flags.json`,
+schema fetch+flatten → `docs/data/helm-values.json`); run it in the ilo Go shell
+before building the site. Both outputs are **gitignored** — the published site is
+always generated from source. The shortcodes degrade to nothing when the data file
+is absent, so a bare `hugo` on a clean checkout never errors. `docs.yml` runs on a
+**daily** cron (so a chart change reaches the site with no cross-repo trigger) and
+runs `gen-docs-data.sh` before the Hugo build; its push/PR `paths` include the
+flag-source files (`cmd/main.go`, `internal/cliflags/**`, `hack/flaggen/**`,
+`hack/flatten-schema.jq`, `hack/gen-docs-data.sh`) so a flag change rebuilds the
+site.
+
 ## Licensing / REUSE
 
 0BSD, REUSE-compliant. Every file carries an SPDX header (Go via `//`, YAML/shell

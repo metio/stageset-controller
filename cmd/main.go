@@ -34,9 +34,9 @@ import (
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/artifact"
+	"github.com/metio/stageset-controller/internal/cliflags"
 	"github.com/metio/stageset-controller/internal/controller"
 	"github.com/metio/stageset-controller/internal/gate"
-	"github.com/metio/stageset-controller/internal/inventory"
 	"github.com/metio/stageset-controller/internal/metrics"
 	"github.com/metio/stageset-controller/internal/rollbackstore"
 	"github.com/metio/stageset-controller/internal/webhook/selfsigned"
@@ -65,70 +65,7 @@ func init() {
 }
 
 func main() {
-	var (
-		metricsAddr          string
-		probeAddr            string
-		enableLeaderElection bool
-		inventoryMode        string
-		shardCap             int
-		allowedActionHosts   stringSlice
-		noCrossNamespaceRefs bool
-		enableWebhook        bool
-		webhookCertMode      string
-		webhookCertDir       string
-		webhookPort          int
-		webhookCertValidity  time.Duration
-		webhookServiceName   string
-		webhookServiceNS     string
-		webhookVWCName       string
-		gateAddr             string
-		runbookBaseURL       string
-		watchNamespaces      string
-		defaultInterval      time.Duration
-		rbPath               string
-		rbS3Endpoint         string
-		rbS3Bucket           string
-		rbS3Prefix           string
-		rbS3Region           string
-		rbS3UseSSL           bool
-		rbS3AccessKey        string
-		rbS3SecretKey        string
-		rbS3SessionToken     string
-		rbS3Anonymous        bool
-		rbS3SSE              string
-		rbS3SSEKMSKey        string
-	)
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election.")
-	flag.StringVar(&inventoryMode, "inventory-mode", "hybrid", "Inventory strategy: entries, hybrid, or applyset.")
-	flag.IntVar(&shardCap, "inventory-shard-cap", inventory.DefaultShardCap, "Maximum entries per StageInventory shard.")
-	flag.Var(&allowedActionHosts, "allowed-action-hosts", "Host glob allowed for http actions; repeatable. Loopback and link-local ranges are always denied unless explicitly listed.")
-	flag.BoolVar(&noCrossNamespaceRefs, "no-cross-namespace-refs", false, "Deny cross-namespace sourceRef and dependsOn references.")
-	flag.BoolVar(&enableWebhook, "enable-webhook", true, "Enable the validating admission webhook for StageSet.")
-	flag.StringVar(&webhookCertMode, "webhook-cert-mode", "cert-manager", "How webhook TLS is provisioned: cert-manager (the chart renders a Certificate; cert mounted from a Secret), or self-signed (the controller generates a CA + serving cert in-pod and patches the ValidatingWebhookConfiguration caBundle).")
-	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs", "Directory holding the webhook tls.crt and tls.key.")
-	flag.IntVar(&webhookPort, "webhook-port", 9443, "Port the validating webhook server binds to.")
-	flag.DurationVar(&webhookCertValidity, "webhook-cert-validity", 365*24*time.Hour, "Validity of the self-signed serving cert; the renewer rotates at validity/3. Operators wanting short-lived material should use cert-manager.")
-	flag.StringVar(&webhookServiceName, "webhook-service-name", "stageset-controller-webhook", "Service the webhook is reachable through; builds cert SANs for self-signed mode.")
-	flag.StringVar(&webhookServiceNS, "webhook-service-namespace", "", "Namespace of the webhook Service; empty falls back to the in-cluster ServiceAccount namespace.")
-	flag.StringVar(&webhookVWCName, "webhook-validating-config-name", "", "Name of the ValidatingWebhookConfiguration whose caBundle to patch. Required for self-signed mode.")
-	flag.StringVar(&gateAddr, "gate-bind-address", ":8082", "Address for the read-only Flagger stage-gate endpoint (GET /gate/{namespace}/{stageset}/{stage}). Empty disables it.")
-	flag.StringVar(&runbookBaseURL, "runbook-base-url", "", "Optional URL prefix appended to actionable Ready condition messages as (runbook: <base>/<reason>/). Empty disables.")
-	flag.StringVar(&watchNamespaces, "watch-namespaces", "", "Comma-separated list of namespaces this controller watches. Empty (the default) means cluster-wide. When set, the manager's cache only observes StageSets and sources in these namespaces — the multi-tenant controller-instances pattern. Falls back to STAGESET_WATCH_NAMESPACES env when the flag is empty.")
-	flag.DurationVar(&defaultInterval, "default-interval", 10*time.Minute, "Reconcile cadence for StageSets that omit spec.interval.")
-	flag.StringVar(&rbPath, "rollback-store-path", "", "Filesystem directory (e.g. an RWX PVC mount) for the optional rollback store. Use an RWX volume for HA replicas. Mutually exclusive with the S3 store.")
-	flag.StringVar(&rbS3Endpoint, "rollback-store-s3-endpoint", "", "S3-compatible endpoint for the optional rollback store (host:port). Empty disables the store; rollback falls back to re-fetching the producer artifact.")
-	flag.StringVar(&rbS3Bucket, "rollback-store-s3-bucket", "", "Bucket for the rollback store.")
-	flag.StringVar(&rbS3Prefix, "rollback-store-s3-prefix", "", "Key prefix within the rollback-store bucket.")
-	flag.StringVar(&rbS3Region, "rollback-store-s3-region", "", "Region for the rollback-store bucket.")
-	flag.BoolVar(&rbS3UseSSL, "rollback-store-s3-use-ssl", true, "Use TLS for the rollback-store endpoint.")
-	flag.StringVar(&rbS3AccessKey, "rollback-store-s3-access-key", "", "Access key; empty engages minio-go's IAM/IRSA discovery chain.")
-	flag.StringVar(&rbS3SecretKey, "rollback-store-s3-secret-key", "", "Secret key for the rollback store.")
-	flag.StringVar(&rbS3SessionToken, "rollback-store-s3-session-token", "", "Optional session token for the rollback store.")
-	flag.BoolVar(&rbS3Anonymous, "rollback-store-s3-anonymous", false, "Use anonymous (unsigned) requests for the rollback store.")
-	flag.StringVar(&rbS3SSE, "rollback-store-s3-sse", "s3", "Server-side encryption at rest for stored objects: none, s3 (SSE-S3), or kms (SSE-KMS). The store holds rendered Secret data, so encryption is on by default; set none only for a bucket whose backend cannot honor an SSE header.")
-	flag.StringVar(&rbS3SSEKMSKey, "rollback-store-s3-sse-kms-key", "", "KMS key ARN/ID for --rollback-store-s3-sse=kms; empty uses the bucket's default KMS key.")
+	c := cliflags.Register(flag.CommandLine)
 
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
@@ -141,14 +78,14 @@ func main() {
 	restCfg := ctrl.GetConfigOrDie()
 	mgrOpts := ctrl.Options{
 		Scheme:                 scheme,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
+		HealthProbeBindAddress: *c.ProbeAddr,
+		LeaderElection:         *c.EnableLeaderElection,
 		LeaderElectionID:       "stageset-controller.stages.metio.wtf",
 		// Webhook serves on every replica (admission must, even non-leaders);
 		// only reconcilers are leader-gated.
-		WebhookServer: webhook.NewServer(webhook.Options{Port: webhookPort, CertDir: webhookCertDir}),
+		WebhookServer: webhook.NewServer(webhook.Options{Port: *c.WebhookPort, CertDir: *c.WebhookCertDir}),
 	}
-	if watchNS := parseWatchNamespaces(watchNamespaces, os.Environ()); len(watchNS) > 0 {
+	if watchNS := parseWatchNamespaces(*c.WatchNamespaces, os.Environ()); len(watchNS) > 0 {
 		// Restrict the manager's informers to the listed namespaces. StageSets
 		// and sources outside this set never enter the cache, so the reconciler
 		// can't see them even where RBAC would otherwise grant access — the
@@ -170,44 +107,44 @@ func main() {
 
 	var rollbackStore controller.RollbackStore
 	switch {
-	case rbPath != "" && rbS3Endpoint != "":
+	case *c.RBPath != "" && *c.RBS3Endpoint != "":
 		setupLog.Error(errors.New("set only one rollback store"), "--rollback-store-path and --rollback-store-s3-endpoint are mutually exclusive")
 		os.Exit(1)
-	case rbPath != "":
-		store, serr := rollbackstore.NewFile(rbPath)
+	case *c.RBPath != "":
+		store, serr := rollbackstore.NewFile(*c.RBPath)
 		if serr != nil {
 			setupLog.Error(serr, "unable to build filesystem rollback store")
 			os.Exit(1)
 		}
 		rollbackStore = store
-		setupLog.Info("rollback store enabled", "backend", "filesystem", "path", rbPath)
+		setupLog.Info("rollback store enabled", "backend", "filesystem", "path", *c.RBPath)
 		// The file store persists rendered output — including Secret data — to
 		// this directory. Unlike the S3 backend it cannot set encryption at rest
 		// itself, so the volume must provide it.
-		setupLog.Info("ensure the rollback-store volume is encrypted at rest (encrypted StorageClass / LUKS / cloud-disk encryption); the file store writes rendered Secret data in the clear", "path", rbPath)
-	case rbS3Endpoint != "" && rbS3Bucket != "":
+		setupLog.Info("ensure the rollback-store volume is encrypted at rest (encrypted StorageClass / LUKS / cloud-disk encryption); the file store writes rendered Secret data in the clear", "path", *c.RBPath)
+	case *c.RBS3Endpoint != "" && *c.RBS3Bucket != "":
 		store, serr := rollbackstore.NewS3(rollbackstore.S3Config{
-			Endpoint: rbS3Endpoint, Bucket: rbS3Bucket, Prefix: rbS3Prefix, Region: rbS3Region,
-			UseSSL: rbS3UseSSL, AccessKey: rbS3AccessKey, SecretKey: rbS3SecretKey,
-			SessionToken: rbS3SessionToken, Anonymous: rbS3Anonymous,
-			SSE: rbS3SSE, SSEKMSKeyID: rbS3SSEKMSKey,
+			Endpoint: *c.RBS3Endpoint, Bucket: *c.RBS3Bucket, Prefix: *c.RBS3Prefix, Region: *c.RBS3Region,
+			UseSSL: *c.RBS3UseSSL, AccessKey: *c.RBS3AccessKey, SecretKey: *c.RBS3SecretKey,
+			SessionToken: *c.RBS3SessionToken, Anonymous: *c.RBS3Anonymous,
+			SSE: *c.RBS3SSE, SSEKMSKeyID: *c.RBS3SSEKMSKey,
 		})
 		if serr != nil {
 			setupLog.Error(serr, "unable to build S3 rollback store")
 			os.Exit(1)
 		}
 		rollbackStore = store
-		setupLog.Info("rollback store enabled", "backend", "s3", "endpoint", rbS3Endpoint, "bucket", rbS3Bucket)
+		setupLog.Info("rollback store enabled", "backend", "s3", "endpoint", *c.RBS3Endpoint, "bucket", *c.RBS3Bucket)
 	}
 
 	if err = (&controller.StageSetReconciler{
 		Client:               mgr.GetClient(),
-		InventoryMode:        inventoryMode,
-		ShardCap:             shardCap,
-		AllowedActionHosts:   allowedActionHosts,
-		NoCrossNamespaceRefs: noCrossNamespaceRefs,
-		RunbookBaseURL:       runbookBaseURL,
-		DefaultInterval:      defaultInterval,
+		InventoryMode:        *c.InventoryMode,
+		ShardCap:             *c.ShardCap,
+		AllowedActionHosts:   []string(*c.AllowedActionHosts),
+		NoCrossNamespaceRefs: *c.NoCrossNamespaceRefs,
+		RunbookBaseURL:       *c.RunbookBaseURL,
+		DefaultInterval:      *c.DefaultInterval,
 		RollbackStore:        rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "StageSet")
@@ -216,45 +153,45 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 	var webhookRenewerDone <-chan struct{}
-	if enableWebhook {
+	if *c.EnableWebhook {
 		if err := (&controller.StageSetValidator{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "StageSet")
 			os.Exit(1)
 		}
-		switch webhookCertMode {
+		switch *c.WebhookCertMode {
 		case "cert-manager":
 			// External tooling provisions tls.crt/tls.key under the cert dir.
 		case "self-signed":
-			if webhookVWCName == "" {
+			if *c.WebhookVWCName == "" {
 				setupLog.Error(errors.New("missing flag"), "--webhook-validating-config-name is required for --webhook-cert-mode=self-signed")
 				os.Exit(1)
 			}
-			ns := webhookServiceNS
+			ns := *c.WebhookServiceNS
 			if ns == "" {
 				ns = inClusterNamespace()
 			}
 			done, serr := provisionSelfSignedWebhookCert(ctx, restCfg, selfsigned.Input{
-				ServiceName: webhookServiceName,
+				ServiceName: *c.WebhookServiceName,
 				Namespace:   ns,
-				Validity:    webhookCertValidity,
-			}, webhookCertDir, webhookVWCName)
+				Validity:    *c.WebhookCertValidity,
+			}, *c.WebhookCertDir, *c.WebhookVWCName)
 			if serr != nil {
 				setupLog.Error(serr, "unable to provision self-signed webhook cert")
 				os.Exit(1)
 			}
 			webhookRenewerDone = done
-			setupLog.Info("self-signed webhook cert provisioned", "certDir", webhookCertDir, "vwc", webhookVWCName)
+			setupLog.Info("self-signed webhook cert provisioned", "certDir", *c.WebhookCertDir, "vwc", *c.WebhookVWCName)
 		default:
-			setupLog.Error(errors.New("invalid flag"), "--webhook-cert-mode must be cert-manager or self-signed", "got", webhookCertMode)
+			setupLog.Error(errors.New("invalid flag"), "--webhook-cert-mode must be cert-manager or self-signed", "got", *c.WebhookCertMode)
 			os.Exit(1)
 		}
 	}
 
-	if gateAddr != "" {
+	if *c.GateAddr != "" {
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			mux := http.NewServeMux()
 			mux.Handle("/gate/", &gate.Handler{Client: mgr.GetClient()})
-			srv := &http.Server{Addr: gateAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+			srv := &http.Server{Addr: *c.GateAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 			// #nosec G118 -- the manager ctx is already done when this goroutine
 			// runs, so graceful shutdown needs a fresh, bounded context.
 			go func() {
@@ -384,13 +321,4 @@ func parseWatchNamespaces(flagValue string, env []string) []string {
 		}
 	}
 	return out
-}
-
-type stringSlice []string
-
-func (s *stringSlice) String() string { return "" }
-
-func (s *stringSlice) Set(value string) error {
-	*s = append(*s, value)
-	return nil
 }

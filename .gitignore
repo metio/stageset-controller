@@ -5,6 +5,9 @@ cover.out
 cover.html
 docs/public/
 docs/resources/
+# Generated docs data — always regenerated from source by hack/gen-docs-data.sh.
+docs/data/flags.json
+docs/data/helm-values.json
 .idea/
 .vscode/
 # Dev-shell caches written into the repo by the containerized toolchain.

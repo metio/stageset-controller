@@ -30,6 +30,8 @@ pygmentsUseClasses = true
   editBranch = "main"
   work = "stageset.projects.metio.wtf"
   description = "ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)"
+  # Cross-project JSON-LD link (emitted as schema.org mentions on the home page).
+  relatedProjects = [{ name = "Jsonnet-as-a-Service", url = "https://jaas.projects.metio.wtf/" }]
 
 # Desktop navigation. The theme renders a main-menu entry only when it has
 # children, so each section is a parent linking to its list page.
@@ -59,6 +61,11 @@ pygmentsUseClasses = true
     name = "Configuration reference"
     url = "/installation/configuration/"
     weight = 4
+  [[menu.main]]
+    parent = "installation"
+    name = "Helm chart values"
+    url = "/installation/helm-values/"
+    weight = 5
 
   [[menu.main]]
     identifier = "tutorials"
@@ -146,6 +153,26 @@ pygmentsUseClasses = true
     name = "Producer-aware sources"
     url = "/usage/producer-aware-sources/"
     weight = 10
+  [[menu.main]]
+    parent = "usage"
+    name = "Inventory and pruning"
+    url = "/usage/inventory/"
+    weight = 11
+  [[menu.main]]
+    parent = "usage"
+    name = "Admission webhook"
+    url = "/usage/admission-webhook/"
+    weight = 12
+  [[menu.main]]
+    parent = "usage"
+    name = "Observability"
+    url = "/usage/observability/"
+    weight = 13
+  [[menu.main]]
+    parent = "usage"
+    name = "Network policy"
+    url = "/usage/network-policy/"
+    weight = 14
 
   [[menu.main]]
     identifier = "cli"
