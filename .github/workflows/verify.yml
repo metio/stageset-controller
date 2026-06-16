@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: vale-cli/vale-action@2.1.2 # renovate: pin to a SHA
+      - uses: vale-cli/vale-action@85f9f7f2c5f449ac0ae5b66662961bae3f77ca6a # 2.1.2 # renovate: pin to a SHA
         with:
           files: docs/content
           fail_on_error: true
@@ -113,7 +113,7 @@ jobs:
           load: true
           tags: ghcr.io/metio/stageset-controller:${{ github.sha }}
       - name: Scan image (Trivy)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ghcr.io/metio/stageset-controller:${{ github.sha }}
           format: table
