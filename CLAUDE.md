@@ -53,7 +53,7 @@ ilo bash -c 'gosec ./...'                             # security scanner
 ilo bash -c 'arch-go'                                 # architecture rules (arch-go.yml)
 ilo bash -c 'govulncheck ./...'
 ilo bash -c 'go test -count=1 -race -shuffle=on -cover ./...'   # full suite (envtest assets prestaged in the image)
-ilo bash -c 'controller-gen object paths=./api/v1/...'         # regenerate deepcopy
+ilo bash -c 'controller-gen object:headerFile="hack/boilerplate.go.txt" paths=./api/v1/...'  # regenerate deepcopy — headerFile is REQUIRED so the SPDX header is kept (REUSE)
 ilo bash -c 'controller-gen crd paths=./api/v1/... output:crd:dir=./config/crd'  # regenerate CRDs
 ```
 
