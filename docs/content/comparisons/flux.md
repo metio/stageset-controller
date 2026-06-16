@@ -35,7 +35,8 @@ like `StageSet`. The difference is granularity.
   or a *producer* resolved to its artifact — which is how it also pairs with
   renderers like [JaaS](https://jaas.projects.metio.wtf/).
 - **SOPS parity.** Encrypted Secrets in a source decrypt the same way, via
-  [`spec.decryption`](/usage/encryption/) (age), so a SOPS-using repo ports across.
+  [`spec.decryption`](/usage/encryption/) (age, PGP, or cloud KMS), so a SOPS-using
+  repo ports across unchanged.
 
 ## Using them together
 

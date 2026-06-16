@@ -159,6 +159,12 @@ output is persisted is the optional [rollback store](/usage/rollback/), which is
 so a decrypted `Secret` never lands in plaintext on disk. See
 [encryption at rest](/usage/rollback/#encryption-at-rest).
 
+A rollback re-fetches the previous source and **runs decryption again** rather than
+restoring plaintext, so the key Secret must still exist when a rollback fires. If
+the key was rotated or deleted in the meantime, the rollback **fails closed** with
+`PreviousRevisionUnavailable` instead of applying a stale or unreadable Secret — an
+encrypted store cannot avoid this, and it is the safe failure direction.
+
 ## Cloud KMS
 
 SOPS files encrypted with a cloud KMS key (AWS KMS, GCP KMS, Azure Key Vault, or
