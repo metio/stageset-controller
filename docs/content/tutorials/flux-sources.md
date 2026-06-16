@@ -17,7 +17,7 @@ Use the **direct** route when the source already holds ready-to-apply manifests
 when you generate manifests first — e.g. evaluating Jsonnet with
 [JaaS](https://jaas.projects.metio.wtf/).
 
-This page is the copy-pasteable recipe per source kind. For how `sourceRef`
+Copy-pasteable recipes follow, one per source kind. For how `sourceRef`
 resolution works as a concept — and the `path`, `prune`, `patches`, and
 `postBuild` knobs that shape a stage — see
 [stages and sources](/usage/stages-and-sources/).

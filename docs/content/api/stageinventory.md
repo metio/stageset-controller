@@ -11,8 +11,8 @@ kind: StageInventory
 
 A `StageInventory` records the set of objects a single stage has applied, so the
 controller can prune precisely and tear stages down in reverse order. **You do not
-author these** — the controller creates, updates, and deletes them. They are
-documented here so you can read them when debugging and back them up.
+author these** — the controller creates, updates, and deletes them. The fields
+below let you read inventory state when debugging and back it up.
 
 One stage may be backed by several `StageInventory` shards once it exceeds
 `--inventory-shard-cap` entries (default 5000). Shard `0` doubles as the ApplySet

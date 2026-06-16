@@ -272,6 +272,15 @@ Renovate's `git-submodules` manager keeps it current. This mirrors every metio
 project (`<project>.projects.metio.wtf`, theme submodule, deploy workflow) — there
 are no project-local theme layouts.
 
+GitHub Pages **must** be configured "Deploy from a branch → `gh-pages` / root":
+the `docs.yml` deploy publishes the built Hugo site there with a `.nojekyll` marker
+and writes the `CNAME` via the action's `cname:` parameter. **Never** set the custom
+domain or create a `CNAME` through the Pages UI — doing so while the source is
+`main` repoints Pages at `main`, which has no `.nojekyll`, so GitHub serves a Jekyll
+build of `README.md` instead of the site (and commits a stray root `CNAME` to `main`
+that then fails the REUSE gate). The domain lives in the Pages setting plus the
+`gh-pages` `CNAME`; `main` carries no `CNAME` file.
+
 The site is **end-user documentation**, authored under `docs/content/`:
 `installation/`, `usage/` (one worked example per feature), `cli/` (one page per
 `stagesetctl` subcommand), `api/` (a detailed field-by-field reference per CR),

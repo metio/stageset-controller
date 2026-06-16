@@ -15,7 +15,7 @@ pygmentsUseClasses = true
   unsafe = true
 
 [outputs]
-  home = ["HTML", "RSS", "ATOM", "HUMANS", "FOAF", "LLMS"]
+  home = ["HTML", "RSS", "ATOM", "HUMANS", "FOAF", "LLMS", "LLMSINDEX"]
   section = ["HTML", "RSS", "ATOM"]
   term = ["HTML", "RSS", "ATOM"]
 
@@ -54,6 +54,11 @@ pygmentsUseClasses = true
     name = "Operations"
     url = "/installation/operations/"
     weight = 3
+  [[menu.main]]
+    parent = "installation"
+    name = "Configuration reference"
+    url = "/installation/configuration/"
+    weight = 4
 
   [[menu.main]]
     identifier = "tutorials"
@@ -62,24 +67,29 @@ pygmentsUseClasses = true
     weight = 15
   [[menu.main]]
     parent = "tutorials"
+    name = "Quickstart"
+    url = "/tutorials/quickstart/"
+    weight = 1
+  [[menu.main]]
+    parent = "tutorials"
     name = "From Jsonnet to a gated rollout"
     url = "/tutorials/jsonnet-to-rollout/"
-    weight = 1
+    weight = 2
   [[menu.main]]
     parent = "tutorials"
     name = "Stage sources (Git/OCI/Bucket)"
     url = "/tutorials/flux-sources/"
-    weight = 2
+    weight = 3
   [[menu.main]]
     parent = "tutorials"
     name = "Parameterizing a rollout"
     url = "/tutorials/parameters/"
-    weight = 3
+    weight = 4
   [[menu.main]]
     parent = "tutorials"
     name = "Progressive delivery"
     url = "/tutorials/progressive-delivery/"
-    weight = 4
+    weight = 5
 
   [[menu.main]]
     identifier = "usage"

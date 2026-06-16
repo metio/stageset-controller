@@ -6,9 +6,9 @@ tags: [sources, externalartifact, jaas, stages]
 
 [Stages and sources](/usage/stages-and-sources/#source-kinds) covers the two
 direct routes — an `ExternalArtifact` (the default `sourceRef.kind`) or a Flux
-`GitRepository`/`OCIRepository`/`Bucket`. This page covers the third: naming the
-thing that *produces* an artifact and letting the controller find it. This is useful
-when an operator publishes an `ExternalArtifact` from a custom resource (for example
+`GitRepository`/`OCIRepository`/`Bucket`. The third option names the thing that
+*produces* an artifact and lets the controller find it. This is useful when an
+operator publishes an `ExternalArtifact` from a custom resource (for example
 [JaaS](https://jaas.projects.metio.wtf/) rendering Jsonnet).
 
 ## Referencing a producer
@@ -33,6 +33,13 @@ spec:
 The controller also watches the common Flux source kinds (`GitRepository`,
 `OCIRepository`, `Bucket`) so a stage re-reconciles when an upstream source
 changes.
+
+A producer can itself consume another producer first: a JaaS `JsonnetSnippet` can
+render from the artifact another snippet publishes. That chaining happens on the
+producer side — see
+[chaining snippets](https://jaas.projects.metio.wtf/usage/snippet-sources/#chaining-snippets).
+A stage references only the final producer and reads the `ExternalArtifact` it
+publishes.
 
 ## Related projects
 

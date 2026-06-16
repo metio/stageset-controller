@@ -1,6 +1,6 @@
 ---
 title: Production
-description: High availability, security hardening, the full flag reference, and an on-prem HA reference setup.
+description: High availability, security hardening, and on-prem and EKS HA reference setups.
 tags: [production, security, operations]
 ---
 
@@ -304,35 +304,9 @@ correctly out of the box:
 - **Per-tenant impersonation** — every apply runs as the StageSet's
   `spec.serviceAccountName`.
 
-## Controller flags reference
+## Controller flags
 
-You never pass these directly — the chart sets them from your Helm values and its
-own defaults — but it helps to know what each does and which value drives it.
-
-| Flag | Default | Purpose | Driven by |
-|---|---|---|---|
-| `--metrics-bind-address` | `:8080` | Prometheus metrics endpoint. | _chart-managed_ |
-| `--health-probe-bind-address` | `:8081` | `/healthz` + `/readyz`. | _chart-managed_ |
-| `--leader-elect` | `false` | Enable leader election. | `controller.leaderElect` |
-| `--inventory-mode` | `hybrid` | Inventory strategy: `entries`, `hybrid`, `applyset`. | `controller.inventoryMode` |
-| `--inventory-shard-cap` | `5000` | Max entries per `StageInventory` shard. | `controller.inventoryShardCap` |
-| `--allowed-action-hosts` | _(none)_ | Host glob permitted for `http` actions (loopback/link-local always denied). | `controller.allowedActionHosts` |
-| `--no-cross-namespace-refs` | `false` | Deny cross-namespace `sourceRef` / `dependsOn`. | `controller.noCrossNamespaceRefs` |
-| `--watch-namespaces` | _(all)_ | Comma-separated namespaces to watch; empty is cluster-wide. Falls back to `STAGESET_WATCH_NAMESPACES`. | `controller.watchNamespaces` |
-| `--enable-webhook` | `true` | Run the validating admission webhook. | _chart-managed_ |
-| `--webhook-cert-mode` | `cert-manager` | `cert-manager` or `self-signed`. | `webhook.certMode` |
-| `--webhook-cert-dir` | `/tmp/k8s-webhook-server/serving-certs` | Where `tls.crt`/`tls.key` live. | _chart-managed_ |
-| `--webhook-port` | `9443` | Webhook server port. | _chart-managed_ |
-| `--webhook-cert-validity` | `8760h` | Self-signed cert lifetime (rotates at ⅓). | `webhook.*` |
-| `--webhook-service-name` | `stageset-controller-webhook` | Service used to build cert SANs. | _chart-managed_ |
-| `--webhook-service-namespace` | _(in-cluster ns)_ | Namespace of the webhook Service. | _chart-managed_ |
-| `--webhook-validating-config-name` | _(none)_ | The `ValidatingWebhookConfiguration` to patch. | _chart-managed_ |
-| `--gate-bind-address` | `:8082` | Read-only gate endpoint; empty disables. | `gate.enabled` |
-| `--runbook-base-url` | _(none)_ | URL prefix on actionable Ready messages. | `controller.runbookBaseURL` |
-| `--rollback-store-path` | _(none)_ | Filesystem (RWX PVC) rollback store. | `rollbackStore.backend: pvc` |
-| `--rollback-store-s3-*` | _(off)_ | S3-compatible rollback store. | `rollbackStore.backend: s3` |
-| `--rollback-store-s3-sse` | `s3` | At-rest encryption for the S3 store: `none`, `s3`, `kms`. | `rollbackStore.s3.sse` |
-
-The PVC and S3 rollback stores are mutually exclusive — the chart enforces it via
-`rollbackStore.backend`. The controller also accepts controller-runtime's `--zap-*`
-logging flags.
+The chart sets the controller's command-line flags from your Helm values and its
+own defaults — you never pass them directly. For the exhaustive per-flag list with
+defaults, see the [Configuration reference](/installation/configuration/), which
+also notes which Helm value drives each one.
