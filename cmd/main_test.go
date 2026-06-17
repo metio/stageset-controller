@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+// TestInClusterNamespace covers the not-in-cluster path: with no mounted
+// ServiceAccount namespace file present, the lookup returns the empty string
+// rather than erroring, so run() falls back to --webhook-service-namespace.
+func TestInClusterNamespace_EmptyWhenNotInCluster(t *testing.T) {
+	if got := inClusterNamespace(); got != "" {
+		t.Errorf("inClusterNamespace() outside a pod = %q, want empty", got)
+	}
+}
+
 func TestParseWatchNamespaces(t *testing.T) {
 	tests := []struct {
 		name string

@@ -56,3 +56,28 @@ func TestNewS3_RejectsBadSSE(t *testing.T) {
 		t.Fatal("expected NewS3 to reject an unknown SSE mode")
 	}
 }
+
+func TestS3Store_objectName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		prefix string
+		key    string
+		want   string
+	}{
+		{name: "no prefix returns key verbatim", prefix: "", key: "a/b.json", want: "a/b.json"},
+		{name: "prefix is joined with a slash", prefix: "rollbacks", key: "ns/ss.json", want: "rollbacks/ns/ss.json"},
+		{name: "trailing slash on prefix is collapsed", prefix: "rollbacks/", key: "ns/ss.json", want: "rollbacks/ns/ss.json"},
+		{name: "multiple trailing slashes collapse", prefix: "rollbacks///", key: "k", want: "rollbacks/k"},
+		{name: "nested prefix preserved", prefix: "team-a/rollbacks", key: "k", want: "team-a/rollbacks/k"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := &S3Store{prefix: tt.prefix}
+			if got := s.objectName(tt.key); got != tt.want {
+				t.Errorf("objectName(%q) with prefix %q = %q, want %q", tt.key, tt.prefix, got, tt.want)
+			}
+		})
+	}
+}

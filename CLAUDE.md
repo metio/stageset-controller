@@ -157,8 +157,10 @@ real apiserver.
   envtest. Any new fuzz target added to an envtest package must keep that guard
   intact.
 - **kind smoke e2e** — `hack/smoke/*.sh`: pure-`kubectl` behaviour scenarios
-  (`scenario-basic`, `-impersonation`, `-networkpolicy`, `-cli`) plus a CRD-setup
-  helper, driven by `lib.sh`. They are agnostic to *how* the controller was
+  (`scenario-basic`, `-impersonation`, `-networkpolicy`, `-cli`, `-direct-source`,
+  `-rollback-s3`, `-selfsigned-webhook`, `-scale`, `-fields`) plus CRD/backend
+  setup helpers, driven by `lib.sh`. The `-selfsigned-webhook`, `-scale`, and
+  `-fields` scenarios mirror the equivalents in the jaas repo (parity). They are agnostic to *how* the controller was
   deployed — the calling workflow owns that — and fake the artifact data plane
   with an in-cluster static file server (a tarball baked into a ConfigMap, served
   over HTTP, pointed at by an `ExternalArtifact` whose `status.artifact` digest
@@ -169,14 +171,19 @@ real apiserver.
 
 `.github/workflows/verify.yml` is the **PR gate**, split into parallel jobs:
 
-- **Go gate** — `test` (`go build` + `go test -race -shuffle=on -coverprofile`),
+- **Go gate** — `test` (`go build` + `go test -v -race -shuffle=on -coverprofile`),
   `lint-go` (`go vet`, `staticcheck`, `gosec`, `gofumpt`), `vulnerabilities`
   (`govulncheck`, a hard merge-blocking gate), `architecture` (`arch-go`). These
   run on plain `actions/setup-go` runners with **no `KUBEBUILDER_ASSETS`**, so
   the envtest packages skip — envtest coverage comes from the dev shell and the
   smoke gate, not Verify.
-- **Text + license gates** — `reuse`, `yaml` (yamllint), `github-actions`
-  (actionlint), `markdown` (markdownlint-cli2), `typos`.
+- **Text + prose + license gates** — `reuse`, `yaml` (yamllint), `github-actions`
+  (actionlint), `markdown` (markdownlint-cli2), `typos`, `prose` (Vale against the
+  shared `metio/vale-config` style), and `docs-lint` (builds the Hugo site — after
+  `hack/gen-docs-data.sh`, which needs `helm-schema` on PATH to generate each
+  chart's `values.schema.json` on the fly — then lints the rendered HTML with
+  `htmltest` and the theme CSS with `biome`).
+- **DCO gate** — `dco` requires a `Signed-off-by` trailer on every non-bot commit.
 - **Container gate** — `container-image` builds the image and scans it with
   Trivy, hard-failing on any fixable CRITICAL/HIGH (`ignore-unfixed`).
 - **`all-green`** — a single aggregate job that `needs` every job above and
@@ -209,8 +216,10 @@ cluster-free). A discovered crasher is written to `testdata/fuzz/` and printed i
 the job log; commit it as a permanent seed, after which it reproduces
 deterministically in the Verify gate's seed-corpus pass.
 
-`docs.yml` builds the Hugo site under `docs/`. **golangci-lint is banned
-project-wide** and appears nowhere in CI.
+`docs.yml` builds and publishes the Hugo site under `docs/` to gh-pages.
+`verify.yml`, `docs.yml`, and `fuzz.yml` are kept **structurally identical to the
+jaas repo** — align changes across both. **golangci-lint is banned project-wide**
+and appears nowhere in CI.
 
 ## Build & release
 

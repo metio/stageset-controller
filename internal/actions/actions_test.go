@@ -9,14 +9,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/fluxcd/pkg/apis/meta"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	apitypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -215,5 +220,248 @@ func TestStatusAccepted(t *testing.T) {
 	}
 	if !statusAccepted(418, []int32{418}) || statusAccepted(200, []int32{418}) {
 		t.Fatal("explicit expectedStatus matching wrong")
+	}
+}
+
+func TestShortHash(t *testing.T) {
+	t.Parallel()
+	h := shortHash("sha256:deadbeef")
+	if len(h) != 8 {
+		t.Fatalf("shortHash length = %d, want 8", len(h))
+	}
+	if shortHash("a") == shortHash("b") {
+		t.Fatal("distinct inputs must hash differently")
+	}
+	first, second := shortHash("revision-x"), shortHash("revision-x")
+	if first != second {
+		t.Fatalf("shortHash must be deterministic: %q != %q", first, second)
+	}
+}
+
+func TestSuffixName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, suffix, want string
+	}{
+		{"short", "-abc", "short-abc"},
+		// 60-char base + 4-char suffix would be 64 > 63, so the base is
+		// truncated to 59 chars to keep the result a valid DNS-1123 label.
+		{strings.Repeat("x", 60), "-abc", strings.Repeat("x", 59) + "-abc"},
+	}
+	for _, tc := range cases {
+		got := suffixName(tc.name, tc.suffix)
+		if got != tc.want {
+			t.Errorf("suffixName(%q,%q) = %q, want %q", tc.name, tc.suffix, got, tc.want)
+		}
+		if len(got) > 63 {
+			t.Errorf("suffixName(%q,%q) = %q exceeds the 63-char label limit", tc.name, tc.suffix, got)
+		}
+	}
+}
+
+func TestBackoff(t *testing.T) {
+	t.Parallel()
+	if got := backoff(0); got != 500*time.Millisecond {
+		t.Errorf("backoff(0) = %v, want 500ms", got)
+	}
+	if got := backoff(1); got != time.Second {
+		t.Errorf("backoff(1) = %v, want 1s", got)
+	}
+	// Later attempts saturate at the 5s ceiling.
+	if got := backoff(20); got != 5*time.Second {
+		t.Errorf("backoff(20) = %v, want the 5s ceiling", got)
+	}
+}
+
+func TestSecretValue(t *testing.T) {
+	t.Parallel()
+	s := runtime.NewScheme()
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatalf("corev1 AddToScheme: %v", err)
+	}
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "gate-token", Namespace: "ns"},
+		Data:       map[string][]byte{"token": []byte("s3cr3t")},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sec).Build()
+	e := &Executor{Client: c}
+
+	got, err := e.secretValue(context.Background(), "ns", &meta.SecretKeyReference{Name: "gate-token", Key: "token"})
+	if err != nil {
+		t.Fatalf("secretValue: %v", err)
+	}
+	if got != "s3cr3t" {
+		t.Errorf("secretValue = %q, want %q", got, "s3cr3t")
+	}
+
+	if _, err := e.secretValue(context.Background(), "ns", &meta.SecretKeyReference{Name: "gate-token", Key: "absent"}); err == nil {
+		t.Error("a missing key must error")
+	}
+	if _, err := e.secretValue(context.Background(), "ns", &meta.SecretKeyReference{Name: "absent", Key: "token"}); err == nil {
+		t.Error("a missing Secret must error")
+	}
+}
+
+// dynScheme registers the core types plus an unstructured ConfigMap so a fake
+// client serves Get/Patch/Delete on them.
+func dynScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatalf("corev1 AddToScheme: %v", err)
+	}
+	return s
+}
+
+func configMap(t *testing.T, ns, name string) *corev1.ConfigMap {
+	t.Helper()
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Data:       map[string]string{"k": "v"},
+	}
+}
+
+// TestRun_DeleteAction covers the documented `delete` action type: a present
+// object is removed, and a missing object counts as success (idempotent).
+func TestRun_DeleteAction(t *testing.T) {
+	t.Parallel()
+	cm := configMap(t, "ns", "legacy")
+	c := fake.NewClientBuilder().WithScheme(dynScheme(t)).WithObjects(cm).Build()
+	e := &Executor{Client: c}
+
+	del := stagesv1.Action{Name: "drop", Delete: &stagesv1.DeleteAction{
+		Target: meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "legacy"},
+	}}
+	if err := e.Run(context.Background(), "ns", []stagesv1.Action{del}, nil, nil); err != nil {
+		t.Fatalf("delete present object: %v", err)
+	}
+	var got corev1.ConfigMap
+	if err := c.Get(context.Background(), apitypes.NamespacedName{Namespace: "ns", Name: "legacy"}, &got); !apierrors.IsNotFound(err) {
+		t.Fatalf("object should be gone, Get err = %v", err)
+	}
+
+	// A second delete of the now-absent object is a no-op success.
+	if err := e.Run(context.Background(), "ns", []stagesv1.Action{del}, nil, nil); err != nil {
+		t.Fatalf("delete of a missing object must succeed: %v", err)
+	}
+}
+
+func TestRun_DeleteAction_BadAPIVersion(t *testing.T) {
+	t.Parallel()
+	e := &Executor{Client: fake.NewClientBuilder().WithScheme(dynScheme(t)).Build()}
+	del := stagesv1.Action{Name: "drop", Delete: &stagesv1.DeleteAction{
+		Target: meta.NamespacedObjectKindReference{APIVersion: "a/b/c", Kind: "ConfigMap", Name: "x"},
+	}}
+	if err := e.Run(context.Background(), "ns", []stagesv1.Action{del}, nil, nil); err == nil {
+		t.Fatal("a malformed apiVersion must error")
+	}
+}
+
+// TestRun_PatchAction covers the documented `patch` action type (strategic
+// merge), defaulting the target namespace to the run namespace.
+func TestRun_PatchAction(t *testing.T) {
+	t.Parallel()
+	cm := configMap(t, "ns", "web")
+	c := fake.NewClientBuilder().WithScheme(dynScheme(t)).WithObjects(cm).Build()
+	e := &Executor{Client: c}
+
+	patch := stagesv1.Action{Name: "flip", Patch: &stagesv1.PatchAction{
+		Target: meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "web"},
+		Type:   "merge",
+		Patch:  `{"data":{"k":"patched"}}`,
+	}}
+	if err := e.Run(context.Background(), "ns", []stagesv1.Action{patch}, nil, nil); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	var got corev1.ConfigMap
+	if err := c.Get(context.Background(), apitypes.NamespacedName{Namespace: "ns", Name: "web"}, &got); err != nil {
+		t.Fatalf("re-get: %v", err)
+	}
+	if got.Data["k"] != "patched" {
+		t.Fatalf("patch not applied: data = %#v", got.Data)
+	}
+}
+
+func TestRun_PatchAction_BadAPIVersion(t *testing.T) {
+	t.Parallel()
+	e := &Executor{Client: fake.NewClientBuilder().WithScheme(dynScheme(t)).Build()}
+	patch := stagesv1.Action{Name: "flip", Patch: &stagesv1.PatchAction{
+		Target: meta.NamespacedObjectKindReference{APIVersion: "a/b/c", Kind: "ConfigMap", Name: "x"},
+		Patch:  `{}`,
+	}}
+	if err := e.Run(context.Background(), "ns", []stagesv1.Action{patch}, nil, nil); err == nil {
+		t.Fatal("a malformed apiVersion must error")
+	}
+}
+
+// TestRun_ApplyAction_FailsClosed pins the documented `apply` action type's
+// fail-closed behaviour without the resolver/fetcher/applier wiring.
+func TestRun_ApplyAction_FailsClosed(t *testing.T) {
+	t.Parallel()
+	e := &Executor{Client: fake.NewClientBuilder().WithScheme(dynScheme(t)).Build()}
+	apply := stagesv1.Action{Name: "stand-up", Apply: &stagesv1.ApplyAction{
+		SourceRef: stagesv1.SourceReference{Name: "maint"},
+	}}
+	if err := e.Run(context.Background(), "ns", []stagesv1.Action{apply}, nil, nil); !errors.Is(err, ErrActionUnsupported) {
+		t.Fatalf("apply without wiring: want ErrActionUnsupported, got %v", err)
+	}
+}
+
+// TestPollExpr covers the CEL `wait` arm: the expression is checked against the
+// target's live state, and a satisfied expression returns immediately.
+func TestPollExpr_SatisfiedExpressionReturns(t *testing.T) {
+	t.Parallel()
+	dep := &unstructured.Unstructured{}
+	dep.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"})
+	dep.SetNamespace("ns")
+	dep.SetName("web")
+	_ = unstructured.SetNestedField(dep.Object, int64(3), "status", "availableReplicas")
+
+	s := runtime.NewScheme()
+	gvk := dep.GroupVersionKind()
+	s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	list := gvk
+	list.Kind += "List"
+	s.AddKnownTypeWithName(list, &unstructured.UnstructuredList{})
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(dep).Build()
+	e := &Executor{Client: c}
+
+	target := &meta.NamespacedObjectKindReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "web"}
+	err := e.pollExpr(context.Background(), "ns", target, "status.availableReplicas >= 3", &metav1.Duration{Duration: 2 * time.Second})
+	if err != nil {
+		t.Fatalf("pollExpr on a satisfied expr: %v", err)
+	}
+}
+
+func TestPollExpr_CompileErrorPropagates(t *testing.T) {
+	t.Parallel()
+	e := &Executor{Client: fake.NewClientBuilder().WithScheme(dynScheme(t)).Build()}
+	target := &meta.NamespacedObjectKindReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "web"}
+	if err := e.pollExpr(context.Background(), "ns", target, "this is not (valid CEL", nil); err == nil {
+		t.Fatal("an uncompilable CEL expression must error before polling")
+	}
+}
+
+func TestPollExpr_TimesOutWhenNeverSatisfied(t *testing.T) {
+	t.Parallel()
+	dep := &unstructured.Unstructured{}
+	dep.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"})
+	dep.SetNamespace("ns")
+	dep.SetName("web")
+	_ = unstructured.SetNestedField(dep.Object, int64(0), "status", "availableReplicas")
+
+	s := runtime.NewScheme()
+	gvk := dep.GroupVersionKind()
+	s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	list := gvk
+	list.Kind += "List"
+	s.AddKnownTypeWithName(list, &unstructured.UnstructuredList{})
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(dep).Build()
+	e := &Executor{Client: c}
+
+	target := &meta.NamespacedObjectKindReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "web"}
+	err := e.pollExpr(context.Background(), "ns", target, "status.availableReplicas >= 3", &metav1.Duration{Duration: 50 * time.Millisecond})
+	if err == nil {
+		t.Fatal("an expression that never holds must time out")
 	}
 }

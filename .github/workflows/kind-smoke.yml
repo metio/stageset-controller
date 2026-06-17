@@ -385,9 +385,167 @@ jobs:
           kubectl -n stageset-system logs deploy/stageset-controller --tail=300 --all-pods || true
           kubectl -n default describe stageset ha-demo || true
 
+  selfsigned:
+    name: Self-signed webhook (in-pod CA + VWC caBundle patch)
+    needs: discover
+    if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Git Repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+      - name: Build container image
+        run: docker build -t ghcr.io/metio/stageset-controller:smoke .
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          version: ${{ needs.discover.outputs.kind_latest }}
+          cluster_name: stageset-selfsigned
+          node_image: kindest/node:${{ needs.discover.outputs.k8s_latest }}
+          wait: 180s
+      - name: Load image into kind
+        run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-selfsigned
+      - name: Cluster prereqs (ExternalArtifact CRD)
+        run: hack/smoke/setup-externalartifact-crd.sh
+      - name: Install the released chart (self-signed webhook) with the dev image
+        run: |
+          # The one job that keeps the webhook ON: in self-signed cert mode the
+          # controller generates its own ECDSA CA in-pod and patches the named VWC's
+          # caBundle (no cert-manager). certMode=self-signed is the chart default;
+          # set it explicitly to harden against a default change. Release name
+          # `stageset` in namespace `default` so the VWC the controller patches —
+          # `{{ stageset.name }}-{{ stageset.namespace }}` = stageset-controller-default
+          # (stageset.name = Chart.Name = stageset-controller) — matches the
+          # scenario's VWC env default.
+          helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
+            --version "${{ needs.discover.outputs.chart_version }}" \
+            --namespace default \
+            --set-string image.tag=smoke \
+            --set webhook.enabled=true \
+            --set webhook.certMode=self-signed \
+            --wait --timeout 5m
+          kubectl apply --server-side --force-conflicts -f config/crd/
+          kubectl create clusterrolebinding stageset-smoke-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=default:stageset-controller
+      - name: Scenario — self-signed webhook admission + caBundle patch
+        run: hack/smoke/scenario-selfsigned-webhook.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n default get all || true
+          kubectl -n default logs deploy/stageset-controller --tail=300 || true
+          kubectl get validatingwebhookconfiguration stageset-controller-default -o yaml || true
+          kubectl -n default describe stageset smoke-ss || true
+
+  scale-smoke:
+    name: Scale (50 StageSets off one shared ExternalArtifact)
+    needs: discover
+    if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Git Repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+      - name: Build container image
+        run: docker build -t ghcr.io/metio/stageset-controller:smoke .
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          version: ${{ needs.discover.outputs.kind_latest }}
+          cluster_name: stageset-scale
+          node_image: kindest/node:${{ needs.discover.outputs.k8s_latest }}
+          wait: 180s
+      - name: Load image into kind
+        run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-scale
+      - name: Cluster prereqs (ExternalArtifact CRD)
+        run: hack/smoke/setup-externalartifact-crd.sh
+      - name: Install the released chart with the dev image
+        run: |
+          # Same install as the matrix job: webhook off (the scenario exercises the
+          # data plane at fan-out, not admission), dev image, HEAD CRDs overlaid,
+          # broad RoleBinding for the controller's own apply identity.
+          helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
+            --version "${{ needs.discover.outputs.chart_version }}" \
+            --namespace stageset-system --create-namespace \
+            --set-string image.tag=smoke \
+            --set webhook.enabled=false \
+            --wait --timeout 5m
+          kubectl apply --server-side --force-conflicts -f config/crd/
+          kubectl create clusterrolebinding stageset-smoke-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=stageset-system:stageset-controller
+      - name: Scenario — 50 StageSets converge + prune
+        run: hack/smoke/scenario-scale.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n stageset-system get all || true
+          kubectl -n stageset-system logs deploy/stageset-controller --tail=300 || true
+          kubectl get stageset -A || true
+          kubectl -n default get configmap | grep scale-applied || true
+
+  new-fields:
+    name: New fields (spec.suspend pause/resume + Events)
+    needs: discover
+    if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Git Repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+      - name: Build container image
+        run: docker build -t ghcr.io/metio/stageset-controller:smoke .
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          version: ${{ needs.discover.outputs.kind_latest }}
+          cluster_name: stageset-new-fields
+          node_image: kindest/node:${{ needs.discover.outputs.k8s_latest }}
+          wait: 180s
+      - name: Load image into kind
+        run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-new-fields
+      - name: Cluster prereqs (ExternalArtifact CRD + classic Flux source CRDs)
+        run: |
+          hack/smoke/setup-externalartifact-crd.sh
+          hack/smoke/setup-flux-source-crds.sh
+      - name: Install the released chart with the dev image
+        run: |
+          # Same install as the matrix job: webhook off (the scenario does not
+          # require admission), dev image, HEAD CRDs overlaid, broad RoleBinding
+          # for the controller's own apply identity.
+          helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
+            --version "${{ needs.discover.outputs.chart_version }}" \
+            --namespace stageset-system --create-namespace \
+            --set-string image.tag=smoke \
+            --set webhook.enabled=false \
+            --wait --timeout 5m
+          kubectl apply --server-side --force-conflicts -f config/crd/
+          kubectl create clusterrolebinding stageset-smoke-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=stageset-system:stageset-controller
+      - name: Scenario — suspend/resume + Event emission
+        run: hack/smoke/scenario-fields.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n stageset-system get all || true
+          kubectl -n stageset-system logs deploy/stageset-controller --tail=300 || true
+          kubectl get stageset -A || true
+          kubectl -n default get events || true
+
   all-green:
     name: Kind smoke — all checks passed
-    needs: [discover, smoke, s3, s3-seaweedfs, ha]
+    needs: [discover, smoke, s3, s3-seaweedfs, ha, selfsigned, scale-smoke, new-fields]
     if: always()
     runs-on: ubuntu-latest
     steps:

@@ -45,8 +45,8 @@ custom `stageset_*` metrics plus controller-runtime signals:
 Every threshold is a knob under `metrics.prometheusRule.thresholds`, and
 `extraAlertLabels` is merged onto every rendered alert so all stageset alerts can
 route through one Alertmanager receiver. Each alert carries a `runbook_url`
-annotation pointing at the matching [runbook](/runbooks/) page on this site
-(`metrics.prometheusRule.runbookBaseURL`); the reconcile-errors alert templates the
+annotation pointing at the matching [runbook](/runbooks/) page on this site; the
+URL prefix is fixed to this site, and the reconcile-errors alert templates the
 URL on `$labels.reason`. Append your own rules under
 `metrics.prometheusRule.extraRules`, and silence a built-in alert by raising its
 threshold rather than forking the chart.

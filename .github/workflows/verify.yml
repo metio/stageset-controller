@@ -17,7 +17,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go build ./...
-      - run: go test -race -shuffle=on -coverprofile=cover.out ./...
+      - run: go test -v -race -shuffle=on -coverprofile=cover.out ./...
   lint-go:
     runs-on: ubuntu-latest
     steps:
@@ -107,6 +107,8 @@ jobs:
       HTMLTEST_VERSION: 0.17.0
       # renovate: datasource=github-releases depName=biomejs/biome extractVersion=^@biomejs/biome@(?<version>.+)$
       BIOME_VERSION: 2.5.0
+      # renovate: datasource=github-releases depName=dadav/helm-schema
+      GO_HELM_SCHEMA_VERSION: 0.23.4
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -119,6 +121,12 @@ jobs:
         with:
           hugo-version: latest
           extended: true
+      - name: Install helm-schema
+        # gen-docs-data.sh generates each chart's values.schema.json on the fly
+        # from values.yaml (the committed schema + its drift gate were removed),
+        # so the docs build needs helm-schema on PATH. Version in lockstep with
+        # dev/Containerfile.
+        run: curl -fsSL "https://github.com/dadav/helm-schema/releases/download/${GO_HELM_SCHEMA_VERSION}/helm-schema_${GO_HELM_SCHEMA_VERSION}_Linux_x86_64.tar.gz" | tar -xz -C /usr/local/bin helm-schema
       - name: Generate docs data (flags + chart values)
         run: hack/gen-docs-data.sh
       - name: Build Website

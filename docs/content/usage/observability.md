@@ -158,9 +158,8 @@ is on the [configuration page](/installation/configuration/).
 ## Runbooks
 
 Each alert carries a runbook link in its `runbook_url` annotation (the annotation
-key is `metrics.prometheusRule.runbookAnnotationKey`, the URL prefix is
-`metrics.prometheusRule.runbookBaseURL`, defaulting to the documentation site's
-[runbooks](/runbooks/)). `StageSetReconcileErrorsHigh` templates
+key is `metrics.prometheusRule.runbookAnnotationKey`; the URL prefix is fixed to
+this site's [runbooks](/runbooks/)). `StageSetReconcileErrorsHigh` templates
 its link on the `reason` label — every Ready-condition reason maps to a runbook at
 `/runbooks/<reason>/` — while the availability and webhook alerts point at their
 fixed pages (`workqueue-saturation`, `reconcile-latency`, `controller-pod-down`,
