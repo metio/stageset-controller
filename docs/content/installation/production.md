@@ -324,5 +324,3 @@ helm upgrade --install stageset-controller \
 - [Multi-cluster and tenancy](/usage/multi-cluster/) — impersonation, namespace
   scoping, remote-cluster reconciliation.
 - [Runbooks](/runbooks/) — incident response.
-</content>
-</invoke>

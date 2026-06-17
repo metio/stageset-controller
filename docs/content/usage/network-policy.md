@@ -263,4 +263,3 @@ rules are non-negotiable for the controller.
 
 For the full set of chart values, see
 [Helm chart values](/installation/helm-values/).
-</content>

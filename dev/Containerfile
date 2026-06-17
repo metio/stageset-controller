@@ -36,12 +36,14 @@ RUN ARCH="$(uname -m)" \
 # Standalone static-analysis tools — the CI verify gate runs these directly.
 # golangci-lint is intentionally NOT installed (banned project-wide).
 # gofumpt: strict formatting; gosec: security scanner; arch-go: architecture
-# rules (arch-go.yml); actionlint: GitHub Actions workflow linter.
+# rules (arch-go.yml); actionlint: GitHub Actions workflow linter; govulncheck:
+# known-vulnerability scanner (the CI vulnerabilities job).
 RUN go install honnef.co/go/tools/cmd/staticcheck@latest
 RUN go install mvdan.cc/gofumpt@latest
 RUN go install github.com/securego/gosec/v2/cmd/gosec@latest
 RUN go install github.com/arch-go/arch-go@latest
 RUN go install github.com/rhysd/actionlint/cmd/actionlint@latest
+RUN go install golang.org/x/vuln/cmd/govulncheck@latest
 
 # Code generation + envtest assets for the controller tests.
 RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest

@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -65,17 +67,62 @@ func init() {
 }
 
 func main() {
-	c := cliflags.Register(flag.CommandLine)
+	// SetupSignalHandler installs the SIGINT/SIGTERM handler exactly once per
+	// process; keeping it in main (not run) lets run be called repeatedly from
+	// tests with an ordinary context.
+	ctx := ctrl.SetupSignalHandler()
+	os.Exit(run(ctx, os.Args[1:], os.Environ(), os.Stderr))
+}
+
+// run is the testable seam under main: it takes its process-affecting inputs
+// (the manager context, args, env, stderr) as parameters and returns a Unix
+// exit code — 0 success, 1 runtime/validation failure, 2 flag parse error — so
+// flag validation can be exercised in tests without contacting an apiserver.
+// A fresh FlagSet per call means two invocations in one process don't panic
+// with "flag redefined".
+func run(ctx context.Context, args, env []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("stageset-controller", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	c := cliflags.Register(fs)
 
 	opts := zap.Options{Development: false}
-	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
+	opts.BindFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
 	setupLog.Info("starting stageset-controller", "version", version, "commit", commit)
 
-	restCfg := ctrl.GetConfigOrDie()
+	// Validate and construct the rollback store before any cluster contact, so a
+	// flag mistake (both backends set, or an incomplete S3 config) fails fast
+	// with a clear message rather than silently leaving rollback disabled or
+	// erroring only after the manager has connected.
+	rollbackStore, err := buildRollbackStore(c)
+	if err != nil {
+		setupLog.Error(err, "invalid rollback store configuration")
+		return 1
+	}
+	switch {
+	case *c.RBPath != "":
+		setupLog.Info("rollback store enabled", "backend", "filesystem", "path", *c.RBPath)
+		// The file store persists rendered output — including Secret data — to
+		// this directory. Unlike the S3 backend it cannot set encryption at rest
+		// itself, so the volume must provide it.
+		setupLog.Info("ensure the rollback-store volume is encrypted at rest (encrypted StorageClass / LUKS / cloud-disk encryption); the file store writes rendered Secret data in the clear", "path", *c.RBPath)
+	case *c.RBS3Endpoint != "":
+		setupLog.Info("rollback store enabled", "backend", "s3", "endpoint", *c.RBS3Endpoint, "bucket", *c.RBS3Bucket)
+	}
+
+	restCfg, err := ctrl.GetConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to load kubeconfig")
+		return 1
+	}
 	mgrOpts := ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: *c.ProbeAddr,
@@ -85,7 +132,7 @@ func main() {
 		// only reconcilers are leader-gated.
 		WebhookServer: webhook.NewServer(webhook.Options{Port: *c.WebhookPort, CertDir: *c.WebhookCertDir}),
 	}
-	if watchNS := parseWatchNamespaces(*c.WatchNamespaces, os.Environ()); len(watchNS) > 0 {
+	if watchNS := parseWatchNamespaces(*c.WatchNamespaces, env); len(watchNS) > 0 {
 		// Restrict the manager's informers to the listed namespaces. StageSets
 		// and sources outside this set never enter the cache, so the reconciler
 		// can't see them even where RBAC would otherwise grant access — the
@@ -102,39 +149,7 @@ func main() {
 	mgr, err := ctrl.NewManager(restCfg, mgrOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
-	}
-
-	var rollbackStore controller.RollbackStore
-	switch {
-	case *c.RBPath != "" && *c.RBS3Endpoint != "":
-		setupLog.Error(errors.New("set only one rollback store"), "--rollback-store-path and --rollback-store-s3-endpoint are mutually exclusive")
-		os.Exit(1)
-	case *c.RBPath != "":
-		store, serr := rollbackstore.NewFile(*c.RBPath)
-		if serr != nil {
-			setupLog.Error(serr, "unable to build filesystem rollback store")
-			os.Exit(1)
-		}
-		rollbackStore = store
-		setupLog.Info("rollback store enabled", "backend", "filesystem", "path", *c.RBPath)
-		// The file store persists rendered output — including Secret data — to
-		// this directory. Unlike the S3 backend it cannot set encryption at rest
-		// itself, so the volume must provide it.
-		setupLog.Info("ensure the rollback-store volume is encrypted at rest (encrypted StorageClass / LUKS / cloud-disk encryption); the file store writes rendered Secret data in the clear", "path", *c.RBPath)
-	case *c.RBS3Endpoint != "" && *c.RBS3Bucket != "":
-		store, serr := rollbackstore.NewS3(rollbackstore.S3Config{
-			Endpoint: *c.RBS3Endpoint, Bucket: *c.RBS3Bucket, Prefix: *c.RBS3Prefix, Region: *c.RBS3Region,
-			UseSSL: *c.RBS3UseSSL, AccessKey: *c.RBS3AccessKey, SecretKey: *c.RBS3SecretKey,
-			SessionToken: *c.RBS3SessionToken, Anonymous: *c.RBS3Anonymous,
-			SSE: *c.RBS3SSE, SSEKMSKeyID: *c.RBS3SSEKMSKey,
-		})
-		if serr != nil {
-			setupLog.Error(serr, "unable to build S3 rollback store")
-			os.Exit(1)
-		}
-		rollbackStore = store
-		setupLog.Info("rollback store enabled", "backend", "s3", "endpoint", *c.RBS3Endpoint, "bucket", *c.RBS3Bucket)
+		return 1
 	}
 
 	if err = (&controller.StageSetReconciler{
@@ -148,15 +163,14 @@ func main() {
 		RollbackStore:        rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "StageSet")
-		os.Exit(1)
+		return 1
 	}
 
-	ctx := ctrl.SetupSignalHandler()
 	var webhookRenewerDone <-chan struct{}
 	if *c.EnableWebhook {
 		if err := (&controller.StageSetValidator{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "StageSet")
-			os.Exit(1)
+			return 1
 		}
 		switch *c.WebhookCertMode {
 		case "cert-manager":
@@ -164,7 +178,7 @@ func main() {
 		case "self-signed":
 			if *c.WebhookVWCName == "" {
 				setupLog.Error(errors.New("missing flag"), "--webhook-validating-config-name is required for --webhook-cert-mode=self-signed")
-				os.Exit(1)
+				return 1
 			}
 			ns := *c.WebhookServiceNS
 			if ns == "" {
@@ -177,13 +191,13 @@ func main() {
 			}, *c.WebhookCertDir, *c.WebhookVWCName)
 			if serr != nil {
 				setupLog.Error(serr, "unable to provision self-signed webhook cert")
-				os.Exit(1)
+				return 1
 			}
 			webhookRenewerDone = done
 			setupLog.Info("self-signed webhook cert provisioned", "certDir", *c.WebhookCertDir, "vwc", *c.WebhookVWCName)
 		default:
 			setupLog.Error(errors.New("invalid flag"), "--webhook-cert-mode must be cert-manager or self-signed", "got", *c.WebhookCertMode)
-			os.Exit(1)
+			return 1
 		}
 	}
 
@@ -206,23 +220,23 @@ func main() {
 			return nil
 		})); err != nil {
 			setupLog.Error(err, "unable to add stage-gate server")
-			os.Exit(1)
+			return 1
 		}
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
+		return 1
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
+		return 1
 	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
+		return 1
 	}
 	// Await the self-signed renewer's clean exit (bounded) after the manager
 	// stops, so a SIGTERM mid-rotation doesn't truncate a caBundle write.
@@ -231,6 +245,41 @@ func main() {
 		case <-webhookRenewerDone:
 		case <-time.After(30 * time.Second):
 		}
+	}
+	return 0
+}
+
+// buildRollbackStore selects and constructs the optional rollback store from the
+// flags, returning (nil, nil) when no backend is configured. Flag-combination
+// mistakes — both backends set, or an S3 config with only one of endpoint/bucket
+// — return an error so the caller fails fast instead of silently running with
+// rollback disabled, in which case a failed deploy would have no store to roll
+// back to.
+func buildRollbackStore(c *cliflags.Flags) (controller.RollbackStore, error) {
+	switch {
+	case *c.RBPath != "" && *c.RBS3Endpoint != "":
+		return nil, errors.New("--rollback-store-path and --rollback-store-s3-endpoint are mutually exclusive; set only one rollback store")
+	case (*c.RBS3Endpoint != "") != (*c.RBS3Bucket != ""):
+		return nil, errors.New("--rollback-store-s3-endpoint and --rollback-store-s3-bucket must both be set to enable the S3 rollback store")
+	case *c.RBPath != "":
+		store, err := rollbackstore.NewFile(*c.RBPath)
+		if err != nil {
+			return nil, fmt.Errorf("build filesystem rollback store: %w", err)
+		}
+		return store, nil
+	case *c.RBS3Endpoint != "" && *c.RBS3Bucket != "":
+		store, err := rollbackstore.NewS3(rollbackstore.S3Config{
+			Endpoint: *c.RBS3Endpoint, Bucket: *c.RBS3Bucket, Prefix: *c.RBS3Prefix, Region: *c.RBS3Region,
+			UseSSL: *c.RBS3UseSSL, AccessKey: *c.RBS3AccessKey, SecretKey: *c.RBS3SecretKey,
+			SessionToken: *c.RBS3SessionToken, Anonymous: *c.RBS3Anonymous,
+			SSE: *c.RBS3SSE, SSEKMSKeyID: *c.RBS3SSEKMSKey,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("build S3 rollback store: %w", err)
+		}
+		return store, nil
+	default:
+		return nil, nil
 	}
 }
 
