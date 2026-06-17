@@ -5,8 +5,15 @@
 # cross-compile through Go's GOOS/GOARCH (CGO is disabled) instead of emulating
 # each target under QEMU. buildx supplies TARGETOS/TARGETARCH/TARGETVARIANT per
 # target; the runtime stage below takes $TARGETPLATFORM and pulls the matching
-# distroless base.
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go@sha256:3cea88773e65f24c4db570d96b97a65fb8f3c145f656a4396e23d9be6f34cddd AS build
+# distroless base. The builder is Docker Hub's official golang image, pinned in
+# lockstep with dev/Containerfile so prod and dev builds agree — cgr.dev
+# throttles anonymous pulls, making its large Go builder layer very slow to
+# fetch in CI.
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.4@sha256:87a41d2539e5671777734e91f467499ed5eafb1fb1f77221dff2744db7a51775 AS build
+# Recent golang base images default GOTOOLCHAIN=local, which blocks auto-download
+# of a higher toolchain directive in go.mod. `auto` lets go.mod pin a newer
+# toolchain than this base image without a Dockerfile change.
+ENV GOTOOLCHAIN=auto
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
