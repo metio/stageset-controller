@@ -78,6 +78,15 @@ spec:
 A manifest field like `value: "${cluster_name}"` becomes `value: "prod-eu"` for
 this stage.
 
+> **A substituted number is a number.** Substitution is textual and runs after
+> kustomize, which drops the quotes around a plain `${var}` scalar — so a numeric
+> value such as `replicas: "${COUNT}"` with `COUNT: "3"` lands as the YAML
+> integer `3`, not the string `"3"`. For fields that must be strings —
+> `ConfigMap`/`Secret` `data`, label and annotation values — keep the substituted
+> value non-numeric (e.g. `"v${COUNT}"`) or build it with a `configMapGenerator`,
+> otherwise the apply fails with `expected string, got int`. This matches Flux
+> kustomize-controller's post-build substitution.
+
 ## Reusing one artifact across environments
 
 The two layers combine into a common pattern: render an environment-*agnostic*

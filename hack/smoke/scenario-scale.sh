@@ -32,7 +32,10 @@ metadata:
   name: scale-applied-${IDX}
   namespace: default
 data:
-  idx: "${IDX}"
+  # postBuild substitution is textual and kustomize drops the quotes around a
+  # plain scalar, so a bare numeric value would land as a YAML int and fail the
+  # ConfigMap string-map apply. A non-numeric value stays a string unquoted.
+  idx: "stage-${IDX}"
 EOF
 DIGEST="$(make_tarball "${WORK}/src" "${WORK}/serve/artifact.tar.gz")"
 
@@ -95,7 +98,7 @@ log "Verify a sample of the rendered ConfigMaps were applied with the right IDX"
 # converged Ready conditions are backed by N real applies, not empty renders.
 for i in 1 $(( (N + 1) / 2 )) "$N"; do
   got="$(kubectl -n "$NS" get configmap "scale-applied-${i}" -o jsonpath='{.data.idx}' 2>/dev/null || true)"
-  [ "$got" = "$i" ] || die "scale-applied-${i} missing or wrong (.data.idx=${got:-<none>}, want ${i})"
+  [ "$got" = "stage-${i}" ] || die "scale-applied-${i} missing or wrong (.data.idx=${got:-<none>}, want stage-${i})"
 done
 
 log "Tear down — delete every scale StageSet; finalizers must prune the applied objects"
