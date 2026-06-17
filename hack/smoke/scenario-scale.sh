@@ -56,9 +56,9 @@ spec:
     - name: app
       sourceRef:
         name: scale-artifact
-  postBuild:
-    substitute:
-      IDX: "${i}"
+      postBuild:
+        substitute:
+          IDX: "${i}"
 EOF
 done | kubectl apply -f -
 
