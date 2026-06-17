@@ -15,8 +15,8 @@ The desired version (`spec.version`) is **lower** than the version the controlle
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>
-kubectl get stageset <name> -n <namespace> -o jsonpath='{.status.version}'   # deployed
+kubectl --namespace <namespace> describe stageset <name>
+kubectl --namespace <namespace> get stageset <name> --output jsonpath='{.status.version}'   # deployed
 # desired: read spec.version.value, or the version file the artifact carries
 ```
 

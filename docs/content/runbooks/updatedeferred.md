@@ -17,8 +17,8 @@ This is **not a failure** — it is time-based delivery working as configured. A
 ## Diagnosis
 
 ```shell
-kubectl get stageset <name> -n <namespace> -o jsonpath='{.status.pendingUpdate}'
-kubectl get stageset <name> -n <namespace> -o jsonpath='{.spec.updateWindows}'
+kubectl --namespace <namespace> get stageset <name> --output jsonpath='{.status.pendingUpdate}'
+kubectl --namespace <namespace> get stageset <name> --output jsonpath='{.spec.updateWindows}'
 ```
 
 Confirm the current time (in each window's `timeZone`) against the windows. An already-deployed StageSet stays `Ready=True` — the deployed version keeps running while the update waits.
@@ -30,7 +30,7 @@ Usually none — the update applies automatically when the next window opens. If
 - **Force it through once** (e.g. an emergency fix during a freeze):
 
   ```shell
-  kubectl annotate --overwrite stageset <name> -n <namespace> \
+  kubectl --namespace <namespace> annotate --overwrite stageset <name> \
     stages.metio.wtf/update-now="$(date +%s)"
   ```
 

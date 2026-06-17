@@ -29,9 +29,9 @@ Common causes:
 
 ```shell
 # which StageSets are churning?
-kubectl get stagesets -A --sort-by=.status.observedGeneration
+kubectl get stagesets --all-namespaces --sort-by=.status.observedGeneration
 # controller logs for slow operations / retries
-kubectl -n stageset-system logs deploy/stageset-controller --tail=200
+kubectl --namespace stageset-system logs deploy/stageset-controller --tail=200
 ```
 
 Correlate with `controller_runtime_reconcile_time_seconds` (see

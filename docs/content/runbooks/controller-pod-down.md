@@ -21,9 +21,9 @@ writes (`failurePolicy: Fail`).
 ## Diagnosis
 
 ```shell
-kubectl -n stageset-system get pods -l app.kubernetes.io/name=stageset-controller
-kubectl -n stageset-system describe pod <pod>
-kubectl -n stageset-system logs <pod> --previous --tail=200
+kubectl --namespace stageset-system get pods --selector app.kubernetes.io/name=stageset-controller
+kubectl --namespace stageset-system describe pod <pod>
+kubectl --namespace stageset-system logs <pod> --previous --tail=200
 ```
 
 Look for flag-parse errors at startup, RBAC `Forbidden` on the controller's own

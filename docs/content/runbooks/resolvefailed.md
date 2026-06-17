@@ -21,9 +21,9 @@ When the failing `sourceRef` targets another namespace, the Message is deliberat
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>
+kubectl --namespace <namespace> describe stageset <name>
 # Ambiguity: are there multiple artifacts pointing at the producer?
-kubectl get externalartifact -n <namespace> -o yaml | grep -A3 sourceRef
+kubectl --namespace <namespace> get externalartifact --output yaml | grep -A3 sourceRef
 ```
 
 ## Remediation

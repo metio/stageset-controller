@@ -28,8 +28,8 @@ In `cert-manager` mode this metric is irrelevant — [cert-manager](https://cert
 ## Diagnosis
 
 ```shell
-kubectl -n stageset-system logs deploy/stageset-controller | grep -i 'cert\|renew\|caBundle'
-kubectl get validatingwebhookconfiguration <name> -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | head -c 40
+kubectl --namespace stageset-system logs deploy/stageset-controller | grep -i 'cert\|renew\|caBundle'
+kubectl get validatingwebhookconfiguration <name> --output jsonpath='{.webhooks[*].clientConfig.caBundle}' | head -c 40
 ```
 
 ## Remediation

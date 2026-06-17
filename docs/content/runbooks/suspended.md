@@ -17,7 +17,7 @@ tags: [runbooks, operations, troubleshooting]
 Resume by clearing the flag:
 
 ```shell
-kubectl patch stageset <name> -n <namespace> --type=merge -p '{"spec":{"suspend":false}}'
+kubectl --namespace <namespace> patch stageset <name> --type=merge --patch '{"spec":{"suspend":false}}'
 ```
 
 The next reconcile picks up from the current artifact revisions.

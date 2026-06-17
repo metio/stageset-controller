@@ -22,12 +22,12 @@ A stage failed during execution. By operation:
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>     # Message: which stage + operation
-kubectl -n stageset-system logs deploy/stageset-controller --tail=200
+kubectl --namespace <namespace> describe stageset <name>     # Message: which stage + operation
+kubectl --namespace stageset-system logs deploy/stageset-controller --tail=200
 
 # For apply/verify failures, inspect what the stage tried to apply:
-kubectl get stageinventory -n <namespace> \
-  -l stages.metio.wtf/stage-set=<name>,stages.metio.wtf/stage=<stage>
+kubectl --namespace <namespace> get stageinventory \
+  --selector stages.metio.wtf/stage-set=<name>,stages.metio.wtf/stage=<stage>
 ```
 
 ## Remediation

@@ -9,7 +9,7 @@ by subsystem. When deployed via the Helm chart you never pass these directly —
 chart sets them from your values and its own defaults. For the values that drive
 each flag, see [Helm chart values](/installation/helm-values/). For the values
 worth tuning and the reasoning behind each, see
-[Production](/installation/production/#settings-you-can-tune); for metrics and
+[Production](/installation/production/); for metrics and
 runbooks, [Operations](/installation/operations/).
 
 The flag tables below are generated from the binary's own FlagSet, so they track

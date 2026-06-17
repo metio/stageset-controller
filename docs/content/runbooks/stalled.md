@@ -15,10 +15,10 @@ A condition that retrying cannot clear. Currently this is a **`spec.dependsOn` c
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>     # Message states "spec.dependsOn forms a cycle"
+kubectl --namespace <namespace> describe stageset <name>     # Message states "spec.dependsOn forms a cycle"
 # Trace the edges:
-kubectl get stageset -n <namespace> \
-  -o custom-columns=NAME:.metadata.name,DEPENDSON:.spec.dependsOn[*].name
+kubectl --namespace <namespace> get stageset \
+  --output custom-columns=NAME:.metadata.name,DEPENDSON:.spec.dependsOn[*].name
 ```
 
 Follow the `dependsOn` names until you find the loop (A → B → A, or longer).

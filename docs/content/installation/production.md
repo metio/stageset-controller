@@ -51,7 +51,7 @@ rollbackStore:
     sse: s3                      # SSE-S3; or kms (+ sseKmsKeyId), or none
 ```
 
-## 2. Run leader-elected HA
+## 2. Run leader-elected HA {#high-availability}
 
 The chart enables leader election by default, so even a single replica is
 lease-guarded. For HA, raise the replica floor above one: only the lease holder
@@ -125,7 +125,7 @@ controller:
   inventoryShardCap: 5000  # lower for smaller inventory objects on huge applies
 ```
 
-## 5. Fence the network and the gate
+## 5. Fence the network and the gate {#network-policy}
 
 The gate endpoint is unauthenticated — a read-only `GET` that progressive-delivery
 tooling (Flagger, Argo Rollouts) polls. Turn on the ingress-only `NetworkPolicy`
@@ -146,7 +146,7 @@ controller:
     - "*.internal.example.com"
 ```
 
-## 6. Provision the admission webhook certificate
+## 6. Provision the admission webhook certificate {#admission-webhook-tls}
 
 The webhook validates `StageSet` spec invariants at `kubectl apply` time instead
 of at reconcile time. It is wired by the chart; the one decision is how its

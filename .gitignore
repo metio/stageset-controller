@@ -16,3 +16,6 @@ docs/data/helm-values.json
 .ilo.rc
 docs/.hugo_build.lock
 .vale/
+
+# htmltest writes a ref cache here when it runs (ilo bash -c "htmltest").
+tmp/.htmltest/

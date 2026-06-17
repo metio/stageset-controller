@@ -24,13 +24,13 @@ Rollback is best-effort by contract: it works exactly when producers retain. Com
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>   # Message names the stage + revision
+kubectl --namespace <namespace> describe stageset <name>   # Message names the stage + revision
 ```
 
 Check the producer's retention. For a JaaS snippet:
 
 ```shell
-kubectl get jsonnetsnippet <name> -n <namespace> -o jsonpath='{.spec.history}'
+kubectl --namespace <namespace> get jsonnetsnippet <name> --output jsonpath='{.spec.history}'
 ```
 
 ## Remediation

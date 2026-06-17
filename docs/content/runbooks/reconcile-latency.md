@@ -24,7 +24,7 @@ impersonating the tenant `ServiceAccount`. Latency climbs when any of those is s
 ## Diagnosis
 
 ```shell
-kubectl -n stageset-system logs deploy/stageset-controller --tail=200 | grep -i 'slow\|timeout\|took'
+kubectl --namespace stageset-system logs deploy/stageset-controller --tail=200 | grep -i 'slow\|timeout\|took'
 ```
 
 Break the latency down by stage count and artifact size; a single StageSet with

@@ -16,11 +16,11 @@ A stage's `sourceRef` resolved to an `ExternalArtifact` (directly, or via a prod
 
 ```shell
 # Which artifact, and is it Ready?
-kubectl get externalartifact -n <namespace>
-kubectl describe externalartifact <name> -n <namespace>
+kubectl --namespace <namespace> get externalartifact
+kubectl --namespace <namespace> describe externalartifact <name>
 
 # If the producer is a JsonnetSnippet (or other producer kind), check it:
-kubectl describe jsonnetsnippet <name> -n <namespace>
+kubectl --namespace <namespace> describe jsonnetsnippet <name>
 ```
 
 ## Remediation

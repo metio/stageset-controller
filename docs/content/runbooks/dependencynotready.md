@@ -15,9 +15,9 @@ A StageSet listed in `spec.dependsOn` is not `Ready` at its observed generation,
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>            # Message names the dependency
-kubectl get stageset <dependency> -n <namespace>           # is it Ready?
-kubectl describe stageset <dependency> -n <namespace>      # why not?
+kubectl --namespace <namespace> describe stageset <name>            # Message names the dependency
+kubectl --namespace <namespace> get stageset <dependency>           # is it Ready?
+kubectl --namespace <namespace> describe stageset <dependency>      # why not?
 ```
 
 ## Remediation

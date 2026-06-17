@@ -302,6 +302,15 @@ ilo --no-rc @dev/website   # one-shot build into docs/public/
 ilo --no-rc @dev/serve     # live server on :1313
 ```
 
+Two website linters are pre-staged in the Go `dev/Containerfile` (alongside markdownlint), so they run in the default `ilo bash` shell — no `--no-rc`. Build the site first, then:
+
+```shell
+ilo bash -c 'htmltest'                          # rendered HTML: dead internal links, missing alt, broken anchors (.htmltest.yml)
+ilo bash -c 'biome lint docs/themes/metio/assets/css'   # theme CSS (config: docs/themes/metio/biome.json)
+```
+
+`htmltest` reads `.htmltest.yml` (rooted at `docs/public`, external links off for a deterministic offline gate — flip `CheckExternal` to verify outbound URLs). The CSS lives in the theme submodule, so `biome` is configured by `biome.json` *in the theme repo* (it excludes the vendored `normalize.css` / `syntax.css`); fix CSS findings there, not in the submodule checkout.
+
 ### Generated docs data (flags + chart values)
 
 Two data-driven reference pages are built from source rather than hand-maintained,

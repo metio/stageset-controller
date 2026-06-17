@@ -24,8 +24,8 @@ Common triggers across all of them: a `v` prefix or trailing whitespace the pars
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>   # Message names the failing input
-kubectl get stageset <name> -n <namespace> -o jsonpath='{.spec.version}{"\n"}'
+kubectl --namespace <namespace> describe stageset <name>   # Message names the failing input
+kubectl --namespace <namespace> get stageset <name> --output jsonpath='{.spec.version}{"\n"}'
 ```
 
 Then, depending on which source the Message names:

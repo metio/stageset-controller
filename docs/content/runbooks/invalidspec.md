@@ -23,7 +23,7 @@ The admission webhook normally rejects these at write time; seeing this on the o
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>
+kubectl --namespace <namespace> describe stageset <name>
 ```
 
 Read the Message — it names the stage, action, or field.

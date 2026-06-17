@@ -18,14 +18,14 @@ A stage's `sourceRef` resolves to **no `ExternalArtifact`**. Either:
 ## Diagnosis
 
 ```shell
-kubectl describe stageset <name> -n <namespace>     # Message names the missing ref
-kubectl get externalartifact -n <namespace>
+kubectl --namespace <namespace> describe stageset <name>     # Message names the missing ref
+kubectl --namespace <namespace> get externalartifact
 ```
 
 For a producer ref, confirm the producer object exists and that it is configured to publish an `ExternalArtifact` (not only serve over HTTP):
 
 ```shell
-kubectl get <producer-kind> <name> -n <namespace> -o yaml
+kubectl --namespace <namespace> get <producer-kind> <name> --output yaml
 ```
 
 ## Remediation
