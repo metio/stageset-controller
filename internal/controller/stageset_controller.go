@@ -15,6 +15,9 @@ import (
 
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/ssa"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -30,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -40,6 +44,7 @@ import (
 	"github.com/metio/stageset-controller/internal/build"
 	"github.com/metio/stageset-controller/internal/inventory"
 	"github.com/metio/stageset-controller/internal/metrics"
+	"github.com/metio/stageset-controller/internal/observability"
 	"github.com/metio/stageset-controller/internal/stageinv"
 )
 
@@ -122,10 +127,22 @@ type StageSetReconciler struct {
 // pin artifacts, then BUILD -> APPLY -> PRUNE + RECORD -> VERIFY each stage in
 // order; a finalizer tears the applied objects down on deletion.
 func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	ctx, span := observability.Tracer().Start(ctx, "StageSet.Reconcile",
+		trace.WithAttributes(
+			attribute.String("stageset.namespace", req.Namespace),
+			attribute.String("stageset.name", req.Name),
+		))
+	defer span.End()
+
+	// controller-runtime seeds this logger with namespace/name/reconcileID; the
+	// logr->slog bridge turns those into structured JSON fields.
+	logger := log.FromContext(ctx)
+
 	var ss stagesv1.StageSet
 	if err := r.Get(ctx, req.NamespacedName, &ss); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	span.SetAttributes(attribute.Int64("stageset.generation", ss.Generation))
 
 	if !ss.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &ss)
@@ -208,9 +225,19 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// windowScope=All, any reconcile) while update windows are closed, unless
 	// a one-shot update-now override is present. A held-but-deployed StageSet
 	// stays Ready; the held revisions and next window are surfaced on status.
-	if res, deferred, derr := r.gateUpdateWindows(ctx, &ss, resolved); derr != nil {
+	gateCtx, gateSpan := observability.Tracer().Start(ctx, "stageset.gateWindows")
+	res, deferred, derr := r.gateUpdateWindows(gateCtx, &ss, resolved)
+	if derr != nil {
+		gateSpan.RecordError(derr)
+		gateSpan.SetStatus(codes.Error, "update-window gating failed")
+		gateSpan.End()
 		return ctrl.Result{}, derr
-	} else if deferred {
+	}
+	gateSpan.SetAttributes(attribute.Bool("stageset.deferred", deferred))
+	gateSpan.End()
+	if deferred {
+		logger.Info("rollout deferred while update windows are closed",
+			"requeueAfter", res.RequeueAfter.String())
 		return res, nil
 	}
 
@@ -243,10 +270,15 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// failures (InvalidVersion, downgrade) short-circuit here; the ordered
 	// pending migrations are surfaced on status and run anchored to their
 	// stages inside the loop.
-	migPlan, mreason, mmsg, merr := r.planVersionMigrations(ctx, &ss, resolved, fetcher)
+	migCtx, migSpan := observability.Tracer().Start(ctx, "stageset.planMigrations")
+	migPlan, mreason, mmsg, merr := r.planVersionMigrations(migCtx, &ss, resolved, fetcher)
 	if merr != nil {
+		migSpan.RecordError(merr)
+		migSpan.SetStatus(codes.Error, "migration planning failed")
+		migSpan.End()
 		return ctrl.Result{}, merr // transient fetch
 	}
+	migSpan.End()
 	if mreason != "" {
 		r.setReady(&ss, metav1.ConditionFalse, mreason, mmsg)
 		ss.Status.ObservedGeneration = ss.Generation
@@ -256,10 +288,15 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// SOPS decryptor (nil when spec.decryption is unset). Built once per
 	// reconcile; the key Secret is read under the tenant SA.
-	dec, derr := r.buildDecryptor(ctx, &ss)
+	decCtx, decSpan := observability.Tracer().Start(ctx, "stageset.buildDecryptor")
+	dec, derr := r.buildDecryptor(decCtx, &ss)
 	if derr != nil {
+		decSpan.RecordError(derr)
+		decSpan.SetStatus(codes.Error, "decryptor configuration failed")
+		decSpan.End()
 		return r.failStage(ctx, &ss, ss.Spec.Stages[0].Name, "configure decryption", derr, nil, "", nil)
 	}
+	decSpan.End()
 
 	priorStages := indexStageStatuses(ss.Status.Stages)
 
@@ -331,23 +368,48 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 			}
 
-			files, err := fetcher.Fetch(ctx, ra.URL, ra.Digest, "")
+			fetchCtx, fetchSpan := observability.Tracer().Start(ctx, "stage.fetch",
+				trace.WithAttributes(attribute.String("stage", stage.Name)))
+			fetchSpan.SetAttributes(
+				attribute.String("stage.revision", ra.Revision),
+				attribute.String("stage.digest", ra.Digest),
+			)
+			files, err := fetcher.Fetch(fetchCtx, ra.URL, ra.Digest, "")
 			if err != nil {
+				fetchSpan.RecordError(err)
+				fetchSpan.SetStatus(codes.Error, "artifact fetch failed")
+				fetchSpan.End()
 				return r.failStage(ctx, &ss, stage.Name, "fetch artifact", err, stageStatuses, ra.Revision, executed)
 			}
+			fetchSpan.End()
+
+			// decryptFiles takes no ctx; the span still times the SOPS pass.
+			_, decryptSpan := observability.Tracer().Start(ctx, "stage.decrypt",
+				trace.WithAttributes(attribute.String("stage", stage.Name)))
 			files, err = decryptFiles(dec, files)
 			if err != nil {
+				decryptSpan.RecordError(err)
+				decryptSpan.SetStatus(codes.Error, "decrypt failed")
+				decryptSpan.End()
 				return r.failStage(ctx, &ss, stage.Name, "decrypt", err, stageStatuses, ra.Revision, executed)
 			}
+			decryptSpan.End()
 			vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
 			if err != nil {
 				return r.failStage(ctx, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, ra.Revision, executed)
 			}
 			subDigests[i] = substitutionDigest(vars)
+			// build.Build takes no ctx; the span still times the kustomize build.
+			_, buildSpan := observability.Tracer().Start(ctx, "stage.build",
+				trace.WithAttributes(attribute.String("stage", stage.Name)))
 			objects, err := build.Build(files, build.Options{Path: stage.Path, Patches: stage.Patches}, vars)
 			if err != nil {
+				buildSpan.RecordError(err)
+				buildSpan.SetStatus(codes.Error, "build failed")
+				buildSpan.End()
 				return r.failStage(ctx, &ss, stage.Name, "build", err, stageStatuses, ra.Revision, executed)
 			}
+			buildSpan.End()
 			// In hybrid/applyset modes every applied object also carries the
 			// ApplySet (KEP-3659) member label, so `kubectl get -l
 			// applyset.kubernetes.io/part-of=<id>` answers "what does this stage
@@ -357,11 +419,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if cerr != nil {
 				return r.failStage(ctx, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
 			}
-			changeSet, err := applier.Apply(ctx, ss.Name, ss.Namespace, objects, conflicts)
+			applyCtx, applySpan := observability.Tracer().Start(ctx, "stage.apply",
+				trace.WithAttributes(
+					attribute.String("stage", stage.Name),
+					attribute.Int("stage.objectCount", len(objects)),
+				))
+			changeSet, err := applier.Apply(applyCtx, ss.Name, ss.Namespace, objects, conflicts)
 			if err != nil {
+				applySpan.RecordError(err)
+				applySpan.SetStatus(codes.Error, "apply failed")
+				applySpan.End()
 				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
 				return r.failStage(ctx, &ss, stage.Name, "apply", err, stageStatuses, ra.Revision, executed)
 			}
+			applySpan.End()
 			r.reportDrift(&ss, stage, changeSet, priorRevision, ra.Revision)
 			if r.RollbackStore != nil && ss.Spec.RollbackOnFailure {
 				r.storeRendered(ctx, &ss, stage.Name, ra.Digest, objects)
@@ -416,13 +487,19 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// rollbackOnFailure is set, restore the last-good snapshot; a snapshot
 		// no longer fetchable surfaces as a terminal PreviousRevisionUnavailable.
 		if ss.Spec.RollbackOnFailure {
-			if rbReason, rbMsg := r.attemptRollback(ctx, &ss, applier, fetcher); rbReason != "" {
+			rbCtx, rbSpan := observability.Tracer().Start(ctx, "stageset.rollback")
+			rbReason, rbMsg := r.attemptRollback(rbCtx, &ss, applier, fetcher)
+			if rbReason != "" {
+				rbSpan.SetStatus(codes.Error, rbReason)
+				rbSpan.End()
 				r.setReady(&ss, metav1.ConditionFalse, rbReason, rbMsg)
 				ss.Status.ObservedGeneration = ss.Generation
 				return ctrl.Result{}, r.Status().Update(ctx, &ss)
 			}
+			rbSpan.End()
 			r.event(&ss, corev1.EventTypeWarning, eventReasonRolledBack,
 				"rolled back to the last-applied revisions after a failed run")
+			logger.Info("rolled back to the last-applied revisions after a failed run")
 		}
 		return loopResult, loopErr
 	}
@@ -489,6 +566,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonReady).Inc()
 	r.event(&ss, corev1.EventTypeNormal, ReasonReady,
 		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
+	logger.Info("StageSet synced", "stages", len(ss.Spec.Stages), "ready", true)
 
 	return ctrl.Result{RequeueAfter: r.steadyInterval(&ss)}, nil
 }
@@ -624,6 +702,7 @@ func (r *StageSetReconciler) failStage(ctx context.Context, ss *stagesv1.StageSe
 	}
 	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonStageFailed).Inc()
 	r.event(ss, corev1.EventTypeWarning, ReasonStageFailed, msg)
+	log.FromContext(ctx).Error(cause, "stage failed", "stage", stage, "op", op)
 	return ctrl.Result{}, cause
 }
 

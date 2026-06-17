@@ -1,5 +1,5 @@
 ---
-title: Secrets encryption (SOPS)
+title: Secrets encryption
 description: Decrypt SOPS-encrypted files in a stage's source before they are applied.
 tags: [secrets, encryption, sops, security]
 ---

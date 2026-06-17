@@ -8,10 +8,9 @@
 // typed value pointers main dereferences after parsing; flaggen introspects the
 // same FlagSet without dereferencing.
 //
-// The controller-runtime zap logging flags are deliberately NOT registered here
-// — main binds those via zap.Options.BindFlags so flaggen documents only the
-// controller's own flags, and the zap flags stay prose in the configuration
-// reference.
+// The logging flags (--log-level, --log-format) are registered here like every
+// other flag: main reads them to build the slog logger that backs both the
+// application's own logs and, via the logr bridge, controller-runtime's.
 package cliflags
 
 import (
@@ -35,6 +34,7 @@ func Groups() []string {
 		"Tracing",
 		"Webhook and TLS provisioning",
 		"Gate endpoint",
+		"Logging",
 	}
 }
 
@@ -92,6 +92,9 @@ type Flags struct {
 	WebhookVWCName      *string
 
 	GateAddr *string
+
+	LogLevel  *string
+	LogFormat *string
 }
 
 // groupByName records each flag's documentation group, populated by Register.
@@ -140,6 +143,8 @@ func Register(fs *flag.FlagSet) *Flags {
 		WebhookServiceNS:     new(string),
 		WebhookVWCName:       new(string),
 		GateAddr:             new(string),
+		LogLevel:             new(string),
+		LogFormat:            new(string),
 	}
 
 	group := func(name string, g string) string {
@@ -157,6 +162,7 @@ func Register(fs *flag.FlagSet) *Flags {
 		tracing = "Tracing"
 		webhook = "Webhook and TLS provisioning"
 		gate    = "Gate endpoint"
+		logging = "Logging"
 	)
 
 	fs.StringVar(f.MetricsAddr, group("metrics-bind-address", metrics), ":8080", "The address the metric endpoint binds to.")
@@ -192,6 +198,8 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.BoolVar(f.RBS3Anonymous, group("rollback-store-s3-anonymous", rbS3), false, "Use anonymous (unsigned) requests for the rollback store.")
 	fs.StringVar(f.RBS3SSE, group("rollback-store-s3-sse", rbS3), "s3", "Server-side encryption at rest for stored objects: none, s3 (SSE-S3), or kms (SSE-KMS). The store holds rendered Secret data, so encryption is on by default; set none only for a bucket whose backend cannot honor an SSE header.")
 	fs.StringVar(f.RBS3SSEKMSKey, group("rollback-store-s3-sse-kms-key", rbS3), "", "KMS key ARN/ID for --rollback-store-s3-sse=kms; empty uses the bucket's default KMS key.")
+	fs.StringVar(f.LogLevel, group("log-level", logging), "info", "Log level: debug, info, warn, or error.")
+	fs.StringVar(f.LogFormat, group("log-format", logging), "json", "Log output format: json or text.")
 
 	return f
 }

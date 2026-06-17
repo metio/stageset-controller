@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	// /usr/share/zoneinfo.
 	_ "time/tzdata"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -28,7 +30,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -87,8 +88,6 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	c := cliflags.Register(fs)
 
-	opts := zap.Options{Development: false}
-	opts.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -96,8 +95,13 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		return 2
 	}
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	setupLog := ctrl.Log.WithName("setup")
+	logger := observability.NewLogger(stderr, *c.LogLevel, *c.LogFormat)
+	slog.SetDefault(logger)
+	// Route controller-runtime's own logs (leader election, cache, manager,
+	// internal reconcile) through the same slog handler so they share the
+	// configured JSON/text format and level.
+	ctrl.SetLogger(logr.FromSlogHandler(logger.Handler()))
+	setupLog := logger.With("logger", "setup")
 	setupLog.Info("starting stageset-controller", "version", version, "commit", commit)
 
 	tracingShutdown, err := observability.InitTracer(ctx, observability.TracingConfig{
@@ -107,7 +111,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		SampleRatio:    *c.TracingSampleRatio,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to init tracer")
+		setupLog.Error("unable to init tracer", "error", err)
 		return 1
 	}
 	defer func() {
@@ -124,7 +128,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	// erroring only after the manager has connected.
 	rollbackStore, err := buildRollbackStore(c)
 	if err != nil {
-		setupLog.Error(err, "invalid rollback store configuration")
+		setupLog.Error("invalid rollback store configuration", "error", err)
 		return 1
 	}
 	switch {
@@ -140,7 +144,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
-		setupLog.Error(err, "unable to load kubeconfig")
+		setupLog.Error("unable to load kubeconfig", "error", err)
 		return 1
 	}
 	mgrOpts := buildManagerOptions(c, env)
@@ -149,7 +153,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	}
 	mgr, err := ctrl.NewManager(restCfg, mgrOpts)
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error("unable to start manager", "error", err)
 		return 1
 	}
 
@@ -162,14 +166,14 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		DefaultInterval:      *c.DefaultInterval,
 		RollbackStore:        rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "StageSet")
+		setupLog.Error("unable to create controller", "error", err, "controller", "StageSet")
 		return 1
 	}
 
 	var webhookRenewerDone <-chan struct{}
 	if *c.EnableWebhook {
 		if err := (&controller.StageSetValidator{}).SetupWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "StageSet")
+			setupLog.Error("unable to create webhook", "error", err, "webhook", "StageSet")
 			return 1
 		}
 		switch *c.WebhookCertMode {
@@ -177,26 +181,26 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 			// External tooling provisions tls.crt/tls.key under the cert dir.
 		case "self-signed":
 			if *c.WebhookVWCName == "" {
-				setupLog.Error(errors.New("missing flag"), "--webhook-validating-config-name is required for --webhook-cert-mode=self-signed")
+				setupLog.Error("--webhook-validating-config-name is required for --webhook-cert-mode=self-signed", "error", errors.New("missing flag"))
 				return 1
 			}
 			ns := *c.WebhookServiceNS
 			if ns == "" {
 				ns = inClusterNamespace()
 			}
-			done, serr := provisionSelfSignedWebhookCert(ctx, restCfg, selfsigned.Input{
+			done, serr := provisionSelfSignedWebhookCert(ctx, logger, restCfg, selfsigned.Input{
 				ServiceName: *c.WebhookServiceName,
 				Namespace:   ns,
 				Validity:    *c.WebhookCertValidity,
 			}, *c.WebhookCertDir, *c.WebhookVWCName)
 			if serr != nil {
-				setupLog.Error(serr, "unable to provision self-signed webhook cert")
+				setupLog.Error("unable to provision self-signed webhook cert", "error", serr)
 				return 1
 			}
 			webhookRenewerDone = done
 			setupLog.Info("self-signed webhook cert provisioned", "certDir", *c.WebhookCertDir, "vwc", *c.WebhookVWCName)
 		default:
-			setupLog.Error(errors.New("invalid flag"), "--webhook-cert-mode must be cert-manager or self-signed", "got", *c.WebhookCertMode)
+			setupLog.Error("--webhook-cert-mode must be cert-manager or self-signed", "error", errors.New("invalid flag"), "got", *c.WebhookCertMode)
 			return 1
 		}
 	}
@@ -219,23 +223,23 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 			}
 			return nil
 		})); err != nil {
-			setupLog.Error(err, "unable to add stage-gate server")
+			setupLog.Error("unable to add stage-gate server", "error", err)
 			return 1
 		}
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+		setupLog.Error("unable to set up health check", "error", err)
 		return 1
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+		setupLog.Error("unable to set up ready check", "error", err)
 		return 1
 	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error("problem running manager", "error", err)
 		return 1
 	}
 	// Await the self-signed renewer's clean exit (bounded) after the manager
@@ -320,7 +324,7 @@ func buildRollbackStore(c *cliflags.Flags) (controller.RollbackStore, error) {
 // it to certDir, unions this pod's CA into the VWC caBundle (peer-preserving,
 // optimistic-concurrency), and starts the rotation renewer. Returns a channel
 // closed when the renewer exits.
-func provisionSelfSignedWebhookCert(ctx context.Context, restCfg *rest.Config, in selfsigned.Input, certDir, vwcName string) (<-chan struct{}, error) {
+func provisionSelfSignedWebhookCert(ctx context.Context, logger *slog.Logger, restCfg *rest.Config, in selfsigned.Input, certDir, vwcName string) (<-chan struct{}, error) {
 	if in.Namespace == "" {
 		return nil, errors.New("webhook self-signed: service namespace is required (set --webhook-service-namespace)")
 	}
@@ -360,7 +364,7 @@ func provisionSelfSignedWebhookCert(ctx context.Context, restCfg *rest.Config, i
 		defer func() {
 			if p := recover(); p != nil {
 				metrics.WebhookCertRenewalFailuresTotal.Inc()
-				ctrl.Log.WithName("webhook").Error(errors.New("renewer panic"), "self-signed cert renewer panicked", "panic", p)
+				logger.With("logger", "webhook").Error("self-signed cert renewer panicked", "error", errors.New("renewer panic"), "panic", p)
 			}
 		}()
 		_ = renewer.Run(ctx)
