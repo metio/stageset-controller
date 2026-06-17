@@ -45,6 +45,18 @@ var (
 		Help: "Total failed self-signed webhook certificate renewals.",
 	})
 
+	// WatchEngagementFailuresTotal counts failures to engage a dynamic producer
+	// watch via Controller.Watch. The watch is engaged lazily the first time a
+	// StageSet references a producer kind; a failed engagement is otherwise
+	// silent — dependent StageSets stop re-triggering on that producer's
+	// upstream changes with no CR-level signal. Sustained non-zero values on a
+	// gvk mean StageSets referencing that producer kind won't re-trigger on
+	// upstream changes until the watch engages.
+	WatchEngagementFailuresTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stageset_watch_engagement_failures_total",
+		Help: "Failures to engage a dynamic producer watch. Sustained non-zero values on a gvk mean dependent StageSets won't re-trigger on that producer kind's upstream changes until the watch engages.",
+	}, []string{"gvk"})
+
 	// StageReady reports whether each stage is currently Ready (1) or not (0).
 	// A progressive-delivery controller that gates on metrics rather than a
 	// webhook — e.g. Argo Rollouts' Prometheus metric provider — can hold a
@@ -56,7 +68,7 @@ var (
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, StageReady)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, StageReady)
 }
 
 // SetStageReady publishes the readiness gauge for one stage.

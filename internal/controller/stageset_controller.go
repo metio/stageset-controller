@@ -1190,7 +1190,12 @@ func (r *StageSetReconciler) engageProducerWatch(gvk schema.GroupVersionKind) {
 	obj.SetGroupVersionKind(gvk)
 	src := source.Kind(r.mgrCache, client.Object(obj), handler.EnqueueRequestsFromMapFunc(r.mapProducer))
 	if err := r.controller.Watch(src); err != nil {
-		return // transient; retried on the next reconcile (still unrecorded)
+		// A failed engagement is otherwise silent: the producer kind stays
+		// unwatched, so dependent StageSets stop re-triggering on its upstream
+		// changes until a later reconcile re-attempts. Count it so a sustained
+		// pattern surfaces in Prometheus even though the next reconcile retries.
+		metrics.WatchEngagementFailuresTotal.WithLabelValues(gvk.String()).Inc()
+		return
 	}
 	r.watchedProducers[gvk] = struct{}{}
 }

@@ -69,6 +69,7 @@ metrics:
 | `StageSetReconcileLatencyHigh` | warning | Reconcile p99 (10m window) exceeds the ceiling in seconds. | `reconcileLatencySeconds` (`30`), `reconcileLatencyDuration` (`15m`) |
 | `StageSetControllerPodDown` | critical | A controller pod is NotReady for the window. | `podDownDuration` (`5m`) |
 | `StageSetWebhookCertRenewalFailing` | critical | `stageset_webhook_cert_renewal_failures_total` increases over 1h beyond the count. | `webhookCertRenewalFailuresPerHour` (`1`), `webhookCertRenewalFailuresDuration` (`30m`) |
+| `StageSetWatchEngagementFailing` | warning | `stageset_watch_engagement_failures_total{gvk=...}` increases over 1h beyond the count — a producer watch failed to engage, so StageSets referencing that kind stop re-triggering on its upstream changes. | `watchEngagementFailuresPerHour` (`1`), `watchEngagementFailuresDuration` (`30m`) |
 
 Each threshold lives under `metrics.prometheusRule.thresholds`. To silence a
 built-in alert without forking the chart, raise its threshold to an impossibly high
@@ -88,6 +89,8 @@ metrics:
       podDownDuration: 5m
       webhookCertRenewalFailuresPerHour: 1
       webhookCertRenewalFailuresDuration: 30m
+      watchEngagementFailuresPerHour: 1
+      watchEngagementFailuresDuration: 30m
 ```
 
 ### Alerts link to runbooks
@@ -96,8 +99,10 @@ Each alert carries a runbook link in its `runbook_url` annotation (the annotatio
 key is `metrics.prometheusRule.runbookAnnotationKey`; the URL prefix is fixed to
 this site's [runbooks](/runbooks/)). `StageSetReconcileErrorsHigh` templates its
 link on the `reason` label — every Ready-condition reason maps to a runbook at
-`/runbooks/<reason>/` — while the availability and webhook alerts point at their
-fixed pages ([workqueue-saturation](/runbooks/workqueue-saturation/),
+`/runbooks/<reason>/` — while the availability, webhook, and
+watch-engagement alerts point at their fixed pages
+([workqueue-saturation](/runbooks/workqueue-saturation/),
 [reconcile-latency](/runbooks/reconcile-latency/),
 [controller-pod-down](/runbooks/controller-pod-down/),
-[webhook-cert-renewal](/runbooks/webhook-cert-renewal/)).
+[webhook-cert-renewal](/runbooks/webhook-cert-renewal/),
+[watch-engagement](/runbooks/watch-engagement/)).
