@@ -67,6 +67,14 @@ The metrics endpoint exposes standard `controller_runtime_*` and `workqueue_*`
 series alongside the custom `stageset_*` metrics documented in
 [Operations](/installation/operations/).
 
+## Tracing
+
+The controller exports OpenTelemetry traces over OTLP gRPC when
+`--tracing-endpoint` is set; it is off by default. See
+[Observability](/usage/observability/) for the collector wiring.
+
+{{< flag-table group="Tracing" >}}
+
 ## Webhook and TLS provisioning
 
 The validating admission webhook for `StageSet` is enabled by default. Two TLS

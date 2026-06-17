@@ -37,7 +37,7 @@ maps to a [runbook](/runbooks/) by its `REASON`.
 ## Detail
 
 ```shell
-stagesetctl get payments -n payments
+stagesetctl --namespace payments get payments
 ```
 
 ```text

@@ -32,6 +32,7 @@ func Groups() []string {
 		"Rollback store — filesystem",
 		"Rollback store — S3",
 		"Metrics and health",
+		"Tracing",
 		"Webhook and TLS provisioning",
 		"Gate endpoint",
 	}
@@ -61,7 +62,6 @@ type Flags struct {
 	ShardCap             *int
 	NoCrossNamespaceRefs *bool
 	AllowedActionHosts   *StringSlice
-	RunbookBaseURL       *string
 	DefaultInterval      *time.Duration
 
 	RBPath *string
@@ -77,6 +77,10 @@ type Flags struct {
 	RBS3Anonymous    *bool
 	RBS3SSE          *string
 	RBS3SSEKMSKey    *string
+
+	TracingEndpoint    *string
+	TracingInsecure    *bool
+	TracingSampleRatio *float64
 
 	EnableWebhook       *bool
 	WebhookCertMode     *string
@@ -111,7 +115,6 @@ func Register(fs *flag.FlagSet) *Flags {
 		ShardCap:             new(int),
 		NoCrossNamespaceRefs: new(bool),
 		AllowedActionHosts:   &StringSlice{},
-		RunbookBaseURL:       new(string),
 		DefaultInterval:      new(time.Duration),
 		RBPath:               new(string),
 		RBS3Endpoint:         new(string),
@@ -125,6 +128,9 @@ func Register(fs *flag.FlagSet) *Flags {
 		RBS3Anonymous:        new(bool),
 		RBS3SSE:              new(string),
 		RBS3SSEKMSKey:        new(string),
+		TracingEndpoint:      new(string),
+		TracingInsecure:      new(bool),
+		TracingSampleRatio:   new(float64),
 		EnableWebhook:        new(bool),
 		WebhookCertMode:      new(string),
 		WebhookCertDir:       new(string),
@@ -148,6 +154,7 @@ func Register(fs *flag.FlagSet) *Flags {
 		rbFile  = "Rollback store — filesystem"
 		rbS3    = "Rollback store — S3"
 		metrics = "Metrics and health"
+		tracing = "Tracing"
 		webhook = "Webhook and TLS provisioning"
 		gate    = "Gate endpoint"
 	)
@@ -159,6 +166,9 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.IntVar(f.ShardCap, group("inventory-shard-cap", recon), inventory.DefaultShardCap, "Maximum entries per StageInventory shard.")
 	fs.Var(f.AllowedActionHosts, group("allowed-action-hosts", recon), "Host glob allowed for http actions; repeatable. Loopback and link-local ranges are always denied unless explicitly listed.")
 	fs.BoolVar(f.NoCrossNamespaceRefs, group("no-cross-namespace-refs", recon), false, "Deny cross-namespace sourceRef and dependsOn references.")
+	fs.StringVar(f.TracingEndpoint, group("tracing-endpoint", tracing), "", "OTLP gRPC collector host:port (e.g. otel-collector.observability.svc:4317). Empty disables tracing entirely.")
+	fs.BoolVar(f.TracingInsecure, group("tracing-insecure", tracing), false, "Skip TLS when dialing the OTLP collector. Use only for in-cluster collectors that don't terminate TLS themselves.")
+	fs.Float64Var(f.TracingSampleRatio, group("tracing-sample-ratio", tracing), 1.0, "TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.")
 	fs.BoolVar(f.EnableWebhook, group("enable-webhook", webhook), true, "Enable the validating admission webhook for StageSet.")
 	fs.StringVar(f.WebhookCertMode, group("webhook-cert-mode", webhook), "cert-manager", "How webhook TLS is provisioned: cert-manager (the chart renders a Certificate; cert mounted from a Secret), or self-signed (the controller generates a CA + serving cert in-pod and patches the ValidatingWebhookConfiguration caBundle).")
 	fs.StringVar(f.WebhookCertDir, group("webhook-cert-dir", webhook), "/tmp/k8s-webhook-server/serving-certs", "Directory holding the webhook tls.crt and tls.key.")
@@ -168,7 +178,6 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.StringVar(f.WebhookServiceNS, group("webhook-service-namespace", webhook), "", "Namespace of the webhook Service; empty falls back to the in-cluster ServiceAccount namespace.")
 	fs.StringVar(f.WebhookVWCName, group("webhook-validating-config-name", webhook), "", "Name of the ValidatingWebhookConfiguration whose caBundle to patch. Required for self-signed mode.")
 	fs.StringVar(f.GateAddr, group("gate-bind-address", gate), ":8082", "Address for the read-only Flagger stage-gate endpoint (GET /gate/{namespace}/{stageset}/{stage}). Empty disables it.")
-	fs.StringVar(f.RunbookBaseURL, group("runbook-base-url", recon), "", "Optional URL prefix appended to actionable Ready condition messages as (runbook: <base>/<reason>/). Empty disables.")
 	fs.StringVar(f.WatchNamespaces, group("watch-namespaces", watch), "", "Comma-separated list of namespaces this controller watches. Empty (the default) means cluster-wide. When set, the manager's cache only observes StageSets and sources in these namespaces — the multi-tenant controller-instances pattern. Falls back to STAGESET_WATCH_NAMESPACES env when the flag is empty.")
 	fs.DurationVar(f.DefaultInterval, group("default-interval", recon), 10*time.Minute, "Reconcile cadence for StageSets that omit spec.interval.")
 	fs.StringVar(f.RBPath, group("rollback-store-path", rbFile), "", "Filesystem directory (e.g. an RWX PVC mount) for the optional rollback store. Use an RWX volume for HA replicas. Mutually exclusive with the S3 store.")

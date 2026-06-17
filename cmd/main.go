@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,6 +41,7 @@ import (
 	"github.com/metio/stageset-controller/internal/controller"
 	"github.com/metio/stageset-controller/internal/gate"
 	"github.com/metio/stageset-controller/internal/metrics"
+	"github.com/metio/stageset-controller/internal/observability"
 	"github.com/metio/stageset-controller/internal/rollbackstore"
 	"github.com/metio/stageset-controller/internal/webhook/selfsigned"
 )
@@ -98,6 +100,24 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	setupLog := ctrl.Log.WithName("setup")
 	setupLog.Info("starting stageset-controller", "version", version, "commit", commit)
 
+	tracingShutdown, err := observability.InitTracer(ctx, observability.TracingConfig{
+		Endpoint:       *c.TracingEndpoint,
+		Insecure:       *c.TracingInsecure,
+		ServiceVersion: version,
+		SampleRatio:    *c.TracingSampleRatio,
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to init tracer")
+		return 1
+	}
+	defer func() {
+		// Bounded shutdown so a slow collector doesn't hang the
+		// process — five seconds is generous for a flush.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tracingShutdown(shutdownCtx)
+	}()
+
 	// Validate and construct the rollback store before any cluster contact, so a
 	// flag mistake (both backends set, or an incomplete S3 config) fails fast
 	// with a clear message rather than silently leaving rollback disabled or
@@ -123,28 +143,9 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		setupLog.Error(err, "unable to load kubeconfig")
 		return 1
 	}
-	mgrOpts := ctrl.Options{
-		Scheme:                 scheme,
-		HealthProbeBindAddress: *c.ProbeAddr,
-		LeaderElection:         *c.EnableLeaderElection,
-		LeaderElectionID:       "stageset-controller.stages.metio.wtf",
-		// Webhook serves on every replica (admission must, even non-leaders);
-		// only reconcilers are leader-gated.
-		WebhookServer: webhook.NewServer(webhook.Options{Port: *c.WebhookPort, CertDir: *c.WebhookCertDir}),
-	}
-	if watchNS := parseWatchNamespaces(*c.WatchNamespaces, env); len(watchNS) > 0 {
-		// Restrict the manager's informers to the listed namespaces. StageSets
-		// and sources outside this set never enter the cache, so the reconciler
-		// can't see them even where RBAC would otherwise grant access — the
-		// multi-tenant controller-instances pattern (one deployment per
-		// tenant-group, disjoint watch sets). The chart pivots RBAC to
-		// per-namespace RoleBindings to match.
-		nsCache := make(map[string]cache.Config, len(watchNS))
-		for _, ns := range watchNS {
-			nsCache[ns] = cache.Config{}
-		}
-		mgrOpts.Cache.DefaultNamespaces = nsCache
-		setupLog.Info("watch scope restricted", "namespaces", watchNS)
+	mgrOpts := buildManagerOptions(c, env)
+	if mgrOpts.Cache.DefaultNamespaces != nil {
+		setupLog.Info("watch scope restricted", "namespaces", parseWatchNamespaces(*c.WatchNamespaces, env))
 	}
 	mgr, err := ctrl.NewManager(restCfg, mgrOpts)
 	if err != nil {
@@ -158,7 +159,6 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		ShardCap:             *c.ShardCap,
 		AllowedActionHosts:   []string(*c.AllowedActionHosts),
 		NoCrossNamespaceRefs: *c.NoCrossNamespaceRefs,
-		RunbookBaseURL:       *c.RunbookBaseURL,
 		DefaultInterval:      *c.DefaultInterval,
 		RollbackStore:        rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
@@ -247,6 +247,39 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+// buildManagerOptions assembles the controller-runtime manager options from the
+// parsed flags: the metrics bind address, health-probe address, leader election,
+// the webhook server, and the cache watch-scope. It contacts no apiserver, so it
+// is exercised directly in tests to pin that the configured --metrics-bind-address
+// reaches metricsserver.Options and that --watch-namespaces lands in
+// Cache.DefaultNamespaces as exactly the listed namespaces.
+func buildManagerOptions(c *cliflags.Flags, env []string) ctrl.Options {
+	mgrOpts := ctrl.Options{
+		Scheme:                 scheme,
+		Metrics:                metricsserver.Options{BindAddress: *c.MetricsAddr},
+		HealthProbeBindAddress: *c.ProbeAddr,
+		LeaderElection:         *c.EnableLeaderElection,
+		LeaderElectionID:       "stageset-controller.stages.metio.wtf",
+		// Webhook serves on every replica (admission must, even non-leaders);
+		// only reconcilers are leader-gated.
+		WebhookServer: webhook.NewServer(webhook.Options{Port: *c.WebhookPort, CertDir: *c.WebhookCertDir}),
+	}
+	if watchNS := parseWatchNamespaces(*c.WatchNamespaces, env); len(watchNS) > 0 {
+		// Restrict the manager's informers to the listed namespaces. StageSets
+		// and sources outside this set never enter the cache, so the reconciler
+		// can't see them even where RBAC would otherwise grant access — the
+		// multi-tenant controller-instances pattern (one deployment per
+		// tenant-group, disjoint watch sets). The chart pivots RBAC to
+		// per-namespace RoleBindings to match.
+		nsCache := make(map[string]cache.Config, len(watchNS))
+		for _, ns := range watchNS {
+			nsCache[ns] = cache.Config{}
+		}
+		mgrOpts.Cache.DefaultNamespaces = nsCache
+	}
+	return mgrOpts
 }
 
 // buildRollbackStore selects and constructs the optional rollback store from the

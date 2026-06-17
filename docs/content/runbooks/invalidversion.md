@@ -32,7 +32,7 @@ Then, depending on which source the Message names:
 
 ```shell
 # fromObject: confirm the field carries a bare semver on the rendered object
-stagesetctl build <name> -n <namespace> --stage <stage> | grep -i version
+stagesetctl --namespace <namespace> build <name> --stage <stage> | grep -i version
 
 # fromArtifact: confirm the file exists and contains only a semver (e.g. 2.1.0)
 # inspect the resolved artifact for the stage named in the Message

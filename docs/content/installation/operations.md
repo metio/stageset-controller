@@ -64,22 +64,16 @@ include `Succeeded`, `UpdateDeferred`, `MigrationStarted`, and
 ## Runbooks
 
 Every actionable Ready-condition reason has a [runbook](/runbooks/) covering the
-symptom, cause, diagnosis, and remediation. Set `--runbook-base-url` (the chart's
-`controller.runbookBaseURL`, which defaults to this docs site) to a published copy
-of those pages and the controller appends `(runbook: <base>/<reason>/)` to the
-Ready message (the reason lower-cased into a path segment), so a `kubectl describe`
-links straight to the fix. Healthy reasons (`Succeeded`, `Suspended`) get no link.
+symptom, cause, diagnosis, and remediation. The controller appends a
+`(runbook: https://stageset.projects.metio.wtf/runbooks/<reason>/)` link to every
+actionable Ready message (the reason lower-cased into a path segment), so a
+`kubectl describe` links straight to the fix. Healthy reasons (`Succeeded`,
+`Suspended`) get no link.
 
-```yaml
-# values.yaml — point at your own mirror, or set "" to drop the links
-controller:
-  runbookBaseURL: https://runbooks.internal/stageset
-```
-
-For example, a `StageFailed` StageSet then shows:
+For example, a `StageFailed` StageSet shows:
 
 ```text
-Message:  stage "application" failed: … (runbook: https://runbooks.internal/stageset/stagefailed/)
+Message:  stage "application" failed: … (runbook: https://stageset.projects.metio.wtf/runbooks/stagefailed/)
 ```
 
 ## Forcing a reconcile

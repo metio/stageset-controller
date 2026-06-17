@@ -75,9 +75,9 @@ rbac:
 ```
 
 ```bash
-helm upgrade --install stageset-controller \
+helm --namespace stageset-system upgrade --install stageset-controller \
   oci://ghcr.io/metio/helm-charts/stageset-controller \
-  -n stageset-system --create-namespace \
+  --create-namespace \
   --set rbac.clusterAdmin=true
 ```
 

@@ -1,7 +1,7 @@
 ---
 title: Observability
-description: The controller's Prometheus metrics, the chart's metrics Service and ServiceMonitor, the opt-in PrometheusRule alert set, and how every alert links to a runbook.
-tags: [observability, metrics, prometheus, alerts]
+description: The controller's Prometheus metrics, the chart's metrics Service and ServiceMonitor, the opt-in PrometheusRule alert set, how every alert links to a runbook, and OTLP tracing.
+tags: [observability, metrics, prometheus, alerts, tracing]
 ---
 
 The controller exports Prometheus metrics on an HTTP endpoint: a set of custom
@@ -139,6 +139,22 @@ metrics:
       webhookCertRenewalFailuresDuration: 30m
 ```
 
+## Tracing
+
+The controller exports OpenTelemetry traces over OTLP gRPC:
+
+- `--tracing-endpoint` — the OTLP gRPC collector host:port, e.g.
+  `otel-collector.observability.svc:4317`. Empty disables tracing entirely.
+- `--tracing-insecure` — skip TLS when dialing the collector. Use only for
+  in-cluster collectors that do not terminate TLS themselves.
+- `--tracing-sample-ratio` — TraceID-ratio sampling between `0.0` and `1.0`
+  (default `1`, every trace sampled).
+
+When the controller runs under a NetworkPolicy, the OTLP collector egress row
+already accounts for these spans; see the
+[network policy page](/usage/network-policy/). The full flag list with defaults
+is on the [configuration page](/installation/configuration/).
+
 ## Runbooks
 
 Each alert carries a runbook link in its `runbook_url` annotation (the annotation
@@ -150,8 +166,9 @@ its link on the `reason` label — every Ready-condition reason maps to a runboo
 fixed pages (`workqueue-saturation`, `reconcile-latency`, `controller-pod-down`,
 `webhook-cert-renewal`).
 
-The same reason-to-page mapping surfaces on the resource itself: the controller's
-`--runbook-base-url` flag threads a `(runbook: <base>/<reason>/)` suffix onto
-actionable Ready-condition messages, so `kubectl describe stageset` links straight
-to the remediation page for an actionable failure. Intentional and steady states —
-`Succeeded`, `Suspended` — carry no suffix, since there is nothing to remediate.
+The same reason-to-page mapping surfaces on the resource itself: the controller
+threads a `(runbook: https://stageset.projects.metio.wtf/runbooks/<reason>/)`
+suffix onto actionable Ready-condition messages, so `kubectl describe stageset`
+links straight to the remediation page for an actionable failure. Intentional and
+steady states — `Succeeded`, `Suspended` — carry no suffix, since there is nothing
+to remediate.

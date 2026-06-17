@@ -14,7 +14,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -53,24 +55,37 @@ type S3Store struct {
 	sse    encrypt.ServerSide
 }
 
+// s3Credentials selects the minio credential provider from the config:
+// anonymous → nil (unsigned), an explicit access key → static V4, otherwise the
+// discovery chain (env → shared file → EC2/EKS IAM). AWS_* environment variables
+// and IRSA web-identity tokens are honored through the env entry, so a Secret of
+// AWS_* keys mounted via envFrom authenticates here.
+func s3Credentials(cfg S3Config) *credentials.Credentials {
+	switch {
+	case cfg.Anonymous:
+		return nil
+	case cfg.AccessKey != "":
+		return credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, cfg.SessionToken)
+	default:
+		// Discovery chain: env vars first, then EC2/EKS metadata.
+		// IRSA web-identity tokens are honored via the env chain.
+		return credentials.NewChainCredentials([]credentials.Provider{
+			&credentials.EnvAWS{},
+			&credentials.FileAWSCredentials{},
+			&credentials.IAM{Client: &http.Client{Timeout: 5 * time.Second}},
+		})
+	}
+}
+
 // NewS3 builds an S3 rollback store. Empty static credentials fall through to
 // minio-go's environment / EC2 / EKS (IRSA) credential chain.
 func NewS3(cfg S3Config) (*S3Store, error) {
-	var creds *credentials.Credentials
-	switch {
-	case cfg.Anonymous:
-		creds = credentials.NewStaticV4("", "", "")
-	case cfg.AccessKey != "":
-		creds = credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, cfg.SessionToken)
-	default:
-		creds = credentials.NewIAM("")
-	}
 	sse, err := serverSideEncryption(cfg.SSE, cfg.SSEKMSKeyID)
 	if err != nil {
 		return nil, err
 	}
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:  creds,
+		Creds:  s3Credentials(cfg),
 		Secure: cfg.UseSSL,
 		Region: cfg.Region,
 	})

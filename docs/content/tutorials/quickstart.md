@@ -34,7 +34,7 @@ values (HA replicas, rollback store, webhook TLS mode, and so on).
 Verify the controller is running:
 
 ```shell
-kubectl -n stageset-system get deploy stageset-controller
+kubectl --namespace stageset-system get deploy stageset-controller
 # NAME                   READY   UP-TO-DATE   AVAILABLE   AGE
 # stageset-controller    1/1     1            1           30s
 ```
@@ -62,7 +62,7 @@ EOF
 Wait for it to sync:
 
 ```shell
-kubectl -n default wait --for=condition=Ready gitrepository/my-app --timeout=2m
+kubectl --namespace default wait --for=condition=Ready gitrepository/my-app --timeout=2m
 ```
 
 ## Step 3 — Apply a StageSet
@@ -90,7 +90,7 @@ EOF
 ## Step 4 — Confirm it reconciled
 
 ```shell
-kubectl -n default get stageset my-app
+kubectl --namespace default get stageset my-app
 # NAME     READY   AGE
 # my-app   True    15s
 ```
@@ -99,13 +99,13 @@ If `READY` is `False`, describe the resource — the `Reason` and `Message` on t
 `Ready` condition identify the problem:
 
 ```shell
-kubectl -n default describe stageset my-app
+kubectl --namespace default describe stageset my-app
 ```
 
 For a richer view of per-stage progress, use the CLI:
 
 ```shell
-stagesetctl get my-app -n default
+stagesetctl --namespace default get my-app
 ```
 
 See [CLI reference](/cli/) for all `stagesetctl` commands.

@@ -76,9 +76,6 @@ type StageSetReconciler struct {
 	AllowedActionHosts []string
 	// NoCrossNamespaceRefs is the global --no-cross-namespace-refs flag.
 	NoCrossNamespaceRefs bool
-	// RunbookBaseURL is the global --runbook-base-url flag: a URL prefix
-	// appended to actionable Ready-condition messages as a runbook link.
-	RunbookBaseURL string
 	// DefaultInterval is the global --default-interval flag: the reconcile
 	// cadence used for StageSets that omit spec.interval.
 	DefaultInterval time.Duration
@@ -552,17 +549,20 @@ var happyReasonsNoRunbook = map[string]bool{
 	ReasonSuspended: true,
 }
 
-// decorateMessage appends a "(runbook: <base>/<reason>/)" suffix when
-// RunbookBaseURL is set, so kubectl describe surfaces a direct link to the
-// per-reason remediation page on the documentation site. The base URL is treated
-// as a directory; the reason is lower-cased into a path segment matching the Hugo
-// page URL. Happy reasons get no suffix.
+// runbookBaseURL is the documentation site's runbook directory. decorateMessage
+// appends a per-reason link under it so kubectl describe surfaces a direct route
+// to the remediation page.
+const runbookBaseURL = "https://stageset.projects.metio.wtf/runbooks/"
+
+// decorateMessage appends a "(runbook: <base><reason>/)" suffix so kubectl
+// describe surfaces a direct link to the per-reason remediation page on the
+// documentation site. The reason is lower-cased into a path segment matching the
+// Hugo page URL. Happy reasons get no suffix.
 func (r *StageSetReconciler) decorateMessage(reason, message string) string {
-	if r.RunbookBaseURL == "" || happyReasonsNoRunbook[reason] {
+	if happyReasonsNoRunbook[reason] {
 		return message
 	}
-	base := strings.TrimRight(r.RunbookBaseURL, "/")
-	return message + " (runbook: " + base + "/" + strings.ToLower(reason) + "/)"
+	return message + " (runbook: " + runbookBaseURL + strings.ToLower(reason) + "/)"
 }
 
 // effectiveInterval is the StageSet's reconcile cadence: spec.interval when set,

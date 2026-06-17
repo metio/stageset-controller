@@ -61,20 +61,17 @@ func TestDecorateMessage(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name   string
-		base   string
 		reason string
 		want   string
 	}{
-		{"no base URL: unchanged", "", ReasonStageFailed, "boom"},
-		{"actionable reason gets a link", "https://example/runbooks", ReasonStageFailed, "boom (runbook: https://example/runbooks/stagefailed/)"},
-		{"trailing slash stripped", "https://example/runbooks/", ReasonStageFailed, "boom (runbook: https://example/runbooks/stagefailed/)"},
-		{"happy reason gets no link", "https://example/runbooks", ReasonReady, "boom"},
-		{"suspended gets no link", "https://example/runbooks", ReasonSuspended, "boom"},
+		{"actionable reason gets a link", ReasonStageFailed, "boom (runbook: https://stageset.projects.metio.wtf/runbooks/stagefailed/)"},
+		{"happy reason gets no link", ReasonReady, "boom"},
+		{"suspended gets no link", ReasonSuspended, "boom"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r := &StageSetReconciler{RunbookBaseURL: tc.base}
+			r := &StageSetReconciler{}
 			if got := r.decorateMessage(tc.reason, "boom"); got != tc.want {
 				t.Fatalf("decorateMessage = %q, want %q", got, tc.want)
 			}

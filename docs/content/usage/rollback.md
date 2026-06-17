@@ -46,8 +46,9 @@ reliable across producer pruning.
 
 The chart never bakes credentials into a rendered Secret. It references a Secret
 you provide by name (`rollbackStore.s3.existingSecret`) and consumes it via
-`envFrom`, expecting the keys `accessKey`, `secretKey`, and the optional
-`sessionToken`. The Secret's provenance is yours to choose.
+`envFrom`, so its keys are read as environment variables: `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, and the optional `AWS_SESSION_TOKEN`. The Secret's
+provenance is yours to choose.
 
 Any of these can produce that Secret, and the chart works with all of them
 unchanged — point the tool at the same name the chart references:
@@ -84,11 +85,11 @@ spec:
   target:
     name: stageset-rollback-credentials # = rollbackStore.s3.existingSecret
   data:
-    - secretKey: accessKey
+    - secretKey: AWS_ACCESS_KEY_ID
       remoteRef:
         key: stageset/rollback-s3
         property: access_key_id
-    - secretKey: secretKey
+    - secretKey: AWS_SECRET_ACCESS_KEY
       remoteRef:
         key: stageset/rollback-s3
         property: secret_access_key

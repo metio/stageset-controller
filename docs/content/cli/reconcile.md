@@ -24,7 +24,7 @@ stagesetctl reconcile NAME [flags]
 ## Example
 
 ```shell
-stagesetctl reconcile payments -n payments
+stagesetctl --namespace payments reconcile payments
 ```
 
 ```text

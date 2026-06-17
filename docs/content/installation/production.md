@@ -192,20 +192,13 @@ metrics:
       team: platform           # Alertmanager routing label
 ```
 
-## 8. Wire the runbook base URL
+Every actionable Ready-condition reason has a [runbook](/runbooks/), and the
+controller appends a direct link to each Ready message
+(`(runbook: https://stageset.projects.metio.wtf/runbooks/<reason>/)`), so a
+`kubectl describe` on a failing StageSet routes straight to the fix. Healthy
+reasons get no link.
 
-Every actionable Ready-condition reason has a [runbook](/runbooks/). Point the
-runbook base URL at a published copy of those pages and the controller appends a
-direct link to each Ready message, so a `kubectl describe` on a failing StageSet
-links straight to the fix. The chart defaults this to the docs site; set it to
-your own mirror, or empty to drop the links. Healthy reasons get no link.
-
-```yaml
-controller:
-  runbookBaseURL: https://stageset.projects.metio.wtf/runbooks
-```
-
-## 9. Plan for upgrades and recovery
+## 8. Plan for upgrades and recovery
 
 Calendar-based releases run on a weekly cron. Chart upgrades are `helm upgrade
 --install`; the chart ships CRDs under `templates/`, so schema changes apply

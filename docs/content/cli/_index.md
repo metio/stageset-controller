@@ -9,6 +9,30 @@ in-cluster.
 Installed on your `PATH` as `kubectl-stageset`, it also works as a kubectl plugin:
 `kubectl stageset <command>` is equivalent to `stagesetctl <command>`.
 
+## Installation
+
+`stagesetctl` ships as a standalone binary attached to every
+[GitHub release](https://github.com/metio/stageset-controller/releases) as
+`stagesetctl_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows), for linux, darwin,
+and windows on amd64 and arm64. The binary inside the archive is named
+`stagesetctl_v<version>`.
+
+Download the archive for your platform, extract it, and install the binary onto your
+`PATH`:
+
+```shell
+tar -xzf stagesetctl_<version>_<os>_<arch>.tar.gz
+install -m 0755 stagesetctl_v<version> /usr/local/bin/stagesetctl
+```
+
+To use it as a kubectl plugin, expose it on your `PATH` as `kubectl-stageset`:
+
+```shell
+ln -s "$(command -v stagesetctl)" /usr/local/bin/kubectl-stageset
+```
+
+After that, `kubectl stageset <command>` works.
+
 | Command | Purpose |
 |---|---|
 | [`get`](/cli/get/) | Print a StageSet's status, or list StageSets. |

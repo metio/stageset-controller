@@ -31,7 +31,7 @@ Jsonnet, not because StageSet can't read Git.)
 
   ```shell
   kubectl create namespace apps
-  kubectl -n apps create serviceaccount web-deployer
+  kubectl --namespace apps create serviceaccount web-deployer
   # bind web-deployer to a Role/ClusterRole that can manage Deployments and
   # Services in the apps namespace — see /usage/multi-cluster/ for the tenancy model
   ```
@@ -94,7 +94,7 @@ Apply it and wait for the source to sync:
 
 ```shell
 kubectl apply -f gitrepository.yaml
-kubectl -n apps wait --for=condition=Ready gitrepository/web-manifests
+kubectl --namespace apps wait --for=condition=Ready gitrepository/web-manifests
 ```
 
 ## 3. Render with JaaS
@@ -125,7 +125,7 @@ namespace. Confirm it went Ready:
 
 ```shell
 kubectl apply -f jsonnetsnippet.yaml
-kubectl -n apps get externalartifact web
+kubectl --namespace apps get externalartifact web
 ```
 
 ## 4. Roll it out with StageSet
@@ -159,8 +159,8 @@ Apply it, preview the change before it lands, then watch it roll out:
 
 ```shell
 kubectl apply -f stageset.yaml
-stagesetctl diff web -n apps          # preview against live cluster state
-stagesetctl get  web -n apps          # per-stage progress
+stagesetctl --namespace apps diff web          # preview against live cluster state
+stagesetctl --namespace apps get  web          # per-stage progress
 ```
 
 ## 5. Ship a change
