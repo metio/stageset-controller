@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -21,12 +22,14 @@ import (
 	"github.com/metio/stageset-controller/internal/artifact"
 )
 
-// reconcileWithConfig runs the reconciler with a rest config wired, so a
-// StageSet carrying spec.serviceAccountName actually impersonates and
-// spec.kubeConfig actually retargets. The envtest apiserver enforces RBAC, so
-// an impersonated SA's bindings bound what the apply can do. The returned error
-// is intentionally not asserted: a denied apply both writes the failed status
-// (which the tests check) and returns the cause so controller-runtime backs off.
+// reconcileWithConfig runs the reconciler with a rest config + real token
+// minter wired, so a StageSet carrying spec.serviceAccountName mints a
+// TokenRequest token and applies as that SA, and spec.kubeConfig retargets to a
+// remote cluster. The envtest apiserver serves TokenRequest and enforces RBAC,
+// so the tenant SA's bindings bound what the apply can do — exercising the
+// production local-cluster mint path. The returned error is intentionally not
+// asserted: a denied apply both writes the failed status (which the tests check)
+// and returns the cause so controller-runtime backs off.
 func reconcileWithConfig(t *testing.T, c client.Client, ss *stagesv1.StageSet) {
 	t.Helper()
 	r := &StageSetReconciler{
@@ -35,9 +38,27 @@ func reconcileWithConfig(t *testing.T, c client.Client, ss *stagesv1.StageSet) {
 		RESTMapper: c.RESTMapper(),
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
+	wireRealMinter(t, r)
 	_, _ = r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
 	})
+}
+
+// wireRealMinter wires a token cache backed by the envtest apiserver's
+// TokenRequest API onto r, so reconciles exercise the production local-cluster
+// mint path. The refresh margin is zeroed: tests don't run long enough to
+// warrant caching, and minting every call keeps the behaviour easy to reason
+// about.
+func wireRealMinter(t *testing.T, r *StageSetReconciler) {
+	t.Helper()
+	kc, err := kubernetes.NewForConfig(r.Config)
+	if err != nil {
+		t.Fatalf("kubernetes.NewForConfig: %v", err)
+	}
+	tc := newTokenCache(clientsetTokenMinter{kc: kc})
+	tc.refreshMargin = 0
+	r.minter = clientsetTokenMinter{kc: kc}
+	r.tokens = tc
 }
 
 // grantConfigMaps creates a ServiceAccount in ns whose only namespace power is

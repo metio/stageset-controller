@@ -81,9 +81,9 @@ spec:
       name: sops-age                      # holds an age key under *.agekey
 ```
 
-- **`serviceAccountName`** — the ServiceAccount the controller impersonates; the
-  StageSet can do exactly what its RBAC allows. See
-  [multi-cluster and tenancy](/usage/multi-cluster/).
+- **`serviceAccountName`** — the ServiceAccount the controller applies as (via a
+  minted TokenRequest token on the local cluster); the StageSet can do exactly what
+  its RBAC allows. See [multi-cluster and tenancy](/usage/multi-cluster/).
 - **`kubeConfig.secretRef`** — a Secret holding a kubeconfig for a remote cluster.
   Only `secretRef` is accepted.
 - **`decryption`** — decrypt SOPS-encrypted files (`age`) in every stage's source

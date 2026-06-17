@@ -27,8 +27,8 @@ delivery controller. The overlap is ordering: Helm's hooks and hook weights give
 - **Typed gates between steps.** Hooks run Jobs; `StageSet` stages can run Jobs,
   HTTP gates, waits, patches, deletes, and transient applies, as pre/post/onFailure
   [actions](/usage/actions/).
-- **Identity.** A `StageSet` applies under an impersonated, per-tenant
-  `ServiceAccount`; `helm upgrade` runs as whoever ran it.
+- **Identity.** A `StageSet` applies under a per-tenant `ServiceAccount`; `helm
+  upgrade` runs as whoever ran it.
 
 ## Using them together
 

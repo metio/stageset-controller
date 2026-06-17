@@ -8,8 +8,8 @@ There are two ways to run the controller, and they map onto two different trust
 models. Pick the one that matches your cluster:
 
 - **Multi-tenant** — the controller holds no write access of its own and applies
-  every `StageSet` impersonating that `StageSet`'s `serviceAccountName`. Each
-  tenant's RBAC bounds what its releases can touch. This is the chart default.
+  every `StageSet` as that `StageSet`'s `serviceAccountName`. Each tenant's RBAC
+  bounds what its releases can touch. This is the chart default.
 - **Single-tenant** — the cluster has one operator, so per-tenant isolation buys
   nothing. Run the controller under its own identity bound to `cluster-admin` and
   skip impersonation entirely — the model Flux's `helm-controller` uses in its
@@ -19,12 +19,19 @@ The two sections below set each one up. The optional
 [watch scoping](#scoping-the-controller-to-a-namespace-set) narrows *which*
 namespaces a multi-tenant controller sees.
 
-## Impersonation (multi-tenant)
+## Tenant ServiceAccounts (multi-tenant)
 
 The controller never applies your manifests as itself. Set `serviceAccountName`
-and every operation for that `StageSet` — build, apply, prune, actions — is
-performed impersonating that ServiceAccount. The `StageSet` can do exactly what the
-SA's RBAC permits, and nothing more.
+and every operation for that `StageSet` — build, apply, prune, actions — runs as
+that ServiceAccount. The `StageSet` can do exactly what the SA's RBAC permits, and
+nothing more.
+
+On the local cluster the controller assumes the tenant identity by minting a
+short-lived [TokenRequest](https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-request-v1/)
+token for the named ServiceAccount and authenticating as it. That needs only
+`create` on `serviceaccounts/token` in the controller's ClusterRole — the powerful
+`impersonate` verb is not granted. The token is cached per ServiceAccount and
+re-minted as it nears expiry.
 
 ```yaml
 spec:
@@ -55,14 +62,14 @@ subjects:
 
 This is the multi-tenancy model: isolation comes from each `StageSet` being bounded
 by its tenant SA, not from the controller's own grant — by default the chart gives
-the controller `impersonate` and read access, no blanket write. A `StageSet` with no
-`serviceAccountName`, or one bound to a too-narrow SA, fails closed rather than
-escalating.
+the controller `create` on `serviceaccounts/token` and read access, no blanket write
+and no `impersonate`. A `StageSet` with no `serviceAccountName`, or one bound to a
+too-narrow SA, fails closed rather than escalating.
 
 ## Single-tenant cluster-admin
 
-On a cluster with a single operator, per-`StageSet` impersonation is friction with
-no payoff — there is no other tenant to isolate from. Run the controller the way
+On a cluster with a single operator, per-`StageSet` tenant identities are friction
+with no payoff — there is no other tenant to isolate from. Run the controller the way
 Flux's `helm-controller` runs by default: under its own ServiceAccount, bound to
 the built-in `cluster-admin` ClusterRole. `StageSet`s then omit `serviceAccountName`
 and apply as the controller, which can write any kind cluster-wide.
@@ -100,8 +107,8 @@ When `serviceAccountName` is unset and no `kubeConfig` is given, the controller
 applies with its own client — so the `cluster-admin` binding is what lets those
 `StageSet`s write. The trade-off: every `StageSet` on the cluster has full write
 access, so this is for single-tenant clusters only. Leave `rbac.clusterAdmin` at its
-default `false` and use [impersonation](#impersonation-multi-tenant) whenever more
-than one team shares the cluster. The two mix — a cluster-admin controller still
+default `false` and give each `StageSet` a [tenant ServiceAccount](#tenant-serviceaccounts-multi-tenant)
+whenever more than one team shares the cluster. The two mix — a cluster-admin controller still
 honors `serviceAccountName` on any `StageSet` that sets it, dropping to that SA's
 rights for that release.
 
@@ -137,8 +144,12 @@ bounded by its tenant SA.
 ## Remote clusters
 
 Point a `StageSet` at another cluster with `kubeConfig`, referencing a Secret that
-holds a kubeconfig. Combined with `serviceAccountName`, the controller applies to
-the remote cluster as the impersonated identity there.
+holds a kubeconfig. The controller authenticates to the remote cluster with the
+identity in that kubeconfig — token minting is local-cluster only, since a token
+minted on the controller's cluster carries the wrong issuer and audience for a
+remote apiserver. When `serviceAccountName` is also set, the controller layers
+classic header impersonation onto the kubeconfig identity, so the remote apply runs
+as that ServiceAccount on the remote cluster.
 
 ```yaml
 spec:

@@ -9,7 +9,13 @@ rules:
   resources:
   - serviceaccounts
   verbs:
-  - impersonate
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
 - apiGroups:
   - admissionregistration.k8s.io
   resources:

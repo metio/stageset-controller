@@ -27,7 +27,7 @@ Jsonnet, not because StageSet can't read Git.)
 - [JaaS](https://jaas.projects.metio.wtf/) installed in operator mode.
 - StageSet installed (see [Installation](/installation/kubernetes/)).
 - An `apps` namespace, and a `web-deployer` `ServiceAccount` in it whose RBAC can
-  apply the workload (the StageSet impersonates it):
+  apply the workload (the StageSet applies as it):
 
   ```shell
   kubectl create namespace apps
@@ -141,7 +141,7 @@ metadata:
   name: web
   namespace: apps
 spec:
-  serviceAccountName: web-deployer      # applies are impersonated as this SA
+  serviceAccountName: web-deployer      # applies run as this tenant SA
   stages:
     - name: web
       sourceRef:

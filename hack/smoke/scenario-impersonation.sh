@@ -3,11 +3,13 @@
 # SPDX-License-Identifier: 0BSD
 #
 # Scenario: a stage's apply runs under spec.serviceAccountName, not the
-# controller's own (cluster-admin in this smoke) identity. A tenant SA may write
-# ConfigMaps but not Secrets:
+# controller's own (cluster-admin in this smoke) identity. On the local cluster
+# the controller assumes that identity by minting a short-lived TokenRequest
+# token for the SA (no `impersonate` verb); kind serves TokenRequest, so this
+# exercises the real mint path. A tenant SA may write ConfigMaps but not Secrets:
 #   - positive: a ConfigMap-only artifact applies and the StageSet goes Ready;
 #   - negative: a Secret artifact is denied, the StageSet reports StageFailed,
-#     and the Secret never appears — proving the apply truly impersonates the SA.
+#     and the Secret never appears — proving the apply truly runs as the SA.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh

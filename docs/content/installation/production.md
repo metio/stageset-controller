@@ -77,11 +77,13 @@ controller:
 ## 3. Choose the tenancy model and scope RBAC
 
 The controller never applies your manifests as itself. Every cluster operation
-for a `StageSet` — building, applying, pruning, running actions — impersonates
-the `StageSet`'s `spec.serviceAccountName`, so a release can only do what its
-tenant `ServiceAccount` permits and an over-broad or missing SA fails closed.
-Give every production `StageSet` a scoped `ServiceAccount`; the chart grants the
-controller `impersonate`, not write access.
+for a `StageSet` — building, applying, pruning, running actions — runs as the
+`StageSet`'s `spec.serviceAccountName`, so a release can only do what its tenant
+`ServiceAccount` permits and an over-broad or missing SA fails closed. On the
+local cluster the controller assumes that identity by minting a short-lived
+TokenRequest token for the SA, so the chart grants it only `create` on
+`serviceaccounts/token` — not write access and not the `impersonate` verb. Give
+every production `StageSet` a scoped `ServiceAccount`.
 
 Pick the model that matches your cluster. Multi-tenant clusters keep
 impersonation on and may scope the controller to a namespace set — one instance
@@ -314,6 +316,6 @@ helm upgrade --install stageset-controller \
   reconcile, drift correction.
 - [Rollback](/usage/rollback/) — store backends, keep-count, and revision
   selection.
-- [Multi-cluster and tenancy](/usage/multi-cluster/) — impersonation, namespace
-  scoping, remote-cluster reconciliation.
+- [Multi-cluster and tenancy](/usage/multi-cluster/) — tenant ServiceAccounts,
+  namespace scoping, remote-cluster reconciliation.
 - [Runbooks](/runbooks/) — incident response.

@@ -23,7 +23,7 @@ reconcile.
 - **Staged, gated delivery.** They apply a rendered set (in dependency order);
   they don't model multi-stage rollouts with readiness gates, update windows, or
   versioned migrations between stages.
-- **GitOps identity and tenancy.** `StageSet` applies under an impersonated tenant
+- **GitOps identity and tenancy.** `StageSet` applies under a per-tenant
   `ServiceAccount` inside the cluster; Tanka/kubecfg use your local credentials.
 
 ## Using them together

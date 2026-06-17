@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -56,10 +57,26 @@ type StageSetReconciler struct {
 	client.Client
 
 	// Config is the manager's rest config, cloned per tenant to build the
-	// impersonating clients spec.serviceAccountName requires. Set in
-	// SetupWithManager; leaving it nil disables impersonation (tests that
-	// never set serviceAccountName).
+	// tenant-scoped clients spec.serviceAccountName requires. Set in
+	// SetupWithManager; leaving it nil disables local-cluster identity
+	// assumption (tests that never set serviceAccountName).
 	Config *rest.Config
+
+	// SkipImpersonation disables the local-cluster TokenRequest mint: when
+	// true, a StageSet carrying spec.serviceAccountName applies under the
+	// controller's own client rather than the tenant SA's identity. ONLY the
+	// envtest harness sets this — production must keep it false so a tenant's
+	// RBAC bounds what its StageSets touch. The remote-cluster path
+	// (spec.kubeConfig) is unaffected; it never mints.
+	SkipImpersonation bool
+
+	// minter mints short-lived TokenRequest tokens for the tenant SAs the
+	// local-cluster apply assumes. Defaulted from a kubernetes.Clientset
+	// built off Config in SetupWithManager; tests substitute a fake.
+	minter tokenMinter
+	// tokens caches minted tokens per (namespace, SA) with expiry-aware
+	// refresh, so steady reconcile load doesn't hammer the TokenRequest API.
+	tokens *tokenCache
 
 	// RESTMapper resolves GVKs for the SSA status poller. Defaults to the
 	// manager's mapper in SetupWithManager.
@@ -120,7 +137,13 @@ type StageSetReconciler struct {
 // back-pointer), just without the fast-failure watch unless its RBAC is added.
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=gitrepositories;ocirepositories;buckets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=jaas.metio.wtf,resources=jsonnetsnippets,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=impersonate
+// Local-cluster apply assumes the tenant SA's identity by minting a
+// short-lived TokenRequest token for it — no `impersonate` verb. The token
+// authenticates as system:serviceaccount:<ns>:<sa>, so the tenant SA's RBAC
+// bounds the apply. (Remote-cluster apply via spec.kubeConfig uses the
+// provided kubeconfig and needs nothing here.)
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get
+// +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
 
 // Reconcile drives one StageSet through the design's state machine: resolve +
@@ -1049,6 +1072,19 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("stageset-controller")
+	}
+	// Default the token minter (and its cache) for the local-cluster
+	// identity-assumption path, unless impersonation is skipped (envtest) or
+	// the test already wired a fake minter.
+	if !r.SkipImpersonation && r.minter == nil && r.Config != nil {
+		kc, err := kubernetes.NewForConfig(r.Config)
+		if err != nil {
+			return fmt.Errorf("build clientset for token minting: %w", err)
+		}
+		r.minter = clientsetTokenMinter{kc: kc}
+	}
+	if r.minter != nil && r.tokens == nil {
+		r.tokens = newTokenCache(r.minter)
 	}
 
 	b := ctrl.NewControllerManagedBy(mgr).

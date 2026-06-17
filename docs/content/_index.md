@@ -49,7 +49,7 @@ metadata:
   name: payments
   namespace: payments
 spec:
-  serviceAccountName: payments-deployer     # every apply is impersonated as this SA
+  serviceAccountName: payments-deployer     # every apply runs as this tenant SA
 
   stages:
     # 1 ── shared infrastructure: CRDs, namespaces, RBAC
