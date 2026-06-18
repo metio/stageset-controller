@@ -110,8 +110,8 @@ This is the important distinction, and it changes who prunes what:
 - **Via [JaaS](https://jaas.projects.metio.wtf/) (or any source).** `JaaS` only
   *renders* — it publishes an `ExternalArtifact` and owns nothing in the target
   cluster. `StageSet` fetches that artifact and applies the manifests itself, so
-  **`StageSet`'s inventory owns every rendered object directly** and prunes them with
-  its own ApplySet semantics. One owner, and `StageSet`'s drift correction,
+  **`StageSet`'s inventory owns every rendered object directly** and prunes them from
+  its own `StageInventory` record. One owner, and `StageSet`'s drift correction,
   [conflict policies](/usage/conflict-policies/), and [rollback](/usage/rollback/)
   apply to the resources themselves.
 

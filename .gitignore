@@ -19,3 +19,4 @@ docs/.hugo_build.lock
 
 # htmltest writes a ref cache here when it runs (ilo bash -c "htmltest").
 tmp/.htmltest/
+.local/

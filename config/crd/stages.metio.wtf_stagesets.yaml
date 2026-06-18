@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.21.0
+    controller-gen.kubebuilder.io/version: v0.17.3
   name: stagesets.stages.metio.wtf
 spec:
   group: stages.metio.wtf
@@ -1803,11 +1803,6 @@ spec:
                 items:
                   type: string
                 type: array
-              inventoryMode:
-                description: |-
-                  InventoryMode records which --inventory-mode the stored inventory of
-                  this object currently satisfies; used to sequence mode migrations.
-                type: string
               lastAppliedRevisions:
                 additionalProperties:
                   type: string

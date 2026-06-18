@@ -108,12 +108,10 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		if rerr != nil {
 			return runtimeErr(rerr)
 		}
-		// Mirror the reconcile apply: in hybrid/applyset modes the controller
-		// stamps the ApplySet member label on every applied object, so a faithful
-		// dry-run diff must too — otherwise the part-of label on a live object
-		// reads as a spurious "configure". The mode is read from status, the
-		// authority for how this StageSet is currently being reconciled.
-		apply.StampMemberLabels(render.Objects, ss.Status.InventoryMode, ss.Name, stage.Name, ss.Namespace, stagesv1.GroupVersion.Group)
+		// Mirror the reconcile apply: the controller stamps the per-stage discovery
+		// label on every applied object, so a faithful dry-run diff must too —
+		// otherwise the label on a live object reads as a spurious "configure".
+		apply.StampStageLabel(render.Objects, stagesv1.StageLabel, stage.Name)
 		refs := make([]inventory.ObjectRef, 0, len(render.Objects))
 		for _, obj := range render.Objects {
 			refs = append(refs, stageinv.RefOf(obj))

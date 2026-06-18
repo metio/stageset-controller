@@ -159,7 +159,6 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 
 	if err = (&controller.StageSetReconciler{
 		Client:               mgr.GetClient(),
-		InventoryMode:        *c.InventoryMode,
 		ShardCap:             *c.ShardCap,
 		AllowedActionHosts:   []string(*c.AllowedActionHosts),
 		NoCrossNamespaceRefs: *c.NoCrossNamespaceRefs,

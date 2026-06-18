@@ -58,7 +58,6 @@ type Flags struct {
 
 	WatchNamespaces *string
 
-	InventoryMode        *string
 	ShardCap             *int
 	NoCrossNamespaceRefs *bool
 	AllowedActionHosts   *StringSlice
@@ -114,7 +113,6 @@ func Register(fs *flag.FlagSet) *Flags {
 		ProbeAddr:            new(string),
 		EnableLeaderElection: new(bool),
 		WatchNamespaces:      new(string),
-		InventoryMode:        new(string),
 		ShardCap:             new(int),
 		NoCrossNamespaceRefs: new(bool),
 		AllowedActionHosts:   &StringSlice{},
@@ -168,7 +166,6 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.StringVar(f.MetricsAddr, group("metrics-bind-address", metrics), ":8080", "The address the metric endpoint binds to.")
 	fs.StringVar(f.ProbeAddr, group("health-probe-bind-address", mgr), ":8081", "The address the probe endpoint binds to.")
 	fs.BoolVar(f.EnableLeaderElection, group("leader-elect", mgr), false, "Enable leader election.")
-	fs.StringVar(f.InventoryMode, group("inventory-mode", recon), "hybrid", "Inventory strategy: entries, hybrid, or applyset.")
 	fs.IntVar(f.ShardCap, group("inventory-shard-cap", recon), inventory.DefaultShardCap, "Maximum entries per StageInventory shard.")
 	fs.Var(f.AllowedActionHosts, group("allowed-action-hosts", recon), "Host glob allowed for http actions; repeatable. Loopback and link-local ranges are always denied unless explicitly listed.")
 	fs.BoolVar(f.NoCrossNamespaceRefs, group("no-cross-namespace-refs", recon), false, "Deny cross-namespace sourceRef and dependsOn references.")

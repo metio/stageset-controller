@@ -20,8 +20,8 @@ waits for it to become healthy, and only then lets the next stage begin. Between
 stages, run typed actions (a migration `Job`, an HTTP gate, a wait-for-condition),
 gate rollouts behind [update windows](/usage/update-windows/), and run
 version-aware [migrations](/usage/versioned-migrations/) when you cross a release boundary.
-Everything is reconciled continuously, drift-corrected, and pruned with ApplySet
-semantics.
+Everything is reconciled continuously, drift-corrected, and pruned from a precise
+per-stage inventory.
 
 ## What a StageSet looks like
 

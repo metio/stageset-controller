@@ -624,11 +624,6 @@ type StageSetStatus struct {
 	// +optional
 	Stages []StageStatus `json:"stages,omitempty"`
 
-	// InventoryMode records which --inventory-mode the stored inventory of
-	// this object currently satisfies; used to sequence mode migrations.
-	// +optional
-	InventoryMode string `json:"inventoryMode,omitempty"`
-
 	// Version is the currently deployed system version, written only after a
 	// fully successful run.
 	// +optional

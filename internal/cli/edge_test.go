@@ -122,7 +122,7 @@ func TestDiff_ClientSide_Unchanged(t *testing.T) {
 	c := testClient(t, cfg)
 	ns := makeNamespace(t, c, "csdsame")
 	makeStageSet(t, c, ns, "app")
-	createConfigMap(t, c, ns, "settings", map[string]any{"greeting": "same"})
+	createConfigMapWithStageLabel(t, c, ns, "settings", "first", map[string]any{"greeting": "same"})
 
 	dir := writeSourceTree(t, map[string]string{
 		"cm.yaml": configMapManifest(ns, "settings", map[string]string{"greeting": "same"}),
@@ -145,7 +145,7 @@ func TestDiff_ClientSide_ShowUnchanged(t *testing.T) {
 	c := testClient(t, cfg)
 	ns := makeNamespace(t, c, "csdshow")
 	makeStageSet(t, c, ns, "app")
-	createConfigMap(t, c, ns, "settings", map[string]any{"greeting": "same"})
+	createConfigMapWithStageLabel(t, c, ns, "settings", "first", map[string]any{"greeting": "same"})
 
 	dir := writeSourceTree(t, map[string]string{
 		"cm.yaml": configMapManifest(ns, "settings", map[string]string{"greeting": "same"}),

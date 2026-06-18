@@ -124,7 +124,6 @@ resources:
 
 controller:
   defaultInterval: 10m     # cadence StageSets inherit when they omit spec.interval
-  inventoryMode: hybrid    # applyset for ApplySet-native tooling; entries to drop the labels
   inventoryShardCap: 5000  # lower for smaller inventory objects on huge applies
 ```
 

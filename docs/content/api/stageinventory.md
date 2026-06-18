@@ -15,9 +15,8 @@ author these** — the controller creates, updates, and deletes them. The fields
 below let you read inventory state when debugging and back it up.
 
 One stage may be backed by several `StageInventory` shards once it exceeds
-`--inventory-shard-cap` entries (default 5000). Shard `0` doubles as the ApplySet
-([KEP-3659](https://github.com/kubernetes/enhancements/tree/master/keps/sig-cli/3659-kubectl-applyset))
-parent object for the stage.
+`--inventory-shard-cap` entries (default 5000), so a single object never grows
+unbounded.
 
 ## spec
 
@@ -61,6 +60,9 @@ The controller stamps these onto inventories and managed objects:
 | `stages.metio.wtf/stage-set` | inventory | Owning StageSet name. |
 | `stages.metio.wtf/stage` | inventory | Stage name. |
 | `stages.metio.wtf/shard` | inventory | Shard index. |
+| `stages.metio.wtf/name` | managed object | Owning StageSet name — `kubectl get -l stages.metio.wtf/name=<stageset>`. |
+| `stages.metio.wtf/namespace` | managed object | Owning StageSet namespace. |
+| `stages.metio.wtf/stage` | managed object | Stage that applied the object — `kubectl get -l stages.metio.wtf/stage=<stage>` for per-stage discovery. |
 | `stages.metio.wtf/prune` | managed object | Set to `disabled` to opt an object out of pruning. |
 
 Other annotations the controller honors on a StageSet or its objects. Each has a
@@ -69,15 +71,3 @@ Other annotations the controller honors on a StageSet or its objects. Each has a
 - `reconcile.fluxcd.io/requestedAt` — request an out-of-band reconcile.
 - `stages.metio.wtf/reconcile-stage` — force a single stage to re-run.
 - `stages.metio.wtf/update-now` — push a window-held rollout through immediately.
-
-## Inventory modes
-
-`--inventory-mode` selects how applied state is tracked:
-
-- `entries` — identifiers recorded in `StageInventory` only.
-- `hybrid` (default) — identifiers plus ApplySet labels for tooling
-  compatibility.
-- `applyset` — ApplySet-native.
-
-The mode satisfied by the stored inventory is surfaced on
-`StageSet.status.inventoryMode`.

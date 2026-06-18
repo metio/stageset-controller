@@ -368,7 +368,6 @@ status:
   version: "2.1.0"
   pendingMigrations: []
   executedMigrations: []
-  inventoryMode: hybrid
   stages:
     - name: infrastructure
       phase: Ready             # Pending|Applying|Pruning|Verifying|Ready|Failed

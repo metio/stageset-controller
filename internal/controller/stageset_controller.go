@@ -66,8 +66,8 @@ type StageSetReconciler struct {
 	// true, a StageSet carrying spec.serviceAccountName applies under the
 	// controller's own client rather than the tenant SA's identity. ONLY the
 	// envtest harness sets this — production must keep it false so a tenant's
-	// RBAC bounds what its StageSets touch. The remote-cluster path
-	// (spec.kubeConfig) is unaffected; it never mints.
+	// RBAC bounds what its StageSets touch. SkipImpersonation governs only the
+	// local-cluster mint; the remote-cluster path (spec.kubeConfig) never mints.
 	SkipImpersonation bool
 
 	// minter mints short-lived TokenRequest tokens for the tenant SAs the
@@ -89,9 +89,6 @@ type StageSetReconciler struct {
 	// unset).
 	Recorder events.EventRecorder
 
-	// InventoryMode is the global --inventory-mode flag
-	// (entries|hybrid|applyset).
-	InventoryMode string
 	// ShardCap is the global --inventory-shard-cap flag.
 	ShardCap int
 	// AllowedActionHosts is the global --allowed-action-hosts flag.
@@ -433,11 +430,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return r.failStage(ctx, &ss, stage.Name, "build", err, stageStatuses, ra.Revision, executed)
 			}
 			buildSpan.End()
-			// In hybrid/applyset modes every applied object also carries the
-			// ApplySet (KEP-3659) member label, so `kubectl get -l
-			// applyset.kubernetes.io/part-of=<id>` answers "what does this stage
-			// own" with no project-specific tooling.
-			apply.StampMemberLabels(objects, r.InventoryMode, ss.Name, stage.Name, ss.Namespace, stagesv1.GroupVersion.Group)
+			// Every applied object carries the per-stage discovery label, so
+			// `kubectl get -l stages.metio.wtf/stage=<stage>` answers "what does
+			// this stage own" with no project-specific tooling.
+			apply.StampStageLabel(objects, stagesv1.StageLabel, stage.Name)
 			conflicts, cerr := resolveConflictHandling(objects, stage)
 			if cerr != nil {
 				return r.failStage(ctx, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
@@ -564,7 +560,6 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	ss.Status.LastAppliedRevisions = applied
 	ss.Status.Stages = stageStatuses
 	publishStageReady(&ss)
-	ss.Status.InventoryMode = r.InventoryMode
 	ss.Status.ObservedGeneration = ss.Generation
 	// A fully successful run advances the recorded version and clears the
 	// in-flight migration ledger (baselining records the version, having run

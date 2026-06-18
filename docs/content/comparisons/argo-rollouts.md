@@ -30,7 +30,7 @@ and the order things apply in.
 | Unit of work | one workload's version + its traffic | a multi-stage release of artifacts |
 | Mechanism | weighted traffic shifting + metric analysis | ordered apply with readiness gates + actions |
 | Promotion driver | analysis metrics (Prometheus, web, Job) | stage readiness (kstatus, CEL) and actions |
-| Pruning / inventory | no (owns the Rollout's pods) | yes (ApplySet inventory, per-stage prune) |
+| Pruning / inventory | no (owns the Rollout's pods) | yes (StageInventory record, per-stage prune) |
 | GitOps reconcile | via Argo CD / a GitOps tool | native (Flux controller) |
 
 ## They compose

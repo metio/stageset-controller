@@ -44,6 +44,24 @@ func createConfigMap(t *testing.T, c client.Client, ns, name string, data map[st
 	}
 }
 
+// createConfigMapWithStageLabel creates a live ConfigMap already carrying the
+// per-stage discovery label a reconcile would have stamped, so a faithful diff
+// against an unchanged render reports clean.
+func createConfigMapWithStageLabel(t *testing.T, c client.Client, ns, name, stage string, data map[string]any) {
+	t.Helper()
+	cm := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "ConfigMap",
+		"metadata": map[string]any{
+			"name": name, "namespace": ns,
+			"labels": map[string]any{stagesv1.StageLabel: stage},
+		},
+		"data": data,
+	}}
+	if err := c.Create(context.Background(), cm); err != nil {
+		t.Fatalf("create ConfigMap %s: %v", name, err)
+	}
+}
+
 func TestDiff_Create(t *testing.T) {
 	cfg := envtestConfig(t)
 	c := testClient(t, cfg)
@@ -267,12 +285,11 @@ func mapperFor(t testing.TB, cfg *rest.Config) meta.RESTMapper {
 	return mapper
 }
 
-// applyAsReconcile writes obj into the cluster exactly as a reconcile in the
-// given inventory mode would: it stamps the ApplySet member label (a no-op in
-// "entries" mode) and then server-side-applies through the same Applier the
-// controller uses, so the live object carries both the part-of label and the
-// owner labels the controller stamps. A faithful diff against this object must
-// therefore report no change.
+// applyAsReconcile writes obj into the cluster exactly as a reconcile would: it
+// stamps the per-stage discovery label and then server-side-applies through the
+// same Applier the controller uses, so the live object carries both the stage
+// label and the owner labels. A faithful diff against this object reports no
+// change.
 func applyAsReconcile(t testing.TB, cfg *rest.Config, ss *stagesv1.StageSet, stage string, obj *unstructured.Unstructured) {
 	t.Helper()
 	mapper := mapperFor(t, cfg)
@@ -280,20 +297,10 @@ func applyAsReconcile(t testing.TB, cfg *rest.Config, ss *stagesv1.StageSet, sta
 	if err != nil {
 		t.Fatalf("client.New: %v", err)
 	}
-	apply.StampMemberLabels([]*unstructured.Unstructured{obj}, ss.Status.InventoryMode, ss.Name, stage, ss.Namespace, stagesv1.GroupVersion.Group)
+	apply.StampStageLabel([]*unstructured.Unstructured{obj}, stagesv1.StageLabel, stage)
 	applier := apply.New(c, mapper, stagesv1.GroupVersion.Group)
 	if _, err := applier.Apply(context.Background(), ss.Name, ss.Namespace, []*unstructured.Unstructured{obj}, apply.ConflictHandling{}); err != nil {
 		t.Fatalf("apply live object: %v", err)
-	}
-}
-
-// setInventoryMode stamps status.inventoryMode, the authority the CLI reads to
-// decide whether to mirror the controller's ApplySet member-label stamping.
-func setInventoryMode(t testing.TB, c client.Client, ss *stagesv1.StageSet, mode string) {
-	t.Helper()
-	ss.Status.InventoryMode = mode
-	if err := c.Status().Update(context.Background(), ss); err != nil {
-		t.Fatalf("set inventory mode %q: %v", mode, err)
 	}
 }
 
@@ -307,18 +314,17 @@ func renderObj(ns, name string, data map[string]any) *unstructured.Unstructured 
 	}}
 }
 
-// TestDiff_HybridMode_CleanWhenLiveCarriesPartOfLabel is the headline
-// regression: in hybrid mode the controller stamps applyset.kubernetes.io/part-of
-// on every applied object, so the CLI's dry-run diff must stamp it too. With the
-// live object carrying the exact label a reconcile writes, the diff is clean.
-// Without the StampMemberLabels mirror in runDiff the live label would read as a
-// removed field and surface as a spurious configure.
-func TestDiff_HybridMode_CleanWhenLiveCarriesPartOfLabel(t *testing.T) {
+// TestDiff_CleanWhenLiveCarriesStageLabel is the headline regression: the
+// controller stamps stages.metio.wtf/stage on every applied object, so the CLI's
+// dry-run diff must stamp it too. With the live object carrying the exact label a
+// reconcile writes, the diff is clean. Without the StampStageLabel mirror in
+// runDiff the live label would read as a removed field and surface as a spurious
+// configure.
+func TestDiff_CleanWhenLiveCarriesStageLabel(t *testing.T) {
 	cfg := envtestConfig(t)
 	c := testClient(t, cfg)
-	ns := makeNamespace(t, c, "diffhybridclean")
+	ns := makeNamespace(t, c, "diffstagelabelclean")
 	ss := makeStageSet(t, c, ns, "app")
-	setInventoryMode(t, c, ss, "hybrid")
 
 	applyAsReconcile(t, cfg, ss, "first", renderObj(ns, "settings", map[string]any{"greeting": "hello"}))
 
@@ -328,112 +334,27 @@ func TestDiff_HybridMode_CleanWhenLiveCarriesPartOfLabel(t *testing.T) {
 
 	stdout, stderr, code := runCLI(t, cfg, "diff", "app", "-n", ns, "--source-dir", dir, "--color", "never")
 	if code != exitOK {
-		t.Fatalf("hybrid clean diff exit = %d, want %d (stderr=%s)\n%s", code, exitOK, stderr, stdout)
+		t.Fatalf("clean diff exit = %d, want %d (stderr=%s)\n%s", code, exitOK, stderr, stdout)
 	}
 	if strings.Contains(stdout, "configure") {
-		t.Errorf("hybrid clean diff must not show a configure (part-of label churn):\n%s", stdout)
+		t.Errorf("clean diff must not show a configure (stage-label churn):\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "unchanged") {
-		t.Errorf("hybrid clean diff should report the object as unchanged:\n%s", stdout)
+		t.Errorf("clean diff should report the object as unchanged:\n%s", stdout)
 	}
 }
 
-// TestDiff_ApplySetMode_CleanWhenLiveCarriesPartOfLabel mirrors the hybrid case
-// for the "applyset" mode, which stamps the same member label.
-func TestDiff_ApplySetMode_CleanWhenLiveCarriesPartOfLabel(t *testing.T) {
+// TestDiff_MissingStageLabelShowsConfigure is the negative control: a live object
+// applied out-of-band WITHOUT the stage label must surface as a configure. This
+// proves the diff genuinely compares the label rather than blindly suppressing it.
+func TestDiff_MissingStageLabelShowsConfigure(t *testing.T) {
 	cfg := envtestConfig(t)
 	c := testClient(t, cfg)
-	ns := makeNamespace(t, c, "diffapplysetclean")
-	ss := makeStageSet(t, c, ns, "app")
-	setInventoryMode(t, c, ss, "applyset")
+	ns := makeNamespace(t, c, "diffstagelabeldrift")
+	makeStageSet(t, c, ns, "app")
 
-	applyAsReconcile(t, cfg, ss, "first", renderObj(ns, "settings", map[string]any{"greeting": "hi"}))
-
-	dir := writeSourceTree(t, map[string]string{
-		"cm.yaml": configMapManifest(ns, "settings", map[string]string{"greeting": "hi"}),
-	})
-
-	stdout, stderr, code := runCLI(t, cfg, "diff", "app", "-n", ns, "--source-dir", dir, "--color", "never")
-	if code != exitOK {
-		t.Fatalf("applyset clean diff exit = %d, want %d (stderr=%s)\n%s", code, exitOK, stderr, stdout)
-	}
-	if strings.Contains(stdout, "configure") {
-		t.Errorf("applyset clean diff must not show a configure:\n%s", stdout)
-	}
-	if !strings.Contains(stdout, "unchanged") {
-		t.Errorf("applyset clean diff should report the object as unchanged:\n%s", stdout)
-	}
-}
-
-// TestDiff_EntriesMode_DoesNotStampPartOfLabel proves the inverse: in "entries"
-// mode the controller does NOT stamp the member label, so the CLI must not add
-// it. A live object without the part-of label diffs clean, and the label string
-// never appears in the rendered output.
-func TestDiff_EntriesMode_DoesNotStampPartOfLabel(t *testing.T) {
-	cfg := envtestConfig(t)
-	c := testClient(t, cfg)
-	ns := makeNamespace(t, c, "diffentries")
-	ss := makeStageSet(t, c, ns, "app")
-	setInventoryMode(t, c, ss, "entries")
-
-	// StampMemberLabels is a no-op in entries mode, so the live object carries
-	// only the owner labels, never the part-of label.
-	applyAsReconcile(t, cfg, ss, "first", renderObj(ns, "settings", map[string]any{"greeting": "hey"}))
-
-	dir := writeSourceTree(t, map[string]string{
-		"cm.yaml": configMapManifest(ns, "settings", map[string]string{"greeting": "hey"}),
-	})
-
-	stdout, stderr, code := runCLI(t, cfg, "diff", "app", "-n", ns, "--source-dir", dir, "--color", "never")
-	if code != exitOK {
-		t.Fatalf("entries clean diff exit = %d, want %d (stderr=%s)\n%s", code, exitOK, stderr, stdout)
-	}
-	if strings.Contains(stdout, "configure") {
-		t.Errorf("entries clean diff must not show a configure:\n%s", stdout)
-	}
-	if strings.Contains(stdout, inventory.PartOfLabel) {
-		t.Errorf("entries mode must not introduce the part-of label:\n%s", stdout)
-	}
-}
-
-// TestDiff_EmptyInventoryMode_DoesNotStampPartOfLabel covers a StageSet whose
-// status.inventoryMode is still unset (e.g. never reconciled): the CLI treats it
-// like entries mode and adds no member label.
-func TestDiff_EmptyInventoryMode_DoesNotStampPartOfLabel(t *testing.T) {
-	cfg := envtestConfig(t)
-	c := testClient(t, cfg)
-	ns := makeNamespace(t, c, "diffemptymode")
-	ss := makeStageSet(t, c, ns, "app")
-	// Status.InventoryMode left empty deliberately.
-
-	applyAsReconcile(t, cfg, ss, "first", renderObj(ns, "settings", map[string]any{"greeting": "yo"}))
-
-	dir := writeSourceTree(t, map[string]string{
-		"cm.yaml": configMapManifest(ns, "settings", map[string]string{"greeting": "yo"}),
-	})
-
-	stdout, stderr, code := runCLI(t, cfg, "diff", "app", "-n", ns, "--source-dir", dir, "--color", "never")
-	if code != exitOK {
-		t.Fatalf("empty-mode clean diff exit = %d, want %d (stderr=%s)\n%s", code, exitOK, stderr, stdout)
-	}
-	if strings.Contains(stdout, inventory.PartOfLabel) {
-		t.Errorf("empty inventory mode must not introduce the part-of label:\n%s", stdout)
-	}
-}
-
-// TestDiff_HybridMode_MissingPartOfLabelShowsConfigure is the negative control:
-// in hybrid mode, a live object applied out-of-band WITHOUT the part-of label
-// must surface as a configure. This proves the diff genuinely compares the
-// label rather than blindly suppressing it.
-func TestDiff_HybridMode_MissingPartOfLabelShowsConfigure(t *testing.T) {
-	cfg := envtestConfig(t)
-	c := testClient(t, cfg)
-	ns := makeNamespace(t, c, "diffhybriddrift")
-	ss := makeStageSet(t, c, ns, "app")
-	setInventoryMode(t, c, ss, "hybrid")
-
-	// Created directly, with no member label and no controller field manager —
-	// the dry-run apply will add the part-of label, so the diff must show it.
+	// Created directly, with no stage label and no controller field manager —
+	// the dry-run apply will add the stage label, so the diff must show it.
 	createConfigMap(t, c, ns, "settings", map[string]any{"greeting": "hello"})
 
 	dir := writeSourceTree(t, map[string]string{
@@ -442,13 +363,13 @@ func TestDiff_HybridMode_MissingPartOfLabelShowsConfigure(t *testing.T) {
 
 	stdout, stderr, code := runCLI(t, cfg, "diff", "app", "-n", ns, "--source-dir", dir, "--color", "never")
 	if code != exitDiff {
-		t.Fatalf("hybrid drift diff exit = %d, want %d (stderr=%s)\n%s", code, exitDiff, stderr, stdout)
+		t.Fatalf("drift diff exit = %d, want %d (stderr=%s)\n%s", code, exitDiff, stderr, stdout)
 	}
 	if !strings.Contains(stdout, "configure ConfigMap/settings") {
-		t.Errorf("missing part-of label should show as configure:\n%s", stdout)
+		t.Errorf("missing stage label should show as configure:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, inventory.PartOfLabel) {
-		t.Errorf("configure diff should reveal the part-of label being added:\n%s", stdout)
+	if !strings.Contains(stdout, stagesv1.StageLabel) {
+		t.Errorf("configure diff should reveal the stage label being added:\n%s", stdout)
 	}
 }
 
@@ -460,7 +381,6 @@ func TestDiff_CleanServerSide(t *testing.T) {
 	c := testClient(t, cfg)
 	ns := makeNamespace(t, c, "diffclean")
 	ss := makeStageSet(t, c, ns, "app")
-	setInventoryMode(t, c, ss, "entries")
 
 	applyAsReconcile(t, cfg, ss, "first", renderObj(ns, "settings", map[string]any{"greeting": "stable"}))
 
