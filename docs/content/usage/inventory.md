@@ -8,8 +8,8 @@ Every time a stage applies, the controller records the exact set of objects it
 applied, so it can **prune** what a later revision no longer renders and tear a
 StageSet down in reverse stage order. That record is the **`StageInventory`** — a
 controller-owned resource you never author (its fields are in the
-[API reference](/api/stageinventory/)). This page covers what the inventory is for
-and the knob that changes how it is tracked: `--inventory-mode`.
+[API reference](/api/stageinventory/)). The knob that changes how membership is
+tracked is `--inventory-mode`.
 
 ## What the inventory records
 

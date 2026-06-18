@@ -62,8 +62,9 @@ floor the chart also renders a `HorizontalPodAutoscaler` (CPU target 80%) and a
 
 The lease is not released eagerly on shutdown, so after a rolling update the new
 leader takes over when the old lease expires — budget a few seconds of reconcile
-pause on restart. Admission and the gate endpoint are unaffected. The HA model is
-detailed in [multi-cluster and tenancy](/usage/multi-cluster/).
+pause on restart. Admission and the gate endpoint stay available throughout,
+since every replica serves them. The HA model is detailed in
+[multi-cluster and tenancy](/usage/multi-cluster/).
 
 ```yaml
 replicas:

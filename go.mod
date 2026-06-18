@@ -4,9 +4,6 @@ go 1.26.0
 
 toolchain go1.26.4
 
-// Scaffold note: dependencies are intentionally not listed yet.
-// Run `make deps` (go mod tidy) once, then commit go.mod and go.sum.
-
 require (
 	filippo.io/age v1.3.1
 	github.com/Masterminds/semver/v3 v3.5.0

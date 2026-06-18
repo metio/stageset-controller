@@ -2,8 +2,8 @@
 title: Contributing
 ---
 
-Contributions are welcome. These pages cover building and testing the controller,
-the checks a pull request must pass, and how releases are cut.
+Contributions are welcome. Build and test the controller locally, satisfy the
+checks every pull request must pass, and see how releases are cut.
 
 ## Developer Certificate of Origin
 

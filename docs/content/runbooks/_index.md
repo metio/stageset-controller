@@ -2,11 +2,11 @@
 title: Runbooks
 ---
 
-One page per `status.conditions[Ready].reason` the controller sets, plus a few
-operational alert runbooks. Each page covers the symptom, the cause, how to
-diagnose it, and how to remediate.
+Start from the `status.conditions[Ready].reason` on a StageSet, or from a firing
+operational alert, and follow the matching page to diagnose and remediate the
+symptom.
 
 The controller appends the matching page link to each actionable Ready message —
 `(runbook: https://stageset.projects.metio.wtf/runbooks/<reason>/)` — so a
-`kubectl describe` routes straight here. Healthy reasons (`Succeeded`,
-`Suspended`) get no link.
+`kubectl describe` routes you straight here. Healthy reasons (`Succeeded`,
+`Suspended`) carry no link.

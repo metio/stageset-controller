@@ -207,7 +207,7 @@ incomplete list does not fail loudly; it silently cuts that path off.
 Find the apiserver's address with:
 
 ```shell
-kubectl --namespace default get endpoints kubernetes -o jsonpath='{.subsets[*].addresses[*].ip}'
+kubectl --namespace default get endpointslice kubernetes --output jsonpath='{.endpoints[*].addresses[*]}'
 ```
 
 Use that IP as a `/32` (or your control plane's CIDR for an HA apiserver). A

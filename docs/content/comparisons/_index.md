@@ -5,8 +5,8 @@ title: Comparisons
 `StageSet` isn't a templating tool and isn't a replacement for your manifest
 generator. It's a *delivery* controller: it takes manifests that already exist
 (as a [Flux](https://fluxcd.io/) `ExternalArtifact`) and rolls them out in order,
-with gates, under continuous reconciliation. These pages place it next to tools
-people reach for in the same situations.
+with gates, under continuous reconciliation. The tools below come up in the same
+situations; here is how each one relates.
 
 | | Generates manifests | Applies them | Continuous reconcile / drift | Ordered stages within a release | Gates / typed actions |
 |---|---|---|---|---|---|

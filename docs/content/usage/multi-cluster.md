@@ -108,7 +108,7 @@ applies with its own client — so the `cluster-admin` binding is what lets thos
 `StageSet`s write. The trade-off: every `StageSet` on the cluster has full write
 access, so this is for single-tenant clusters only. Leave `rbac.clusterAdmin` at its
 default `false` and give each `StageSet` a [tenant ServiceAccount](#tenant-serviceaccounts-multi-tenant)
-whenever more than one team shares the cluster. The two mix — a cluster-admin controller still
+whenever more than one team shares the cluster. The two mix — a cluster-admin controller
 honors `serviceAccountName` on any `StageSet` that sets it, dropping to that SA's
 rights for that release.
 

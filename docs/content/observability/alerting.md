@@ -5,7 +5,7 @@ tags: [observability, alerts, prometheus, events, runbooks]
 ---
 
 Two layers surface trouble: Kubernetes Events the controller emits on a StageSet's
-own timeline, and a Prometheus alert set built on the [metrics](/usage/metrics/).
+own timeline, and a Prometheus alert set built on the [metrics](/observability/metrics/).
 Both lead an operator to a [runbook](/runbooks/).
 
 ## The controller binary
@@ -22,7 +22,7 @@ kubectl --namespace team-a describe stageset checkout
 kubectl --namespace team-a get events --field-selector involvedObject.name=checkout
 ```
 
-Reasons you will see include `Ready` and `StageFailed` on the rollout outcome,
+Reasons you will see include `Succeeded` and `StageFailed` on the rollout outcome,
 `UpdateDeferred` when an update window holds a rollout, `MigrationStarted` /
 `MigrationCompleted` / `MigrationFailed` around a versioned migration,
 `DriftCorrected` when an apply repaired out-of-band drift, `RolledBack` when

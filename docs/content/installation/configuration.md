@@ -71,7 +71,7 @@ series alongside the custom `stageset_*` metrics documented in
 
 The controller exports OpenTelemetry traces over OTLP gRPC when
 `--tracing-endpoint` is set; it is off by default. See
-[Observability](/usage/observability/) for the collector wiring.
+[Observability](/observability/) for the collector wiring.
 
 {{< flag-table group="Tracing" >}}
 
@@ -95,8 +95,10 @@ ready to advance and `503` otherwise.
 
 ## Logging
 
-Logging is powered by the controller-runtime `zap` logger. The standard zap
-flags (`--zap-log-level`, `--zap-encoder`, `--zap-stacktrace-level`,
-`--zap-time-encoding`, and `--zap-devel`) are available and bound to
-`flag.CommandLine`; run `stageset-controller --help` to see their current
-defaults. These flags are not part of the generated reference above.
+The controller logs through `log/slog`. Set the verbosity with `--log-level`
+(`debug`, `info`, `warn`, or `error`, default `info`) and the encoding with
+`--log-format` (`json` or `text`, default `json`); controller-runtime's own
+logs flow through the same handler via a logr bridge. See
+[Logging](/observability/logging/) for reading and filtering the output.
+
+{{< flag-table group="Logging" >}}

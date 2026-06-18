@@ -4,10 +4,11 @@ description: Reference a producer like JaaS and let the controller find its Exte
 tags: [sources, externalartifact, jaas, stages]
 ---
 
-[Stages and sources](/usage/stages-and-sources/#source-kinds) covers the two
-direct routes — an `ExternalArtifact` (the default `sourceRef.kind`) or a Flux
-`GitRepository`/`OCIRepository`/`Bucket`. The third option names the thing that
-*produces* an artifact and lets the controller find it. This is useful when an
+Point a stage at the resource that *produces* an artifact, and the controller
+finds the `ExternalArtifact` that producer publishes. This is the third source
+route, alongside the two direct ones — an `ExternalArtifact` (the default
+`sourceRef.kind`) or a Flux `GitRepository`/`OCIRepository`/`Bucket` — covered in
+[stages and sources](/usage/stages-and-sources/#source-kinds). Reach for it when an
 operator publishes an `ExternalArtifact` from a custom resource (for example
 [JaaS](https://jaas.projects.metio.wtf/) rendering Jsonnet).
 

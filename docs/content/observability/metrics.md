@@ -70,7 +70,7 @@ histogram_quantile(0.99,
 )
 ```
 
-The [alerting](/usage/alerting/) catalog builds on exactly these expressions.
+The [alerting](/observability/alerting/) catalog builds on exactly these expressions.
 
 ## The Helm chart
 

@@ -14,8 +14,11 @@ failure points straight at the cause:
 - **vulnerabilities** — `govulncheck` (a reachable advisory is a hard gate).
 - **architecture** — `arch-go` against `arch-go.yml`.
 - **reuse** — SPDX/REUSE compliance on every file.
-- **text linters** — `yamllint`, `actionlint`, `markdownlint`, `typos`.
+- **text linters** — `yamllint`, `actionlint`, `markdownlint`, `typos`, and Vale
+  prose linting.
+- **docs-lint** — builds the Hugo site and lints the rendered output.
 - **container-image** — a buildx image build plus a Trivy scan.
+- **dco** — every non-bot commit carries a `Signed-off-by` trailer.
 
 A single **all-green** job depends on every other job and is the only required
 check, so new jobs are covered automatically. A separate `kind-smoke.yml` runs the

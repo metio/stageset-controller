@@ -9,8 +9,7 @@ tags: [tutorials, progressive-delivery, flagger, argo, stages]
 [Argo Rollouts](https://argoproj.github.io/argo-rollouts/). The controller exposes
 a read-only gate endpoint and a readiness gauge so either one can hold a promotion
 until a `StageSet` stage is healthy; ready checks let a stage wait on a Rollout in
-return. Pick the section for your controller below — see also
-[StageSet vs Argo Rollouts](/comparisons/argo-rollouts/).
+return. See also [StageSet vs Argo Rollouts](/comparisons/argo-rollouts/).
 
 ## The gate contract
 

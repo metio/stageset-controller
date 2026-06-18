@@ -4,19 +4,19 @@ description: A dynamic watch on a producer source kind failed to engage, so Stag
 tags: [runbooks, troubleshooting, sources]
 ---
 
-Fires when `stageset_watch_engagement_failures_total{gvk=...}` has increased
-above the per-hour threshold for the alert window. The controller engages
-producer watches lazily: the first time a StageSet names a producer kind in a
-stage's `sourceRef`, `engageProducerWatch` adds a dynamic `source.Kind` watch
-(routed through `mapProducer`) so a change on that producer re-triggers the
-referencing StageSets. `ExternalArtifact` is watched statically; the dynamic
-watches cover producer kinds such as `GitRepository`, `OCIRepository`, `Bucket`,
-and operator-defined producers like a JaaS `JsonnetSnippet`.
+`stageset_watch_engagement_failures_total{gvk=...}` has increased above the
+per-hour threshold for the alert window, and the named producer kind stays
+unwatched. The controller engages producer watches lazily: the first time a
+StageSet names a producer kind in a stage's `sourceRef`, `engageProducerWatch`
+adds a dynamic `source.Kind` watch (routed through `mapProducer`) so a change on
+that producer re-triggers the referencing StageSets. `ExternalArtifact` is
+watched statically; the dynamic watches cover producer kinds such as
+`GitRepository`, `OCIRepository`, `Bucket`, and operator-defined producers like a
+JaaS `JsonnetSnippet`.
 
-When that engagement fails, the producer kind stays unwatched. The visible
-symptom is that StageSets referencing that kind stop re-triggering on the
-producer's upstream updates — they sit at their last-resolved revision and only
-catch up on the periodic retry. There is no per-StageSet status signal.
+While engagement fails, StageSets referencing that kind sit at their
+last-resolved revision and only catch up on the periodic retry. There is no
+per-StageSet status signal.
 
 ## Symptom
 

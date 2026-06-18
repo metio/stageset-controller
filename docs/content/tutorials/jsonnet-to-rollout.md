@@ -160,7 +160,7 @@ Apply it, preview the change before it lands, then watch it roll out:
 ```shell
 kubectl apply -f stageset.yaml
 stagesetctl --namespace apps diff web          # preview against live cluster state
-stagesetctl --namespace apps get  web          # per-stage progress
+stagesetctl --namespace apps get web           # per-stage progress
 ```
 
 ## 5. Ship a change

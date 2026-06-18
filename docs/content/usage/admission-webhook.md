@@ -51,16 +51,18 @@ instead of at admission.
 
 The apiserver dials the webhook over TLS and verifies the serving certificate
 against the `caBundle` on the `ValidatingWebhookConfiguration`. Choose how that is
-provisioned with `--webhook-cert-mode` (chart value `webhook.certMode`):
+provisioned with `--webhook-cert-mode` (`cert-manager` or `self-signed`; the binary
+defaults to `cert-manager`, while the chart value `webhook.certMode` defaults to
+`self-signed` for a no-prerequisite install):
 
-### cert-manager (default)
+### cert-manager
 
 The chart renders a `cert-manager.io/v1` Certificate; cert-manager issues the
 Secret, it is mounted at `--webhook-cert-dir`, and cert-manager renews it. The
 webhook server hot-reloads the rotated files. Requires
 [cert-manager](https://cert-manager.io/) in the cluster.
 
-### self-signed
+### self-signed (chart default)
 
 No cert-manager dependency: the controller generates an ECDSA CA and serving
 certificate in-pod, writes them to `--webhook-cert-dir`, and patches the named
@@ -76,7 +78,7 @@ restart.
 # Helm values
 webhook:
   enabled: true
-  certMode: cert-manager     # or self-signed
+  certMode: self-signed      # chart default; or cert-manager
 ```
 
 The [configuration reference](/installation/configuration/) lists the full

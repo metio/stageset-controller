@@ -8,7 +8,7 @@ A stage's source can carry [SOPS](https://github.com/getsops/sops)-encrypted
 files — typically a `Secret` whose values are encrypted — and the controller
 decrypts them in memory, before building and applying the manifests. This mirrors
 Flux's `kustomize-controller` decryption contract, so an existing SOPS-encrypted
-repository works unchanged.
+repository needs no migration.
 
 Set `spec.decryption` and point it at a Secret holding the keys:
 
