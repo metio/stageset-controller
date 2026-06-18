@@ -38,6 +38,7 @@ After that, `kubectl stageset <command>` works.
 | [`get`](/cli/get/) | Print a StageSet's status, or list StageSets. |
 | [`build`](/cli/build/) | Render a StageSet's manifests to stdout. |
 | [`diff`](/cli/diff/) | Preview what a reconcile would change; usable as a CI gate. |
+| [`apply`](/cli/apply/) | Server-side-apply a StageSet's rendered manifests directly. |
 | [`reconcile`](/cli/reconcile/) | Force an out-of-band reconcile. |
 
 ## Global flags

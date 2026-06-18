@@ -152,6 +152,7 @@ func newRootCommand(o *options) *cobra.Command {
 	root.AddCommand(newGetCommand(o))
 	root.AddCommand(newBuildCommand(o))
 	root.AddCommand(newDiffCommand(o))
+	root.AddCommand(newApplyCommand(o))
 	root.AddCommand(newReconcileCommand(o))
 
 	return root

@@ -233,9 +233,14 @@ pygmentsUseClasses = true
     weight = 3
   [[menu.main]]
     parent = "cli"
+    name = "apply"
+    url = "/cli/apply/"
+    weight = 4
+  [[menu.main]]
+    parent = "cli"
     name = "reconcile"
     url = "/cli/reconcile/"
-    weight = 4
+    weight = 5
 
   [[menu.main]]
     identifier = "api"
