@@ -12,7 +12,7 @@ require (
 	github.com/fluxcd/pkg/apis/kustomize v1.19.0
 	github.com/fluxcd/pkg/apis/meta v1.30.0
 	github.com/fluxcd/pkg/envsubst v1.7.0
-	github.com/fluxcd/pkg/kustomize v1.34.0
+	github.com/fluxcd/pkg/kustomize v1.35.0
 	github.com/fluxcd/pkg/ssa v0.76.0
 	github.com/getsops/sops/v3 v3.13.1
 	github.com/go-logr/logr v1.4.3
