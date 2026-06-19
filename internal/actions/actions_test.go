@@ -548,3 +548,122 @@ func TestPollExpr_TimesOutWhenNeverSatisfied(t *testing.T) {
 		t.Fatal("an expression that never holds must time out")
 	}
 }
+
+// ptrInt32 returns a pointer to v for action retry counts.
+func ptrInt32(v int32) *int32 { return &v }
+
+// TestRun_HTTPClientErrorTerminal proves a deterministic 4xx is terminal: the
+// server is hit exactly once even though retries are configured, and the error
+// carries ErrHTTPClientStatus, the host, and the response body snippet.
+func TestRun_HTTPClientErrorTerminal(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("malformed payload"))
+	}))
+	defer srv.Close()
+
+	e := &Executor{HTTPClient: http.DefaultClient, AllowedHosts: []string{hostOf(t, srv.URL)}}
+	err := e.Run(context.Background(), "ns",
+		[]stagesv1.Action{{Name: "ping", HTTP: &stagesv1.HTTPAction{URL: srv.URL}, Retries: ptrInt32(3)}}, nil, nil)
+	if !errors.Is(err, ErrHTTPClientStatus) {
+		t.Fatalf("want ErrHTTPClientStatus, got %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("a deterministic 4xx must not retry: hits=%d, want 1", got)
+	}
+	host := hostOf(t, srv.URL)
+	if !strings.Contains(err.Error(), host) {
+		t.Fatalf("error should name the host %q: %v", host, err)
+	}
+	if !strings.Contains(err.Error(), "malformed payload") {
+		t.Fatalf("error should carry the body snippet: %v", err)
+	}
+}
+
+// TestRun_HTTPServerErrorRetries proves a 5xx (and the transient 4xx 429) is
+// retried to exhaustion, unlike a deterministic 4xx.
+func TestRun_HTTPServerErrorRetries(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		code int
+	}{
+		{"500 retries", http.StatusInternalServerError},
+		{"429 retries", http.StatusTooManyRequests},
+		{"408 retries", http.StatusRequestTimeout},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var hits int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				atomic.AddInt32(&hits, 1)
+				w.WriteHeader(tc.code)
+			}))
+			defer srv.Close()
+			e := &Executor{HTTPClient: http.DefaultClient, AllowedHosts: []string{hostOf(t, srv.URL)}}
+			err := e.Run(context.Background(), "ns",
+				[]stagesv1.Action{{Name: "ping", HTTP: &stagesv1.HTTPAction{URL: srv.URL}, Retries: ptrInt32(2)}}, nil, nil)
+			if err == nil {
+				t.Fatalf("status %d should fail", tc.code)
+			}
+			if errors.Is(err, ErrHTTPClientStatus) {
+				t.Fatalf("status %d must not be classified terminal client-error: %v", tc.code, err)
+			}
+			// 1 initial + 2 retries.
+			if got := atomic.LoadInt32(&hits); got != 3 {
+				t.Fatalf("a retryable status should retry: hits=%d, want 3", got)
+			}
+		})
+	}
+}
+
+// TestPollExpr_BadExpressionSurfacesInTimeout proves a CEL expression that
+// errors on every poll is reported in the timeout message instead of being
+// hidden behind a bare deadline.
+func TestPollExpr_BadExpressionSurfacesInTimeout(t *testing.T) {
+	t.Parallel()
+	dep := &unstructured.Unstructured{}
+	dep.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"})
+	dep.SetNamespace("ns")
+	dep.SetName("web")
+
+	s := runtime.NewScheme()
+	gvk := dep.GroupVersionKind()
+	s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(dep).Build()
+	e := &Executor{Client: c}
+
+	target := &meta.NamespacedObjectKindReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "web"}
+	// A type error at eval time (string > int) errors on every poll.
+	err := e.pollExpr(context.Background(), "ns", target, "status.phase > 3", &metav1.Duration{Duration: 50 * time.Millisecond})
+	if err == nil {
+		t.Fatal("a bad expression must surface as a timeout error")
+	}
+	if !strings.Contains(err.Error(), "last error") || !strings.Contains(err.Error(), "evaluate expression") {
+		t.Fatalf("timeout should fold the last eval error: %v", err)
+	}
+}
+
+// TestPollExpr_DeniedGetSurfacesInTimeout proves a failing per-poll Get (e.g.
+// RBAC denial or the target simply absent) is folded into the timeout message.
+func TestPollExpr_DeniedGetSurfacesInTimeout(t *testing.T) {
+	t.Parallel()
+	s := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
+	s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	c := fake.NewClientBuilder().WithScheme(s).Build() // no objects → Get returns NotFound
+	e := &Executor{Client: c}
+
+	target := &meta.NamespacedObjectKindReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "missing"}
+	err := e.pollExpr(context.Background(), "ns", target, "true", &metav1.Duration{Duration: 50 * time.Millisecond})
+	if err == nil {
+		t.Fatal("a never-gettable target must time out")
+	}
+	if !strings.Contains(err.Error(), "last error") || !strings.Contains(err.Error(), "get target") {
+		t.Fatalf("timeout should fold the last Get error: %v", err)
+	}
+}

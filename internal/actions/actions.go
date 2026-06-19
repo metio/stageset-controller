@@ -52,9 +52,20 @@ var (
 	// forbidden IP at dial time (the dial-time pin behind the string-level
 	// allowedURL check).
 	ErrForbiddenAddress = errors.New("action url host resolves to a forbidden address")
+	// ErrHTTPClientStatus reports an http action that returned a deterministic
+	// 4xx (a malformed/unauthorized request). Retrying the same request gets the
+	// same answer, so it is terminal — the retry loop fails fast. The two
+	// transient 4xx codes (408 Request Timeout, 429 Too Many Requests) are NOT
+	// wrapped in this sentinel, so they keep retrying like 5xx.
+	ErrHTTPClientStatus = errors.New("action url returned a client error")
 )
 
 const maxResponseBytes = 1 << 16 // bound the action response body we drain
+
+// maxErrorBodyBytes bounds how much of a mismatched response body is folded into
+// the error (and thus the StageSet status). Small on purpose: enough to carry an
+// upstream error message, not a full page.
+const maxErrorBodyBytes = 512
 
 // Executor runs typed actions against the cluster.
 type Executor struct {
@@ -129,8 +140,9 @@ func (e *Executor) exec(ctx context.Context, ns string, a *stagesv1.Action) erro
 		}
 		// Config errors will not improve on retry. A host that resolves to a
 		// forbidden address is steady-state too — the DNS record, not transient
-		// load, is the cause.
-		if errors.Is(err, ErrActionUnsupported) || errors.Is(err, ErrForbiddenHost) || errors.Is(err, ErrForbiddenAddress) {
+		// load, is the cause. A deterministic 4xx (malformed/unauthorized
+		// request) is terminal as well: the same request returns the same status.
+		if errors.Is(err, ErrActionUnsupported) || errors.Is(err, ErrForbiddenHost) || errors.Is(err, ErrForbiddenAddress) || errors.Is(err, ErrHTTPClientStatus) {
 			return err
 		}
 		if attempt == retries {
@@ -271,11 +283,44 @@ func (e *Executor) httpCall(ctx context.Context, ns string, h *stagesv1.HTTPActi
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
-	if !statusAccepted(resp.StatusCode, h.ExpectedStatus) {
-		return fmt.Errorf("unexpected response status %d", resp.StatusCode)
+	if statusAccepted(resp.StatusCode, h.ExpectedStatus) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
+		return nil
 	}
-	return nil
+	// On a mismatch surface the host and a bounded snippet of the body so the
+	// status condition (RBAC-gated) carries enough to diagnose. The snippet is
+	// capped at maxErrorBodyBytes; secrets are not echoed back into the request
+	// body field, so a response body cannot leak request secrets here.
+	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+	err = fmt.Errorf("%w: %s returned status %d: %s",
+		statusClass(resp.StatusCode), req.URL.Host, resp.StatusCode, bodySnippet(snippet))
+	return err
+}
+
+// statusClass classifies a non-accepted response status for the retry loop. A
+// deterministic 4xx (except 408/429) wraps ErrHTTPClientStatus so the retry loop
+// fails fast; everything else (5xx, plus the transient 408/429) returns a bare
+// error so it keeps retrying.
+func statusClass(code int) error {
+	if code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests {
+		return ErrHTTPClientStatus
+	}
+	return errUnexpectedStatus
+}
+
+// errUnexpectedStatus is the retryable status error (5xx and transient 4xx). It
+// is deliberately distinct from ErrHTTPClientStatus so the retry loop's
+// errors.Is check only fast-fails on the terminal client-error class.
+var errUnexpectedStatus = errors.New("unexpected response status")
+
+// bodySnippet renders a captured response body for an error message: trimmed,
+// and "(empty)" when there is nothing to show.
+func bodySnippet(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return "(empty)"
+	}
+	return s
 }
 
 func (e *Executor) wait(ctx context.Context, ns string, w *stagesv1.WaitAction) error {
@@ -322,20 +367,39 @@ func (e *Executor) pollExpr(ctx context.Context, ns string, target *meta.Namespa
 	defer cancel()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	// Retain the last per-poll Get / CEL-eval failure so a malformed expression
+	// or an RBAC-denied Get is surfaced in the timeout message instead of being
+	// hidden behind a generic "timed out". A poll that succeeds clears it.
+	var lastErr error
 	for {
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(gvk)
-		if gerr := e.Client.Get(ctx, apitypes.NamespacedName{Namespace: tns, Name: target.Name}, obj); gerr == nil {
-			if ok, _ := prog.EvalBool(obj.Object); ok {
-				return nil
-			}
+		if gerr := e.Client.Get(ctx, apitypes.NamespacedName{Namespace: tns, Name: target.Name}, obj); gerr != nil {
+			lastErr = fmt.Errorf("get target: %w", gerr)
+		} else if ok, eerr := prog.EvalBool(obj.Object); eerr != nil {
+			lastErr = fmt.Errorf("evaluate expression: %w", eerr)
+		} else if ok {
+			return nil
+		} else {
+			lastErr = nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("wait for %q on %s/%s timed out: %w", expr, tns, target.Name, ctx.Err())
+			return fmt.Errorf("wait for %q on %s/%s did not complete: %w",
+				expr, tns, target.Name, foldLastErr(ctx.Err(), lastErr))
 		case <-ticker.C:
 		}
 	}
+}
+
+// foldLastErr combines the timeout cause with the last non-nil per-poll error so
+// the message names the real obstacle (bad CEL expr, denied Get) rather than a
+// bare deadline. When no poll error was seen, the timeout stands alone.
+func foldLastErr(timeoutErr, lastErr error) error {
+	if lastErr == nil {
+		return timeoutErr
+	}
+	return fmt.Errorf("%w (last error: %v)", timeoutErr, lastErr)
 }
 
 // job renders Job objects from an ExternalArtifact, applies them with a
@@ -391,10 +455,16 @@ func (e *Executor) job(ctx context.Context, ns string, j *stagesv1.JobAction) er
 func (e *Executor) awaitJob(ctx context.Context, job *unstructured.Unstructured) error {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	// Retain the last poll Get failure so an RBAC-denied or otherwise failing
+	// status read surfaces in the timeout message rather than a bare deadline.
+	var lastErr error
 	for {
 		fresh := &unstructured.Unstructured{}
 		fresh.SetGroupVersionKind(job.GroupVersionKind())
-		if gerr := e.Client.Get(ctx, apitypes.NamespacedName{Namespace: job.GetNamespace(), Name: job.GetName()}, fresh); gerr == nil {
+		if gerr := e.Client.Get(ctx, apitypes.NamespacedName{Namespace: job.GetNamespace(), Name: job.GetName()}, fresh); gerr != nil {
+			lastErr = fmt.Errorf("get job: %w", gerr)
+		} else {
+			lastErr = nil
 			conds, _, _ := unstructured.NestedSlice(fresh.Object, "status", "conditions")
 			for _, c := range conds {
 				m, ok := c.(map[string]any)
@@ -413,7 +483,7 @@ func (e *Executor) awaitJob(ctx context.Context, job *unstructured.Unstructured)
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("job %s did not complete: %w", job.GetName(), ctx.Err())
+			return fmt.Errorf("job %s did not complete: %w", job.GetName(), foldLastErr(ctx.Err(), lastErr))
 		case <-ticker.C:
 		}
 	}
