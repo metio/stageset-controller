@@ -365,10 +365,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// rather than burning reconciles. Transient connect failures still fail
 		// the stage and back off.
 		if errors.Is(err, errInvalidKubeConfigSpec) {
+			prevReady := readyConditionSnapshot(&ss)
 			r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec, err.Error())
 			ss.Status.ObservedGeneration = ss.Generation
 			metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonInvalidSpec).Inc()
-			r.event(&ss, corev1.EventTypeWarning, ReasonInvalidSpec, err.Error())
+			r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, ReasonInvalidSpec, err.Error())
 			if uerr := r.patchStatus(ctx, patchHelper, &ss); uerr != nil {
 				return ctrl.Result{}, uerr
 			}
@@ -754,14 +755,14 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if ss.Spec.RollbackOnFailure {
 		ss.Status.LastAppliedSnapshot = snapshotStages(&ss, resolved, subDigests)
 	}
-	r.setReady(&ss, metav1.ConditionTrue, ReasonReady,
-		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
+	syncedMsg := fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages))
+	prevReady := readyConditionSnapshot(&ss)
+	r.setReady(&ss, metav1.ConditionTrue, ReasonReady, syncedMsg)
 	if err := r.patchStatus(ctx, patchHelper, &ss); err != nil {
 		return ctrl.Result{}, err
 	}
 	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonReady).Inc()
-	r.event(&ss, corev1.EventTypeNormal, ReasonReady,
-		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
+	r.emitReadyEvent(&ss, prevReady, metav1.ConditionTrue, ReasonReady, syncedMsg)
 	logger.Info("StageSet synced", "stages", len(ss.Spec.Stages), "ready", true)
 
 	return jitter.JitteredRequeueInterval(ctrl.Result{RequeueAfter: r.steadyInterval(&ss)}), nil
@@ -845,6 +846,38 @@ func (r *StageSetReconciler) setReady(ss *stagesv1.StageSet, status metav1.Condi
 		Reason:  reason,
 		Message: r.decorateMessage(reason, message),
 	})
+}
+
+// readyConditionSnapshot returns a value copy of the current Ready condition, or
+// nil if absent. It must be called BEFORE setReady: fluxconditions.Set updates
+// the condition in place (apimeta.FindStatusCondition hands back a pointer into
+// the slice), so emitReadyEvent's dedup needs this prior snapshot rather than
+// the just-written state.
+func readyConditionSnapshot(ss *stagesv1.StageSet) *metav1.Condition {
+	if cur := apimeta.FindStatusCondition(ss.Status.Conditions, ConditionReady); cur != nil {
+		snapshot := *cur
+		return &snapshot
+	}
+	return nil
+}
+
+// emitReadyEvent records a Kubernetes event for a Ready-condition transition,
+// deduplicated against prev: it fires only when the Ready status or reason
+// actually changes. A StageSet re-reconciling at its steady interval — or
+// retrying a terminal failure every permanentRetryInterval — therefore doesn't
+// re-emit an identical event on every pass. The event type follows the status
+// (True -> Normal, otherwise Warning). prev comes from readyConditionSnapshot,
+// taken before setReady mutated the condition. Mirrors the jaas operator's
+// emitConditionEvent.
+func (r *StageSetReconciler) emitReadyEvent(ss *stagesv1.StageSet, prev *metav1.Condition, status metav1.ConditionStatus, reason, message string) {
+	if prev != nil && prev.Status == status && prev.Reason == reason {
+		return
+	}
+	eventtype := corev1.EventTypeWarning
+	if status == metav1.ConditionTrue {
+		eventtype = corev1.EventTypeNormal
+	}
+	r.event(ss, eventtype, reason, message)
 }
 
 // patchStatus persists accumulated status changes (the Ready condition plus the
@@ -957,12 +990,13 @@ func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.He
 	})
 	publishStageReady(ss)
 	ss.Status.ObservedGeneration = ss.Generation
+	prevReady := readyConditionSnapshot(ss)
 	r.setReady(ss, metav1.ConditionFalse, reason, readyMsg)
 	if uerr := r.patchStatus(ctx, helper, ss); uerr != nil {
 		return ctrl.Result{}, uerr
 	}
 	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, reason).Inc()
-	r.event(ss, corev1.EventTypeWarning, reason, readyMsg)
+	r.emitReadyEvent(ss, prevReady, metav1.ConditionFalse, reason, readyMsg)
 	log.FromContext(ctx).Error(cause, "stage failed", "stage", stage, "op", op, "terminal", terminal)
 	// A terminal failure still has to register as a failure to the stage loop
 	// (so the run halts and rollbackOnFailure can engage) WITHOUT engaging
