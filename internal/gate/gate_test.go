@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -150,5 +151,38 @@ func TestGate_JSON_MissingStageSet(t *testing.T) {
 	}
 	if body["ready"] != false {
 		t.Fatalf("ready = %v, want false", body["ready"])
+	}
+}
+
+// TestGate_DoesNotLeakStageMessage pins the leak-safety contract: a failed stage's
+// free-form status message (which can carry build/decrypt/RBAC error detail) must
+// never appear in the unauthenticated gate response, in either dialect. The
+// structured phase still reports, so legitimate diagnostics survive.
+func TestGate_DoesNotLeakStageMessage(t *testing.T) {
+	t.Parallel()
+	const sentinel = "kustomize build /tmp/overlays: secret-leak-sentinel"
+	h := &Handler{Client: gateClient(t, stageSet("flux-system", "platform",
+		stagesv1.StageStatus{Name: "migrations", Phase: stagesv1.StageFailed, Message: sentinel}))}
+
+	// Plain text (Flagger dialect).
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/gate/flux-system/platform/migrations", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("text status = %d, want 403", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "secret-leak-sentinel") {
+		t.Errorf("text gate leaked the stage message: %s", rec.Body.String())
+	}
+
+	// JSON (Argo dialect).
+	jreq := httptest.NewRequest(http.MethodGet, "/gate/flux-system/platform/migrations", nil)
+	jreq.Header.Set("Accept", "application/json")
+	jrec := httptest.NewRecorder()
+	h.ServeHTTP(jrec, jreq)
+	if strings.Contains(jrec.Body.String(), "secret-leak-sentinel") {
+		t.Errorf("json gate leaked the stage message: %s", jrec.Body.String())
+	}
+	if !strings.Contains(jrec.Body.String(), string(stagesv1.StageFailed)) {
+		t.Errorf("json gate should still report the structured phase: %s", jrec.Body.String())
 	}
 }

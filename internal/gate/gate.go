@@ -16,8 +16,10 @@
 //     (successCondition: result.ready == true) and treats a non-2xx as an error,
 //     so readiness has to live in the body, not the status.
 //
-// The response leaks only a stage phase, so the endpoint is safe to expose
-// unauthenticated (optionally fenced by NetworkPolicy).
+// The response discloses only the stage's phase and pinned revision — never the
+// free-form status message, which can carry build, decryption, or RBAC error
+// detail — so the endpoint is safe to expose unauthenticated (optionally fenced
+// by NetworkPolicy).
 package gate
 
 import (
@@ -38,7 +40,10 @@ type Handler struct {
 }
 
 // gateResult is the JSON body returned to clients that request application/json.
-// Ready is the single field a gate evaluates; the rest are diagnostic.
+// Ready is the single field a gate evaluates; phase and revision are low-info
+// diagnostics. The stage's free-form status message is deliberately NOT included:
+// it can carry build, decryption, fetch, or RBAC error detail (file paths, source
+// URLs, ServiceAccount names), and this endpoint is unauthenticated.
 type gateResult struct {
 	Ready     bool   `json:"ready"`
 	Namespace string `json:"namespace"`
@@ -46,7 +51,6 @@ type gateResult struct {
 	Stage     string `json:"stage"`
 	Phase     string `json:"phase,omitempty"`
 	Revision  string `json:"revision,omitempty"`
-	Message   string `json:"message,omitempty"`
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -74,16 +78,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if s.Name != stage {
 			continue
 		}
-		res.Phase, res.Revision, res.Message = string(s.Phase), s.AppliedRevision, s.Message
+		// Only the phase and pinned revision are disclosed — never s.Message,
+		// which can carry build/decrypt/RBAC error detail on this unauthenticated
+		// endpoint. The full message stays on the StageSet status (RBAC-gated).
+		res.Phase, res.Revision = string(s.Phase), s.AppliedRevision
 		if s.Phase == stagesv1.StageReady {
 			res.Ready = true
 			respond(w, req, res, http.StatusOK, "stage %q is Ready at %s\n", stage, s.AppliedRevision)
 			return
 		}
-		respond(w, req, res, http.StatusForbidden, "stage %q phase=%s: %s\n", stage, s.Phase, s.Message)
+		respond(w, req, res, http.StatusForbidden, "stage %q is not Ready (phase=%s)\n", stage, s.Phase)
 		return
 	}
-	res.Message = "stage not found"
 	respond(w, req, res, http.StatusForbidden, "stage %q not found in stageset %s/%s\n", stage, namespace, name)
 }
 
