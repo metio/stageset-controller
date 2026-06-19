@@ -26,7 +26,7 @@ func reconcileAt(t *testing.T, c client.Client, ss *stagesv1.StageSet, now time.
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		Now:        func() time.Time { return now },
 	}
-	_, _ = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(ss)})
+	_, _ = driveReconcile(r, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(ss)})
 }
 
 func tm(s string) *metav1.Time {

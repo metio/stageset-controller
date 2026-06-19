@@ -32,7 +32,7 @@ func reconcileWith(t *testing.T, c client.Client, ss *stagesv1.StageSet, allowed
 		Fetcher:            &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		AllowedActionHosts: allowedHosts,
 	}
-	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+	_, err := driveReconcile(r, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
 	return err
 }
 

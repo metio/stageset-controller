@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -120,5 +121,30 @@ func TestWebhook_RejectsInvalidAction(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exactly one of") {
 		t.Fatalf("rejection should cite the action oneof rule, got: %v", err)
+	}
+
+	// kubeConfig.configMapRef (cloud-provider auth) is accepted at admission —
+	// the webhook only shape-checks; the ConfigMap's provider/keys are validated
+	// at reconcile time. A named secretRef (self-contained kubeconfig) is
+	// accepted too.
+	cmRef := valid("kubeconfig-cmref")
+	cmRef.Spec.KubeConfig = &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud-auth"}}
+	if err := c.Create(ctx, cmRef); err != nil {
+		t.Fatalf("webhook rejected a StageSet with kubeConfig.configMapRef: %v", err)
+	}
+
+	// A configMapRef without a name is rejected at admission (shape check).
+	cmRefNoName := valid("kubeconfig-cmref-noname")
+	cmRefNoName.Spec.KubeConfig = &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{}}
+	if err := c.Create(ctx, cmRefNoName); err == nil {
+		t.Fatal("webhook accepted a StageSet with a nameless kubeConfig.configMapRef")
+	} else if !strings.Contains(err.Error(), "configMapRef.name") {
+		t.Fatalf("rejection should cite configMapRef.name, got: %v", err)
+	}
+
+	secRef := valid("kubeconfig-secretref")
+	secRef.Spec.KubeConfig = &fluxmeta.KubeConfigReference{SecretRef: &fluxmeta.SecretKeyReference{Name: "remote-kubeconfig"}}
+	if err := c.Create(ctx, secRef); err != nil {
+		t.Fatalf("webhook rejected a StageSet with kubeConfig.secretRef: %v", err)
 	}
 }

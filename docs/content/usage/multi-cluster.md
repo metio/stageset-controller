@@ -166,8 +166,58 @@ spec:
 
 The Secret is read with the controller's own identity — connecting to the target
 cluster is the controller's job — and the kubeconfig payload defaults to the
-`value` key. A self-contained kubeconfig is required; `configMapRef`-style
-cloud-provider auth is not supported.
+`value` key.
+
+### Cloud-provider auth
+
+Instead of storing a self-contained kubeconfig in a Secret, point `kubeConfig` at
+a `configMapRef` to authenticate through a cloud provider's workload identity. The
+cluster's API server address and CA come from the ConfigMap, and the bearer token
+is minted by the provider's IAM/STS on each request:
+
+```yaml
+spec:
+  kubeConfig:
+    configMapRef:
+      name: prod-eks-auth
+  stages:
+    - name: app
+      sourceRef:
+        name: payments-app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prod-eks-auth
+data:
+  provider: aws              # one of: aws, azure, gcp, generic (required)
+  cluster: prod-eks          # provider-specific cluster resource name
+  address: https://XXXX.eks.amazonaws.com  # API server address
+  ca.crt: |                  # PEM-encoded CA bundle (optional)
+    -----BEGIN CERTIFICATE-----
+    ...
+    -----END CERTIFICATE-----
+  audiences: |               # OIDC audiences for the SA token (optional)
+    sts.amazonaws.com
+  serviceAccountName: deployer  # cloud identity to impersonate (optional)
+```
+
+The ConfigMap is read with the controller's own identity. Which keys are required
+depends on the provider; the `provider` key is always required and must be one of
+`aws`, `azure`, `gcp`, or `generic`. When `serviceAccountName` is set in the
+ConfigMap, that ServiceAccount (in the StageSet's namespace) is the cloud identity
+whose workload-identity binding the provider exchanges for a cluster token; when
+absent, the controller's own ambient cloud credentials are used.
+
+**Trust model:** the ConfigMap names the provider and the cluster, but the actual
+cloud credential is never in the cluster — it is minted on demand from the cloud's
+IAM/STS using the controller's (or the named ServiceAccount's) workload identity.
+A malformed ConfigMap (unknown `provider`, missing a required key, or a missing
+ConfigMap) fails the StageSet terminally with `reason: InvalidSpec`; admission
+only checks that `configMapRef.name` is set, because the ConfigMap contents are
+not visible to the webhook.
+
+`secretRef` and `configMapRef` are mutually exclusive — set exactly one.
 
 Cross-namespace `sourceRef` and `dependsOn` references can be disabled
 cluster-wide with the controller's `--no-cross-namespace-refs` flag when you want

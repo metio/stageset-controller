@@ -67,7 +67,7 @@ func TestReconcile_RollbackStore_StoresOnSuccess(t *testing.T) {
 		Fetcher:       &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		RollbackStore: store,
 	}
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(ss)}); err != nil {
+	if _, err := driveReconcile(r, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(ss)}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if len(store.data) == 0 {

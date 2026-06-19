@@ -5,9 +5,11 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	authutils "github.com/fluxcd/pkg/auth/utils"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,6 +34,72 @@ type clusterTarget struct {
 	token string
 }
 
+// remoteConfigBuilder turns a spec.kubeConfig reference into the rest.Config the
+// apply runs through. Both reference shapes route through it:
+//
+//   - secretRef names a self-contained kubeconfig stored in a Secret; the config
+//     carries its own embedded credentials.
+//   - configMapRef selects cloud-provider workload-identity auth (AWS / Azure /
+//     GCP / generic): the ConfigMap names the provider and cluster, and the
+//     bearer token is minted by the cloud's IAM/STS on every request.
+//
+// The returned cacheKey participates in targetCluster's per-target cache so a
+// rotated kubeconfig (or a different ConfigMap) builds a fresh connection while
+// an unchanged one reuses the discovered RESTMapper. Production wires
+// defaultRemoteConfigBuilder; tests inject a fake that points at envtest.
+type remoteConfigBuilder interface {
+	RESTConfig(ctx context.Context, kc *fluxmeta.KubeConfigReference, namespace string) (cfg *rest.Config, cacheKey string, err error)
+}
+
+// errInvalidKubeConfigSpec marks a kubeConfig failure that no retry can fix —
+// a malformed configMapRef (unknown provider, missing required keys) or an
+// unparseable kubeconfig Secret. It is terminal: the reconciler surfaces it as
+// ReasonInvalidSpec rather than retrying on every reconcile.
+var errInvalidKubeConfigSpec = errors.New("invalid spec.kubeConfig")
+
+// defaultRemoteConfigBuilder is the production remoteConfigBuilder. Both paths
+// read in-cluster objects (the Secret / ConfigMap) with the controller's own
+// client — connecting to the target cluster is the controller's job, not the
+// tenant's.
+type defaultRemoteConfigBuilder struct {
+	r *StageSetReconciler
+}
+
+// RESTConfig builds a rest.Config for the kubeConfig reference. secretRef parses
+// a stored kubeconfig; configMapRef hands off to fluxcd/pkg/auth, which reads
+// the ConfigMap, validates its provider/keys, and returns a config whose bearer
+// token is re-minted from the cloud STS per request.
+func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta.KubeConfigReference, namespace string) (*rest.Config, string, error) {
+	switch {
+	case kc.SecretRef != nil:
+		raw, version, err := b.r.kubeconfigBytes(ctx, namespace, kc.SecretRef)
+		if err != nil {
+			return nil, "", err
+		}
+		// A malformed kubeconfig Secret is treated as a transient stage failure
+		// (not errInvalidKubeConfigSpec) so the secretRef path keeps its existing
+		// behavior: the run fails the stage and backs off rather than going
+		// terminal.
+		cfg, err := clientcmd.RESTConfigFromKubeConfig(raw)
+		if err != nil {
+			return nil, "", fmt.Errorf("parsing kubeConfig secret %q: %w", kc.SecretRef.Name, err)
+		}
+		return cfg, "secret/" + namespace + "/" + kc.SecretRef.Name + "/" + version, nil
+	case kc.ConfigMapRef != nil:
+		// fluxcd/pkg/auth reads the ConfigMap, dispatches on its "provider" key
+		// (aws|azure|gcp|generic), validates the per-provider inputs, and mints
+		// the cluster bearer token from the cloud's IAM/STS. A bad provider name
+		// or missing required key is terminal — wrap it as such.
+		cfg, err := authutils.GetRESTConfig(ctx, *kc, namespace, b.r.Client)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: cloud-provider kubeConfig configMap %q: %w", errInvalidKubeConfigSpec, kc.ConfigMapRef.Name, err)
+		}
+		return cfg, "configmap/" + namespace + "/" + kc.ConfigMapRef.Name, nil
+	default:
+		return nil, "", fmt.Errorf("%w: spec.kubeConfig sets neither secretRef nor configMapRef", errInvalidKubeConfigSpec)
+	}
+}
+
 // targetCluster returns the client and mapper every cluster write of a run is
 // performed through. Two orthogonal modifiers compose onto the controller's own
 // connection:
@@ -44,8 +112,10 @@ type clusterTarget struct {
 //     authority to mint and a controller-cluster token would be rejected by the
 //     remote apiserver (wrong issuer/audience), so the remote path keeps
 //     header impersonation against the kubeconfig's credentials.
-//   - spec.kubeConfig.secretRef retargets the apply to a remote cluster, built
-//     from a kubeconfig stored in a Secret in the StageSet's namespace.
+//   - spec.kubeConfig retargets the apply to a remote cluster. secretRef builds
+//     it from a kubeconfig stored in a Secret in the StageSet's namespace;
+//     configMapRef selects cloud-provider workload-identity auth (the four
+//     fluxcd/pkg/auth providers), built from a ConfigMap in the same namespace.
 //
 // With neither set, the controller's own client and mapper are returned — the
 // single-cluster, single-tenant default, no extra objects built. Bookkeeping
@@ -54,18 +124,15 @@ type clusterTarget struct {
 //
 // Results are cached: local clients per <namespace>/<sa> (rebuilt when the
 // minted token rotates so a cached client never carries an expired token),
-// remote clients per <namespace>/<sa>/<secret>/<resourceVersion> so a rotated
+// remote clients per <namespace>/<sa>/<kubeConfig-identity> so a rotated
 // kubeconfig builds a fresh connection while an unchanged one reuses the
 // discovered RESTMapper.
 func (r *StageSetReconciler) targetCluster(ctx context.Context, ns, sa string, kc *fluxmeta.KubeConfigReference) (client.Client, apimeta.RESTMapper, error) {
 	if kc == nil && sa == "" {
 		return r.Client, r.RESTMapper, nil
 	}
-	if kc != nil && kc.ConfigMapRef != nil {
-		return nil, nil, fmt.Errorf("spec.kubeConfig.configMapRef (cloud-provider auth) is not yet supported; use secretRef with a self-contained kubeconfig")
-	}
 
-	remote := kc != nil && kc.SecretRef != nil
+	remote := kc != nil
 
 	// Local cluster + a tenant SA, impersonation disabled: apply under the
 	// controller's own identity without minting. Only the envtest harness sets
@@ -82,15 +149,19 @@ func (r *StageSetReconciler) targetCluster(ctx context.Context, ns, sa string, k
 		token      string
 	)
 	if remote {
-		raw, version, err := r.kubeconfigBytes(ctx, ns, kc.SecretRef)
+		builder := r.remoteConfig
+		if builder == nil {
+			builder = defaultRemoteConfigBuilder{r: r}
+		}
+		var (
+			ckey string
+			err  error
+		)
+		cfg, ckey, err = builder.RESTConfig(ctx, kc, ns)
 		if err != nil {
 			return nil, nil, err
 		}
-		cfg, err = clientcmd.RESTConfigFromKubeConfig(raw)
-		if err != nil {
-			return nil, nil, fmt.Errorf("parsing kubeConfig secret %q: %w", kc.SecretRef.Name, err)
-		}
-		key = "remote/" + ns + "/" + kc.SecretRef.Name + "/" + version + "/" + sa
+		key = "remote/" + ns + "/" + ckey + "/" + sa
 		// Remote: header impersonation against the kubeconfig's credentials. A
 		// token minted on the controller cluster is not valid here.
 		if sa != "" {

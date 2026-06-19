@@ -18,10 +18,6 @@ spec:
     - jsonPath: .metadata.labels.stages\.metio\.wtf/stage
       name: Stage
       type: string
-    - jsonPath: .spec.entries[*]
-      name: Entries
-      priority: 1
-      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date

@@ -49,7 +49,10 @@ annotation pointing at the matching [runbook](/runbooks/) page on this site; the
 URL prefix is fixed to this site, and the reconcile-errors alert templates the
 URL on `$labels.reason`. Append your own rules under
 `metrics.prometheusRule.extraRules`, and silence a built-in alert by raising its
-threshold rather than forking the chart.
+threshold rather than forking the chart. When `StageSetControllerWorkqueueDepthHigh`
+or `StageSetReconcileLatencyHigh` fires persistently, the controller is at capacity
+— see [Scale and capacity](/installation/scale-and-capacity/) for which lever to
+pull.
 
 ## Events
 

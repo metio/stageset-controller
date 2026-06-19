@@ -149,6 +149,15 @@ spec:
         name: my-app
 ```
 
+`to` is an **exact** target version, the same kind of value `version.value`
+holds. `from` is a semver **constraint**, not an exact version: it is matched
+against the currently deployed version with the same grammar Helm and
+`flux`-style ranges use. So `from` accepts ranges like `>=1.0.0, <2.0.0`,
+`1.x`, or `^1.2` — the migration fires only when the deployed version satisfies
+that constraint *and* the run crosses up to `to`. A `from` of `>=1.0.0, <2.0.0`
+with `to: "2.0.0"` runs the migration on any 1.x → 2.0.0 transition; omit
+`from` to fire on every crossing up to `to` regardless of where you start.
+
 When the deployed version crosses from a `1.x` into `2.0.0`, the `backfill` job
 runs once, anchored before the `app` stage. The controller tracks progress so a
 retry doesn't re-run a completed migration:

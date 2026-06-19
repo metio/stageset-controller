@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	fluxpatch "github.com/fluxcd/pkg/runtime/patch"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -33,7 +34,7 @@ func (r *StageSetReconciler) now() time.Time {
 // deferred=true (with a requeue result) when an update window holds the
 // rollout; the caller then returns without applying. It maintains
 // status.pendingUpdate and honors the one-shot update-now override.
-func (r *StageSetReconciler) gateUpdateWindows(ctx context.Context, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact) (ctrl.Result, bool, error) {
+func (r *StageSetReconciler) gateUpdateWindows(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact) (ctrl.Result, bool, error) {
 	// Emergency override: apply the held rollout once, regardless of windows.
 	if token := ss.Annotations[updateNowAnnotation]; token != "" && token != ss.Status.LastHandledUpdateOverride {
 		ss.Status.LastHandledUpdateOverride = token
@@ -50,7 +51,7 @@ func (r *StageSetReconciler) gateUpdateWindows(ctx context.Context, ss *stagesv1
 		// Malformed windows normally fail admission; this is the fallback.
 		r.setReady(ss, metav1.ConditionFalse, ReasonInvalidSpec, fmt.Sprintf("update window: %v", err))
 		ss.Status.ObservedGeneration = ss.Generation
-		return ctrl.Result{}, true, r.Status().Update(ctx, ss)
+		return ctrl.Result{}, true, r.patchStatus(ctx, helper, ss)
 	}
 
 	newRevision := false
@@ -88,7 +89,7 @@ func (r *StageSetReconciler) gateUpdateWindows(ctx context.Context, ss *stagesv1
 	}
 	r.event(ss, corev1.EventTypeNormal, ReasonUpdateDeferred, msg)
 	metrics.UpdateDeferredTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
-	if uerr := r.Status().Update(ctx, ss); uerr != nil {
+	if uerr := r.patchStatus(ctx, helper, ss); uerr != nil {
 		return ctrl.Result{}, true, uerr
 	}
 	return ctrl.Result{RequeueAfter: requeueForWindow(nextChange, r.now(), r.retryInterval(ss))}, true, nil

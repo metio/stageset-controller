@@ -11,6 +11,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/fluxcd/pkg/apis/meta"
 
@@ -218,6 +219,111 @@ func TestCRDEnum_DecryptionProvider(t *testing.T) {
 		if createOutcome(t, withProvider(bad)) {
 			t.Errorf("Decryption.Provider %q must be rejected by the enum", bad)
 		}
+	}
+}
+
+// TestCRDEnum_HTTPActionMethod pins the
+// Enum=GET;POST;PUT;PATCH;DELETE;HEAD marker on HTTPAction.Method.
+func TestCRDEnum_HTTPActionMethod(t *testing.T) {
+	ns := newNamespace(t, testClient(t))
+	n := 0
+	withMethod := func(method string) *stagesv1.StageSet {
+		n++
+		ss := validationStageSet(ns, fmt.Sprintf("httpmethod-%d", n))
+		ss.Spec.Stages[0].Actions = &stagesv1.StageActions{Post: []stagesv1.Action{{
+			Name: "notify",
+			HTTP: &stagesv1.HTTPAction{URL: "https://example.test/hook", Method: method},
+		}}}
+		return ss
+	}
+	for _, valid := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"} {
+		if !createOutcome(t, withMethod(valid)) {
+			t.Errorf("HTTPAction.Method %q must be accepted", valid)
+		}
+	}
+	for _, bad := range []string{"Pst", "post", "get", "OPTIONS", "TRACE", "x"} {
+		if createOutcome(t, withMethod(bad)) {
+			t.Errorf("HTTPAction.Method %q must be rejected by the enum", bad)
+		}
+	}
+}
+
+// TestCRDRange_HTTPActionExpectedStatus pins the items Minimum=100/Maximum=599
+// markers on HTTPAction.ExpectedStatus: in-range status codes are accepted and
+// out-of-range ones are rejected at admission.
+func TestCRDRange_HTTPActionExpectedStatus(t *testing.T) {
+	ns := newNamespace(t, testClient(t))
+	n := 0
+	withStatus := func(codes ...int32) *stagesv1.StageSet {
+		n++
+		ss := validationStageSet(ns, fmt.Sprintf("httpstatus-%d", n))
+		ss.Spec.Stages[0].Actions = &stagesv1.StageActions{Post: []stagesv1.Action{{
+			Name: "notify",
+			HTTP: &stagesv1.HTTPAction{URL: "https://example.test/hook", ExpectedStatus: codes},
+		}}}
+		return ss
+	}
+	for _, valid := range [][]int32{{200}, {100}, {599}, {201, 204}} {
+		if !createOutcome(t, withStatus(valid...)) {
+			t.Errorf("HTTPAction.ExpectedStatus %v must be accepted", valid)
+		}
+	}
+	for _, bad := range [][]int32{{99}, {600}, {0}, {200, 700}} {
+		if createOutcome(t, withStatus(bad...)) {
+			t.Errorf("HTTPAction.ExpectedStatus %v must be rejected by the range", bad)
+		}
+	}
+}
+
+// TestCRDRange_ActionRetries pins the Minimum=0 marker on Action.Retries: a
+// non-negative retry count is accepted, a negative one is rejected.
+func TestCRDRange_ActionRetries(t *testing.T) {
+	ns := newNamespace(t, testClient(t))
+	n := 0
+	withRetries := func(r int32) *stagesv1.StageSet {
+		n++
+		ss := validationStageSet(ns, fmt.Sprintf("retries-%d", n))
+		ss.Spec.Stages[0].Actions = &stagesv1.StageActions{Post: []stagesv1.Action{{
+			Name:    "notify",
+			Retries: &r,
+			HTTP:    &stagesv1.HTTPAction{URL: "https://example.test/hook"},
+		}}}
+		return ss
+	}
+	for _, valid := range []int32{0, 1, 5} {
+		if !createOutcome(t, withRetries(valid)) {
+			t.Errorf("Action.Retries %d must be accepted", valid)
+		}
+	}
+	for _, bad := range []int32{-1, -5} {
+		if createOutcome(t, withRetries(bad)) {
+			t.Errorf("Action.Retries %d must be rejected by Minimum=0", bad)
+		}
+	}
+}
+
+// TestCRDDefault_ConflictPolicyDefault pins the +kubebuilder:default=Fail marker
+// on ConflictPolicy.Default: a conflictPolicy created with no explicit default
+// is stored with default: Fail.
+func TestCRDDefault_ConflictPolicyDefault(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	ss := validationStageSet(ns, "cpdefault")
+	ss.Spec.Stages[0].ConflictPolicy = &stagesv1.ConflictPolicy{
+		Rules: []stagesv1.ConflictRule{{
+			Target: stagesv1.ConflictTarget{Kind: "ConfigMap"},
+			Action: "Recreate",
+		}},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got := &stagesv1.StageSet{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(ss), got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if d := got.Spec.Stages[0].ConflictPolicy.Default; d != "Fail" {
+		t.Errorf("ConflictPolicy.Default = %q, want the schema default %q", d, "Fail")
 	}
 }
 

@@ -10,11 +10,64 @@ import (
 	"testing"
 	"time"
 
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	fluxpredicates "github.com/fluxcd/pkg/runtime/predicates"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
+
+// The watch predicate is predicate.Or(GenerationChanged, ReconcileRequested,
+// reconcileStageRequested). The single-stage reconcile-stage annotation bumps
+// neither generation nor the Flux requestedAt token, so without the third term
+// the force-stage Update event would be dropped — this pins that it survives,
+// and that status-only / unrelated-annotation churn does not.
+func TestWatchPredicate_WakesOnExpectedChanges(t *testing.T) {
+	t.Parallel()
+	pred := predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		fluxpredicates.ReconcileRequestedPredicate{},
+		reconcileStageRequestedPredicate{},
+	)
+
+	base := func() *stagesv1.StageSet {
+		return &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{
+			Name: "ss", Namespace: "ns", Generation: 1,
+		}}
+	}
+	withGen := func(g int64) *stagesv1.StageSet { s := base(); s.Generation = g; return s }
+	withAnn := func(k, v string) *stagesv1.StageSet {
+		s := base()
+		s.Annotations = map[string]string{k: v}
+		return s
+	}
+
+	cases := map[string]struct {
+		oldObj, newObj *stagesv1.StageSet
+		want           bool
+	}{
+		"generation bump (spec change)":   {base(), withGen(2), true},
+		"reconcile-stage annotation set":  {base(), withAnn(reconcileStageAnnotation, "stage-a@t1"), true},
+		"reconcile-stage token changed":   {withAnn(reconcileStageAnnotation, "stage-a@t1"), withAnn(reconcileStageAnnotation, "stage-a@t2"), true},
+		"flux requestedAt token set":      {base(), withAnn(fluxmeta.ReconcileRequestAnnotation, "now"), true},
+		"no change (status-only update)":  {base(), base(), false},
+		"unrelated annotation only":       {base(), withAnn("example.com/note", "hi"), false},
+		"reconcile-stage token unchanged": {withAnn(reconcileStageAnnotation, "stage-a@t1"), withAnn(reconcileStageAnnotation, "stage-a@t1"), false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := pred.Update(event.UpdateEvent{ObjectOld: tc.oldObj, ObjectNew: tc.newObj})
+			if got != tc.want {
+				t.Errorf("predicate Update = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestParseReconcileStage(t *testing.T) {
 	cases := map[string]struct {

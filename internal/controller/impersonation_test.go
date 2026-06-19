@@ -39,7 +39,7 @@ func reconcileWithConfig(t *testing.T, c client.Client, ss *stagesv1.StageSet) {
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
 	wireRealMinter(t, r)
-	_, _ = r.Reconcile(context.Background(), ctrl.Request{
+	_, _ = driveReconcile(r, ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
 	})
 }

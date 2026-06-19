@@ -57,6 +57,60 @@ func TestValidateDecryption(t *testing.T) {
 	}
 }
 
+// TestValidateKubeConfig covers the kubeConfig validator's shape checks:
+// exactly one of secretRef / configMapRef, each carrying a name. configMapRef
+// (cloud-provider auth) is now accepted at admission — its ConfigMap contents
+// can't be read here, so provider/key validation happens at reconcile time.
+func TestValidateKubeConfig(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		kubeConfig *meta.KubeConfigReference
+		wantErr    bool
+	}{
+		{name: "nil is fine", kubeConfig: nil},
+		{
+			name:       "secretRef accepted",
+			kubeConfig: &meta.KubeConfigReference{SecretRef: &meta.SecretKeyReference{Name: "remote-kubeconfig"}},
+		},
+		{
+			name:       "configMapRef accepted",
+			kubeConfig: &meta.KubeConfigReference{ConfigMapRef: &meta.LocalObjectReference{Name: "cloud-auth"}},
+		},
+		{
+			name:       "configMapRef without name rejected",
+			kubeConfig: &meta.KubeConfigReference{ConfigMapRef: &meta.LocalObjectReference{}},
+			wantErr:    true,
+		},
+		{
+			name:       "secretRef without name rejected",
+			kubeConfig: &meta.KubeConfigReference{SecretRef: &meta.SecretKeyReference{}},
+			wantErr:    true,
+		},
+		{
+			name:       "both refs rejected",
+			kubeConfig: &meta.KubeConfigReference{SecretRef: &meta.SecretKeyReference{Name: "s"}, ConfigMapRef: &meta.LocalObjectReference{Name: "c"}},
+			wantErr:    true,
+		},
+		{
+			name:       "neither ref rejected",
+			kubeConfig: &meta.KubeConfigReference{},
+			wantErr:    true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{}
+			ss.Spec.KubeConfig = tc.kubeConfig
+			err := validateKubeConfig(ss)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateKubeConfig err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestValidateMigrations_ActionOneof covers the action-oneof branch of
 // validateMigrations: a migration whose action sets no verb (or more than one)
 // is rejected, while a single-verb migration action passes. The

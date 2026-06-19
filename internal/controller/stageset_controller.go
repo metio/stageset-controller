@@ -14,6 +14,10 @@ import (
 	"time"
 
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	fluxconditions "github.com/fluxcd/pkg/runtime/conditions"
+	"github.com/fluxcd/pkg/runtime/jitter"
+	fluxpatch "github.com/fluxcd/pkg/runtime/patch"
+	fluxpredicates "github.com/fluxcd/pkg/runtime/predicates"
 	"github.com/fluxcd/pkg/ssa"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -29,12 +33,14 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	crbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -43,11 +49,18 @@ import (
 	"github.com/metio/stageset-controller/internal/apply"
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
+	"github.com/metio/stageset-controller/internal/decryptor"
 	"github.com/metio/stageset-controller/internal/inventory"
 	"github.com/metio/stageset-controller/internal/metrics"
 	"github.com/metio/stageset-controller/internal/observability"
 	"github.com/metio/stageset-controller/internal/stageinv"
 )
+
+// defaultIntervalJitterFraction is the +/- fraction applied to every
+// interval-based RequeueAfter so a fleet of StageSets configured with the same
+// interval doesn't reconcile in lockstep. 5% spreads the wakeups without
+// meaningfully shifting the effective cadence.
+const defaultIntervalJitterFraction = 0.05
 
 // StageSetReconciler reconciles StageSet objects. The reconciliation model —
 // resolve and pin artifacts, then BUILD -> APPLY -> PRUNE -> VERIFY each stage
@@ -95,6 +108,12 @@ type StageSetReconciler struct {
 	AllowedActionHosts []string
 	// NoCrossNamespaceRefs is the global --no-cross-namespace-refs flag.
 	NoCrossNamespaceRefs bool
+	// ObjectLevelKMS is the global --object-level-kms flag: when true, SOPS
+	// cloud KMS decryption uses the StageSet's serviceAccountName federated to
+	// a cloud identity (object-level identity) instead of the controller's
+	// ambient credentials. Default false keeps the ambient behavior so existing
+	// setups are unaffected.
+	ObjectLevelKMS bool
 	// DefaultInterval is the global --default-interval flag: the reconcile
 	// cadence used for StageSets that omit spec.interval.
 	DefaultInterval time.Duration
@@ -105,6 +124,18 @@ type StageSetReconciler struct {
 	// Now returns the current time for update-window evaluation; nil defaults
 	// to time.Now. Tests inject a fixed clock.
 	Now func() time.Time
+
+	// remoteConfig builds the rest.Config for a spec.kubeConfig target (secretRef
+	// kubeconfig or configMapRef cloud-provider auth). Defaulted to
+	// defaultRemoteConfigBuilder in SetupWithManager; tests inject a fake that
+	// points at envtest so the cloud path is exercised without a cloud account.
+	remoteConfig remoteConfigBuilder
+
+	// credentialSource overrides the per-tenant cloud KMS credential resolver
+	// used when ObjectLevelKMS is enabled. Nil falls back to a
+	// tenantCredentialSource backed by fluxcd/pkg/auth; tests inject a fake so
+	// the object-level-KMS wiring is exercised without a cloud account.
+	credentialSource decryptor.CredentialSource
 
 	// targets memoizes the per-run target connection (client + RESTMapper) for
 	// the impersonated and/or remote cluster a StageSet applies to; client.New
@@ -167,15 +198,36 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !ss.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &ss)
 	}
+
+	// Snapshot the object before any status mutation so every status write
+	// below can be issued through the Flux patch.Helper: the Ready condition is
+	// patched via the helper's internal re-Get + optimistic-lock backoff loop,
+	// so a Conflict (a sibling controller or a manual kubectl edit bumping
+	// resourceVersion) is resolved by re-applying the condition diff to the
+	// latest object rather than failing the whole reconcile. The plain status
+	// fields merge-patch without a resourceVersion precondition, so they can't
+	// conflict. The helper is created here, before the finalizer Update, so its
+	// "before" snapshot reflects the persisted spec/metadata.
+	patchHelper, err := fluxpatch.NewHelper(&ss, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if controllerutil.AddFinalizer(&ss, FinalizerName) {
 		if err := r.Update(ctx, &ss); err != nil {
 			return ctrl.Result{}, err
 		}
+		// Adding a finalizer doesn't change metadata.generation, so the
+		// resulting Update event is dropped by the GenerationChangedPredicate
+		// on the For() watch. Requeue explicitly so the first real reconcile
+		// runs instead of waiting for the interval (or an unrelated event).
+		logger.V(1).Info("finalizer added; requeuing to reconcile")
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	if ss.Spec.Suspend {
 		r.setReady(&ss, metav1.ConditionFalse, ReasonSuspended, "Reconciliation is suspended")
-		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+		return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
 	}
 
 	// Record that this run handled the current reconcile.fluxcd.io/requestedAt
@@ -192,7 +244,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := ValidateSpec(&ss); err != nil {
 		r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec, err.Error())
 		ss.Status.ObservedGeneration = ss.Generation
-		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+		return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
 	}
 
 	// Dependency gating: every spec.dependsOn StageSet must be Ready at its
@@ -206,13 +258,13 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		r.setReady(&ss, metav1.ConditionFalse, reason, why)
 		ss.Status.ObservedGeneration = ss.Generation
-		if uerr := r.Status().Update(ctx, &ss); uerr != nil {
+		if uerr := r.patchStatus(ctx, patchHelper, &ss); uerr != nil {
 			return ctrl.Result{}, uerr
 		}
 		if terminal {
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{RequeueAfter: r.retryInterval(&ss)}, nil
+		return jitter.JitteredRequeueInterval(ctrl.Result{RequeueAfter: r.retryInterval(&ss)}), nil
 	}
 
 	// Producer-aware source resolution + revision pinning: resolve every
@@ -234,7 +286,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		ra, err := resolver.Resolve(ctx, r.Client, ss.Spec.Stages[i].SourceRef, ss.Namespace)
 		if err != nil {
-			return r.failResolution(ctx, &ss, ss.Spec.Stages[i].Name, err)
+			return r.failResolution(ctx, patchHelper, &ss, ss.Spec.Stages[i].Name, err)
 		}
 		resolved[i] = ra
 		pinned[ra.Key()] = ra.Revision
@@ -246,7 +298,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// a one-shot update-now override is present. A held-but-deployed StageSet
 	// stays Ready; the held revisions and next window are surfaced on status.
 	gateCtx, gateSpan := observability.Tracer().Start(ctx, "stageset.gateWindows")
-	res, deferred, derr := r.gateUpdateWindows(gateCtx, &ss, resolved)
+	res, deferred, derr := r.gateUpdateWindows(gateCtx, patchHelper, &ss, resolved)
 	if derr != nil {
 		gateSpan.RecordError(derr)
 		gateSpan.SetStatus(codes.Error, "update-window gating failed")
@@ -273,7 +325,19 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// status) always stays on the controller client and cluster.
 	target, targetMapper, err := r.targetCluster(ctx, ss.Namespace, ss.Spec.ServiceAccountName, ss.Spec.KubeConfig)
 	if err != nil {
-		return r.failStage(ctx, &ss, ss.Spec.Stages[0].Name, "connect to target cluster", err, nil, "", nil)
+		// A malformed spec.kubeConfig (unknown cloud provider, missing required
+		// ConfigMap key, unparseable kubeconfig Secret) is terminal: retrying
+		// can't fix the spec, so surface it as InvalidSpec and wait for an edit
+		// rather than burning reconciles. Transient connect failures still fail
+		// the stage and back off.
+		if errors.Is(err, errInvalidKubeConfigSpec) {
+			r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec, err.Error())
+			ss.Status.ObservedGeneration = ss.Generation
+			metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonInvalidSpec).Inc()
+			r.event(&ss, corev1.EventTypeWarning, ReasonInvalidSpec, err.Error())
+			return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
+		}
+		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "connect to target cluster", err, nil, "", nil)
 	}
 	applier := apply.New(target, targetMapper, stagesv1.GroupVersion.Group)
 	recorder := &stageinv.Recorder{Client: r.Client, ShardCap: r.ShardCap}
@@ -302,7 +366,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if mreason != "" {
 		r.setReady(&ss, metav1.ConditionFalse, mreason, mmsg)
 		ss.Status.ObservedGeneration = ss.Generation
-		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+		return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
 	}
 	ss.Status.PendingMigrations = migPlan.pendingNames()
 
@@ -314,7 +378,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		decSpan.RecordError(derr)
 		decSpan.SetStatus(codes.Error, "decryptor configuration failed")
 		decSpan.End()
-		return r.failStage(ctx, &ss, ss.Spec.Stages[0].Name, "configure decryption", derr, nil, "", nil)
+		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "configure decryption", derr, nil, "", nil)
 	}
 	decSpan.End()
 
@@ -389,14 +453,14 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// version-conditional work (data conversions, immutable-object
 			// recreation) happens before the stage applies its content.
 			if merr := r.runStageMigrations(ctx, &ss, stage.Name, migPlan, executor); merr != nil {
-				return r.failStage(ctx, &ss, stage.Name, "migration", merr, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "migration", merr, stageStatuses, ra.Revision, executed)
 			}
 
 			// PRE actions: before BUILD; a failure aborts the stage untouched
 			// (nothing has been applied), so no onFailure runs.
 			if stage.Actions != nil {
 				if err := executor.Run(ctx, ss.Namespace, stage.Actions.Pre, toStringSet(executed), record); err != nil {
-					return r.failStage(ctx, &ss, stage.Name, "pre-action", err, stageStatuses, ra.Revision, executed)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "pre-action", err, stageStatuses, ra.Revision, executed)
 				}
 			}
 
@@ -411,7 +475,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				fetchSpan.RecordError(err)
 				fetchSpan.SetStatus(codes.Error, "artifact fetch failed")
 				fetchSpan.End()
-				return r.failStage(ctx, &ss, stage.Name, "fetch artifact", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "fetch artifact", err, stageStatuses, ra.Revision, executed)
 			}
 			fetchSpan.End()
 
@@ -423,12 +487,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				decryptSpan.RecordError(err)
 				decryptSpan.SetStatus(codes.Error, "decrypt failed")
 				decryptSpan.End()
-				return r.failStage(ctx, &ss, stage.Name, "decrypt", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "decrypt", err, stageStatuses, ra.Revision, executed)
 			}
 			decryptSpan.End()
 			vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
 			if err != nil {
-				return r.failStage(ctx, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, ra.Revision, executed)
 			}
 			subDigests[i] = substitutionDigest(vars)
 			// build.Build takes no ctx; the span still times the kustomize build.
@@ -439,7 +503,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				buildSpan.RecordError(err)
 				buildSpan.SetStatus(codes.Error, "build failed")
 				buildSpan.End()
-				return r.failStage(ctx, &ss, stage.Name, "build", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "build", err, stageStatuses, ra.Revision, executed)
 			}
 			buildSpan.End()
 			// Every applied object carries the per-stage discovery label, so
@@ -448,7 +512,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			apply.StampStageLabel(objects, stagesv1.StageLabel, stage.Name)
 			conflicts, cerr := resolveConflictHandling(objects, stage)
 			if cerr != nil {
-				return r.failStage(ctx, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
 			}
 			applyCtx, applySpan := observability.Tracer().Start(ctx, "stage.apply",
 				trace.WithAttributes(
@@ -461,7 +525,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				applySpan.SetStatus(codes.Error, "apply failed")
 				applySpan.End()
 				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
-				return r.failStage(ctx, &ss, stage.Name, "apply", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "apply", err, stageStatuses, ra.Revision, executed)
 			}
 			applySpan.End()
 			r.reportDrift(&ss, stage, changeSet, priorRevision, ra.Revision)
@@ -495,13 +559,13 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			if werr := recorder.Write(ctx, &ss, stage.Name, i, writeRefs); werr != nil {
 				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
-				return r.failStage(ctx, &ss, stage.Name, "record inventory", werr, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "record inventory", werr, stageStatuses, ra.Revision, executed)
 			}
 
 			if !disableWait(stage) {
 				if err := applier.Wait(ctx, changeSet.ToObjMetadataSet(), stageTimeout(&ss, stage)); err != nil {
 					r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
-					return r.failStage(ctx, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
 				}
 			}
 
@@ -510,7 +574,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if stage.Actions != nil {
 				if err := executor.Run(ctx, ss.Namespace, stage.Actions.Post, toStringSet(executed), record); err != nil {
 					r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
-					return r.failStage(ctx, &ss, stage.Name, "post-action", err, stageStatuses, ra.Revision, executed)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "post-action", err, stageStatuses, ra.Revision, executed)
 				}
 			}
 
@@ -540,7 +604,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				rbSpan.End()
 				r.setReady(&ss, metav1.ConditionFalse, rbReason, rbMsg)
 				ss.Status.ObservedGeneration = ss.Generation
-				return ctrl.Result{}, r.Status().Update(ctx, &ss)
+				return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
 			}
 			rbSpan.End()
 			r.event(&ss, corev1.EventTypeWarning, eventReasonRolledBack,
@@ -559,7 +623,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec,
 			fmt.Sprintf("%d object(s) are claimed by more than one stage", len(dups)))
 		ss.Status.ObservedGeneration = ss.Generation
-		return ctrl.Result{}, r.Status().Update(ctx, &ss)
+		return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
 	}
 	plan := inventory.ComputePlan(previousRecords, desiredRecords)
 	if len(reconstructedStages) > 0 {
@@ -616,7 +680,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	r.setReady(&ss, metav1.ConditionTrue, ReasonReady,
 		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
-	if err := r.Status().Update(ctx, &ss); err != nil {
+	if err := r.patchStatus(ctx, patchHelper, &ss); err != nil {
 		return ctrl.Result{}, err
 	}
 	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonReady).Inc()
@@ -624,14 +688,14 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages)))
 	logger.Info("StageSet synced", "stages", len(ss.Spec.Stages), "ready", true)
 
-	return ctrl.Result{RequeueAfter: r.steadyInterval(&ss)}, nil
+	return jitter.JitteredRequeueInterval(ctrl.Result{RequeueAfter: r.steadyInterval(&ss)}), nil
 }
 
 // failResolution records the resolution failure on the Ready condition and
 // chooses a requeue strategy: transient waits (artifact not yet present or not
 // Ready) requeue at RetryInterval; spec/config errors wait for a spec change;
 // unexpected API errors are returned so controller-runtime backs off.
-func (r *StageSetReconciler) failResolution(ctx context.Context, ss *stagesv1.StageSet, stage string, err error) (ctrl.Result, error) {
+func (r *StageSetReconciler) failResolution(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage string, err error) (ctrl.Result, error) {
 	var (
 		reason    = ReasonResolveFailed
 		transient bool
@@ -651,27 +715,40 @@ func (r *StageSetReconciler) failResolution(ctx context.Context, ss *stagesv1.St
 
 	r.setReady(ss, metav1.ConditionFalse, reason, fmt.Sprintf("stage %q: %v", stage, err))
 	ss.Status.ObservedGeneration = ss.Generation
-	if uerr := r.Status().Update(ctx, ss); uerr != nil {
+	if uerr := r.patchStatus(ctx, helper, ss); uerr != nil {
 		return ctrl.Result{}, uerr
 	}
 	switch {
 	case apiError:
 		return ctrl.Result{}, err
 	case transient:
-		return ctrl.Result{RequeueAfter: r.retryInterval(ss)}, nil
+		return jitter.JitteredRequeueInterval(ctrl.Result{RequeueAfter: r.retryInterval(ss)}), nil
 	default:
 		return ctrl.Result{}, nil
 	}
 }
 
 func (r *StageSetReconciler) setReady(ss *stagesv1.StageSet, status metav1.ConditionStatus, reason, message string) {
-	apimeta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
-		Type:               ConditionReady,
-		Status:             status,
-		Reason:             reason,
-		Message:            r.decorateMessage(reason, message),
-		ObservedGeneration: ss.Generation,
+	// fluxconditions.Set stamps the condition's ObservedGeneration from the
+	// object's generation and preserves LastTransitionTime when only the
+	// message changes — same surface as apimeta.SetStatusCondition, but the
+	// resulting condition diff is what the patch.Helper's conflict-safe
+	// patchStatusConditions loop applies.
+	fluxconditions.Set(ss, &metav1.Condition{
+		Type:    ConditionReady,
+		Status:  status,
+		Reason:  reason,
+		Message: r.decorateMessage(reason, message),
 	})
+}
+
+// patchStatus persists accumulated status changes (the Ready condition plus the
+// plain status fields) through the per-reconcile patch.Helper. The Ready
+// condition goes through the helper's optimistic-lock retry loop so a sibling
+// controller bumping resourceVersion is resolved by re-applying the condition
+// diff rather than failing the reconcile.
+func (r *StageSetReconciler) patchStatus(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet) error {
+	return helper.Patch(ctx, ss, fluxpatch.WithOwnedConditions{Conditions: []string{ConditionReady}})
 }
 
 // happyReasonsNoRunbook names Ready reasons describing a healthy or
@@ -740,7 +817,7 @@ func (r *StageSetReconciler) fetcher() *artifact.Fetcher {
 // per-stage status — including the action ledger (executed) so a retry skips
 // the side effects already performed — then returns the error so
 // controller-runtime backs off and retries.
-func (r *StageSetReconciler) failStage(ctx context.Context, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, revision string, executed []string) (ctrl.Result, error) {
+func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, revision string, executed []string) (ctrl.Result, error) {
 	ss.Status.Stages = append(prior, stagesv1.StageStatus{
 		Name:            stage,
 		Phase:           stagesv1.StageFailed,
@@ -753,7 +830,7 @@ func (r *StageSetReconciler) failStage(ctx context.Context, ss *stagesv1.StageSe
 	ss.Status.ObservedGeneration = ss.Generation
 	msg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
 	r.setReady(ss, metav1.ConditionFalse, ReasonStageFailed, msg)
-	if uerr := r.Status().Update(ctx, ss); uerr != nil {
+	if uerr := r.patchStatus(ctx, helper, ss); uerr != nil {
 		return ctrl.Result{}, uerr
 	}
 	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonStageFailed).Inc()
@@ -1141,9 +1218,35 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.minter != nil && r.tokens == nil {
 		r.tokens = newTokenCache(r.minter)
 	}
+	if r.remoteConfig == nil {
+		r.remoteConfig = defaultRemoteConfigBuilder{r: r}
+	}
+
+	// Spread interval-based requeues by +/- defaultIntervalJitterFraction so a
+	// fleet of StageSets sharing a --default-interval doesn't thunder-herd the
+	// controller (and the upstream producers) on one deadline. Setting the
+	// global jitter is idempotent for the same fraction, so repeated
+	// SetupWithManager calls (multiple test cases in one binary) are safe. A
+	// nil rand selects a time-seeded one.
+	jitter.SetGlobalIntervalJitter(defaultIntervalJitterFraction, nil)
 
 	b := ctrl.NewControllerManagedBy(mgr).
-		For(&stagesv1.StageSet{}).
+		For(&stagesv1.StageSet{}, crbuilder.WithPredicates(
+			// Wake on a spec change (generation bump), a fresh
+			// reconcile.fluxcd.io/requestedAt token (whole-object force
+			// reconcile), or a stages.metio.wtf/reconcile-stage change
+			// (single-stage force reconcile). Filtering out the status-only
+			// updates the reconciler writes itself keeps the workqueue from
+			// churning on its own condition/observedGeneration stamps;
+			// spec.interval (jittered RequeueAfter) drives the steady-state
+			// reconcile, and the StageInventory / dependsOn / ExternalArtifact
+			// watches drive dependency-triggered runs.
+			predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				fluxpredicates.ReconcileRequestedPredicate{},
+				reconcileStageRequestedPredicate{},
+			),
+		)).
 		Owns(&stagesv1.StageInventory{}).
 		Watches(&stagesv1.StageSet{}, handler.EnqueueRequestsFromMapFunc(r.mapStageSetDependents))
 

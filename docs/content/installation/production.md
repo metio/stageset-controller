@@ -115,6 +115,8 @@ large inventories or very busy clusters. Ephemeral storage covers `/tmp` and the
 self-signed cert directory, both emptyDirs. The reconcile cadence StageSets
 inherit when they omit `spec.interval`, and the inventory mode and shard cap that
 govern how applied objects are tracked, are tuning knobs worth reviewing.
+[Scale and capacity](/installation/scale-and-capacity/) covers the sizing drivers
+and these throughput knobs in depth.
 
 ```yaml
 resources:

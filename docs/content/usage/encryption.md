@@ -182,7 +182,34 @@ One consequence to weigh in a multi-tenant cluster: unlike age (read under the
 tenant SA), **cloud KMS uses the controller's identity**, so any `StageSet` can
 decrypt a file encrypted with a KMS key the controller's role can access. This
 matches Flux's `kustomize-controller`. Scope the controller's KMS grant
-accordingly, or use age keys for hard per-tenant isolation.
+accordingly, use age keys for hard per-tenant isolation, or enable
+[object-level KMS identity](#per-tenant-kms-identity-object-level-kms) below.
+
+### Per-tenant KMS identity (object-level KMS)
+
+By default cloud KMS uses the controller's ambient credentials (above). Enabling
+the controller flag `--object-level-kms` instead decrypts each cloud KMS key with
+the **`StageSet`'s `serviceAccountName` federated to a cloud identity**, so KMS
+decryption is bounded by that tenant's cloud IAM grants rather than the
+controller's. The flag is off by default; leaving it off keeps the ambient
+behavior unchanged.
+
+When the flag is on and a `StageSet` sets `serviceAccountName`, the controller
+mints a projected token for that ServiceAccount and exchanges it with the cloud's
+STS — AWS IRSA, GCP Workload Identity, or Azure Workload Identity — exactly like
+the per-tenant cluster credentials used elsewhere. A `StageSet` with no
+`serviceAccountName` falls back to the ambient credentials (there is no tenant
+identity to assume). age and PGP decryption are unaffected by the flag — they
+always run tenant-scoped from `secretRef`.
+
+Trust model: the KMS call carries the tenant ServiceAccount's cloud identity, so
+one tenant can only decrypt with KMS keys its own cloud identity is granted —
+matching the isolation age already gives. The tenant ServiceAccount must be
+federated to a cloud identity (e.g. an IRSA-annotated ServiceAccount, a GKE
+Workload-Identity binding, or an Azure federated credential) that holds
+`kms:Decrypt` on the relevant key; without that federation the KMS decrypt fails.
+There is no spec field — the choice is a cluster-wide operator decision via the
+flag.
 
 ## What's supported
 
@@ -190,7 +217,9 @@ accordingly, or use age keys for hard per-tenant isolation.
   pattern (`--encrypted-regex '^(data|stringData)$'`) is the tested path.
 - **PGP** keys via `secretRef` (`.asc` entries) — read under the tenant SA, pure
   Go, no `gpg` binary or keyring needed. See [PGP keys](#pgp-keys).
-- **Cloud KMS** (AWS/GCP/Azure/Vault) via the controller's ambient credentials.
+- **Cloud KMS** (AWS/GCP/Azure/Vault) via the controller's ambient credentials,
+  or via each tenant's federated cloud identity with
+  [`--object-level-kms`](#per-tenant-kms-identity-object-level-kms).
 - **Encrypted files feeding a `secretGenerator`** — an encrypted `.env` (or other
   file) referenced by a kustomize `secretGenerator` is decrypted before the build,
   so the generated `Secret` carries the plaintext.

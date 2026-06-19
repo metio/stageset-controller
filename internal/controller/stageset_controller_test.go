@@ -97,11 +97,93 @@ func reconcileOnce(t *testing.T, c client.Client, ss *stagesv1.StageSet) {
 		// Permissive fetcher so the artifact's httptest loopback URL is reachable.
 		Fetcher: &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
-	}); err != nil {
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}}
+	if _, err := driveReconcile(r, req); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
+}
+
+// driveReconcile runs a reconcile and, if the first pass only added the
+// finalizer (which requeues without bumping generation, so the watch predicate
+// would otherwise drop the resulting event), runs a second pass so the real
+// reconcile happens. It returns the result and error of the run that did the
+// work, mirroring how the controller behaves once the finalizer is present.
+//
+// The finalizer pass is detected by the object having no Ready condition yet:
+// the finalizer-add path returns before any status write, so a missing Ready
+// means the real reconcile has not run.
+func driveReconcile(r *StageSetReconciler, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		return res, err
+	}
+	var ss stagesv1.StageSet
+	if gerr := r.Client.Get(context.Background(), req.NamespacedName, &ss); gerr != nil {
+		return res, nil // object gone (e.g. deletion path); nothing more to drive.
+	}
+	if apimeta.FindStatusCondition(ss.Status.Conditions, ConditionReady) != nil {
+		return res, nil
+	}
+	return r.Reconcile(context.Background(), req)
+}
+
+// The first reconcile of a fresh StageSet adds the finalizer and requeues
+// without setting Ready: the finalizer add doesn't bump generation, so the
+// watch's GenerationChangedPredicate would drop the resulting Update event, and
+// the explicit requeue is what re-triggers the real reconcile.
+func TestReconcile_FinalizerAddRequeues(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "fresh"},
+		Spec: stagesv1.StageSetSpec{
+			Interval: metav1.Duration{Duration: 5 * time.Minute},
+			Stages:   []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "missing"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+
+	r := &StageSetReconciler{
+		Client:     c,
+		RESTMapper: c.RESTMapper(),
+		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "fresh"}}
+
+	res, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	if res.IsZero() {
+		t.Fatal("first reconcile should requeue after adding the finalizer, got a zero result")
+	}
+	got := getStageSet(t, c, ns, "fresh")
+	if !controllerContainsFinalizer(got) {
+		t.Fatal("finalizer should be present after the first reconcile")
+	}
+	if r := readyReason(got); r != "" {
+		t.Fatalf("Ready should not be set on the finalizer-only pass, got %q", r)
+	}
+
+	// The requeued pass runs the real reconcile and reports the missing source.
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if r := readyReason(getStageSet(t, c, ns, "fresh")); r != ReasonArtifactNotFound {
+		t.Fatalf("Ready reason = %q, want %q", r, ReasonArtifactNotFound)
+	}
+}
+
+func controllerContainsFinalizer(ss *stagesv1.StageSet) bool {
+	for _, f := range ss.GetFinalizers() {
+		if f == FinalizerName {
+			return true
+		}
+	}
+	return false
 }
 
 func makeTarGz(t *testing.T, files map[string]string) []byte {

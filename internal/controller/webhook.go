@@ -18,7 +18,7 @@ import (
 
 // StageSetValidator is the validating admission webhook for StageSet. It
 // enforces invariants the CRD schema cannot express cheaply — currently that
-// every action sets exactly one of patch/http/wait/job. Keeping this out of a
+// every action sets exactly one of patch/http/wait/job/delete/apply. Keeping this out of a
 // CRD CEL rule is what lets spec.stages and the action lists stay unbounded:
 // CEL validation cost is multiplied by the size of every enclosing array, so
 // an unbounded list makes the apiserver reject the CRD.
@@ -66,7 +66,39 @@ func ValidateSpec(ss *stagesv1.StageSet) error {
 	if err := validateDecryption(ss); err != nil {
 		return err
 	}
+	if err := validateKubeConfig(ss); err != nil {
+		return err
+	}
 	return window.Validate(ss.Spec.UpdateWindows)
+}
+
+// validateKubeConfig checks spec.kubeConfig at the level admission can see. A
+// secretRef names a self-contained kubeconfig; a configMapRef selects
+// cloud-provider workload-identity auth (AWS / Azure / GCP / generic). Exactly
+// one must be set, and each reference must carry a name.
+//
+// The configMap's contents — its provider name and per-provider keys — aren't
+// readable at admission (the webhook only sees the StageSet), so that
+// validation happens at reconcile time when the ConfigMap is read, surfacing as
+// a terminal ReasonInvalidSpec. This guard only enforces the shape.
+func validateKubeConfig(ss *stagesv1.StageSet) error {
+	kc := ss.Spec.KubeConfig
+	if kc == nil {
+		return nil
+	}
+	hasSecret := kc.SecretRef != nil
+	hasConfigMap := kc.ConfigMapRef != nil
+	switch {
+	case hasSecret && hasConfigMap:
+		return fmt.Errorf("spec.kubeConfig must set exactly one of secretRef or configMapRef, not both")
+	case !hasSecret && !hasConfigMap:
+		return fmt.Errorf("spec.kubeConfig must set one of secretRef or configMapRef")
+	case hasSecret && kc.SecretRef.Name == "":
+		return fmt.Errorf("spec.kubeConfig.secretRef.name must be set")
+	case hasConfigMap && kc.ConfigMapRef.Name == "":
+		return fmt.Errorf("spec.kubeConfig.configMapRef.name must be set")
+	}
+	return nil
 }
 
 // validateDecryption enforces that spec.decryption, when set, names the only
@@ -140,7 +172,7 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 }
 
 // ValidateStages enforces the action oneof invariant: every action sets
-// exactly one of patch/http/wait/job/delete. It is shared by both the
+// exactly one of patch/http/wait/job/delete/apply. It is shared by both the
 // admission webhook and the reconciler fallback (so a StageSet that slips past
 // a bypassed/disabled webhook still fails loudly rather than reaching an action
 // executor with an undefined verb).

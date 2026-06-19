@@ -39,7 +39,7 @@ func reconcileOnceTraced(t *testing.T, c client.Client, ss *stagesv1.StageSet) [
 		RESTMapper: c.RESTMapper(),
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+	if _, err := driveReconcile(r, ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
 	}); err != nil {
 		t.Fatalf("Reconcile: %v", err)

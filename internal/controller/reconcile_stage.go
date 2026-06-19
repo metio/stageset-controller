@@ -6,6 +6,9 @@ package controller
 import (
 	"strings"
 
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
@@ -27,4 +30,23 @@ func parseReconcileStage(ss *stagesv1.StageSet) (stage, token string) {
 		return "", ""
 	}
 	return name, tok
+}
+
+// reconcileStageRequestedPredicate wakes the controller when the
+// reconcile-stage annotation changes. The single-stage force-reconcile is a
+// metadata-only edit — it bumps neither metadata.generation nor the Flux
+// reconcile.fluxcd.io/requestedAt token, so neither GenerationChangedPredicate
+// nor ReconcileRequestedPredicate would deliver the Update event. Scoped to the
+// one key so an unrelated annotation edit still gets filtered out alongside the
+// reconciler's own status writes.
+type reconcileStageRequestedPredicate struct {
+	predicate.Funcs
+}
+
+func (reconcileStageRequestedPredicate) Update(e event.UpdateEvent) bool {
+	if e.ObjectOld == nil || e.ObjectNew == nil {
+		return false
+	}
+	return e.ObjectOld.GetAnnotations()[reconcileStageAnnotation] !=
+		e.ObjectNew.GetAnnotations()[reconcileStageAnnotation]
 }

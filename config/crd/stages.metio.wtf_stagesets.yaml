@@ -199,10 +199,10 @@ spec:
                         crossed.
                       items:
                         description: |-
-                          Action is one typed step. Exactly one of Patch, HTTP, Wait, or Job must be
-                          set — enforced by the validating admission webhook (and a reconciler
-                          fallback), not a CRD CEL rule, so spec.stages and the action lists stay
-                          unbounded (CEL cost is multiplied by enclosing array sizes).
+                          Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
+                          Apply must be set — enforced by the validating admission webhook (and a
+                          reconciler fallback), not a CRD CEL rule, so spec.stages and the action lists
+                          stay unbounded (CEL cost is multiplied by enclosing array sizes).
                         properties:
                           apply:
                             description: |-
@@ -306,6 +306,8 @@ spec:
                                   2xx.
                                 items:
                                   format: int32
+                                  maximum: 599
+                                  minimum: 100
                                   type: integer
                                 type: array
                               headersFrom:
@@ -332,6 +334,13 @@ spec:
                                 type: array
                               method:
                                 description: Method defaults to POST.
+                                enum:
+                                - GET
+                                - POST
+                                - PUT
+                                - PATCH
+                                - DELETE
+                                - HEAD
                                 type: string
                               url:
                                 description: URL to call; validated against --allowed-action-hosts.
@@ -421,6 +430,7 @@ spec:
                           retries:
                             description: Retries before the action is considered failed.
                             format: int32
+                            minimum: 0
                             type: integer
                           timeout:
                             description: Timeout for the action.
@@ -467,8 +477,11 @@ spec:
                         type: object
                       type: array
                     from:
-                      description: From optionally constrains the current version
-                        it applies from.
+                      description: |-
+                        From optionally constrains the current version it applies from. Unlike
+                        To, this is a semver *constraint* (e.g. ">=1.0.0, <2.0.0" or "1.x"),
+                        matched against the currently deployed version. Omit to fire on every
+                        crossing up to To.
                       type: string
                     name:
                       description: Name of the migration, for the idempotency ledger
@@ -480,8 +493,9 @@ spec:
                         pre-actions.
                       type: string
                     to:
-                      description: To is the version boundary this migration crosses
-                        up to.
+                      description: |-
+                        To is the exact version boundary this migration crosses up to (a
+                        concrete semver, not a range).
                       type: string
                   required:
                   - name
@@ -517,10 +531,10 @@ spec:
                             APPLY onward.
                           items:
                             description: |-
-                              Action is one typed step. Exactly one of Patch, HTTP, Wait, or Job must be
-                              set — enforced by the validating admission webhook (and a reconciler
-                              fallback), not a CRD CEL rule, so spec.stages and the action lists stay
-                              unbounded (CEL cost is multiplied by enclosing array sizes).
+                              Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
+                              Apply must be set — enforced by the validating admission webhook (and a
+                              reconciler fallback), not a CRD CEL rule, so spec.stages and the action lists
+                              stay unbounded (CEL cost is multiplied by enclosing array sizes).
                             properties:
                               apply:
                                 description: |-
@@ -625,6 +639,8 @@ spec:
                                       any 2xx.
                                     items:
                                       format: int32
+                                      maximum: 599
+                                      minimum: 100
                                       type: integer
                                     type: array
                                   headersFrom:
@@ -651,6 +667,13 @@ spec:
                                     type: array
                                   method:
                                     description: Method defaults to POST.
+                                    enum:
+                                    - GET
+                                    - POST
+                                    - PUT
+                                    - PATCH
+                                    - DELETE
+                                    - HEAD
                                     type: string
                                   url:
                                     description: URL to call; validated against --allowed-action-hosts.
@@ -742,6 +765,7 @@ spec:
                                 description: Retries before the action is considered
                                   failed.
                                 format: int32
+                                minimum: 0
                                 type: integer
                               timeout:
                                 description: Timeout for the action.
@@ -792,10 +816,10 @@ spec:
                             only when these succeed.
                           items:
                             description: |-
-                              Action is one typed step. Exactly one of Patch, HTTP, Wait, or Job must be
-                              set — enforced by the validating admission webhook (and a reconciler
-                              fallback), not a CRD CEL rule, so spec.stages and the action lists stay
-                              unbounded (CEL cost is multiplied by enclosing array sizes).
+                              Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
+                              Apply must be set — enforced by the validating admission webhook (and a
+                              reconciler fallback), not a CRD CEL rule, so spec.stages and the action lists
+                              stay unbounded (CEL cost is multiplied by enclosing array sizes).
                             properties:
                               apply:
                                 description: |-
@@ -900,6 +924,8 @@ spec:
                                       any 2xx.
                                     items:
                                       format: int32
+                                      maximum: 599
+                                      minimum: 100
                                       type: integer
                                     type: array
                                   headersFrom:
@@ -926,6 +952,13 @@ spec:
                                     type: array
                                   method:
                                     description: Method defaults to POST.
+                                    enum:
+                                    - GET
+                                    - POST
+                                    - PUT
+                                    - PATCH
+                                    - DELETE
+                                    - HEAD
                                     type: string
                                   url:
                                     description: URL to call; validated against --allowed-action-hosts.
@@ -1017,6 +1050,7 @@ spec:
                                 description: Retries before the action is considered
                                   failed.
                                 format: int32
+                                minimum: 0
                                 type: integer
                               timeout:
                                 description: Timeout for the action.
@@ -1067,10 +1101,10 @@ spec:
                             untouched.
                           items:
                             description: |-
-                              Action is one typed step. Exactly one of Patch, HTTP, Wait, or Job must be
-                              set — enforced by the validating admission webhook (and a reconciler
-                              fallback), not a CRD CEL rule, so spec.stages and the action lists stay
-                              unbounded (CEL cost is multiplied by enclosing array sizes).
+                              Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
+                              Apply must be set — enforced by the validating admission webhook (and a
+                              reconciler fallback), not a CRD CEL rule, so spec.stages and the action lists
+                              stay unbounded (CEL cost is multiplied by enclosing array sizes).
                             properties:
                               apply:
                                 description: |-
@@ -1175,6 +1209,8 @@ spec:
                                       any 2xx.
                                     items:
                                       format: int32
+                                      maximum: 599
+                                      minimum: 100
                                       type: integer
                                     type: array
                                   headersFrom:
@@ -1201,6 +1237,13 @@ spec:
                                     type: array
                                   method:
                                     description: Method defaults to POST.
+                                    enum:
+                                    - GET
+                                    - POST
+                                    - PUT
+                                    - PATCH
+                                    - DELETE
+                                    - HEAD
                                     type: string
                                   url:
                                     description: URL to call; validated against --allowed-action-hosts.
@@ -1292,6 +1335,7 @@ spec:
                                 description: Retries before the action is considered
                                   failed.
                                 format: int32
+                                minimum: 0
                                 type: integer
                               timeout:
                                 description: Timeout for the action.
@@ -1351,6 +1395,7 @@ spec:
                         toggle (which is sugar for default: Recreate).
                       properties:
                         default:
+                          default: Fail
                           description: Default action for conflicts with no matching
                             rule.
                           enum:

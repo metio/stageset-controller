@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -16,9 +17,11 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/artifact"
 )
 
 // kubeconfigFor serializes a rest.Config into a self-contained kubeconfig. The
@@ -143,25 +146,138 @@ func TestReconcile_KubeConfig_InvalidKubeconfigFails(t *testing.T) {
 	}
 }
 
-// A cloud-provider configMapRef kubeConfig is explicitly not supported yet and
-// must be rejected rather than silently ignored.
-func TestReconcile_KubeConfig_ConfigMapRefRejected(t *testing.T) {
+// fakeRemoteConfigBuilder is the test seam standing in for the cloud-provider
+// (configMapRef) path: instead of minting a token from a cloud STS, it returns
+// a rest.Config pointing at the envtest apiserver. This is what lets the whole
+// configMapRef apply/prune path be exercised without any cloud account.
+type fakeRemoteConfigBuilder struct {
+	cfg *rest.Config
+	err error
+	// gotConfigMap records the configMapRef name the reconciler asked for, so a
+	// test can assert the cloud path (not the secretRef path) was taken.
+	gotConfigMap string
+}
+
+func (b *fakeRemoteConfigBuilder) RESTConfig(_ context.Context, kc *fluxmeta.KubeConfigReference, _ string) (*rest.Config, string, error) {
+	if b.err != nil {
+		return nil, "", b.err
+	}
+	if kc.ConfigMapRef != nil {
+		b.gotConfigMap = kc.ConfigMapRef.Name
+	}
+	out := rest.CopyConfig(b.cfg)
+	return out, "fake/" + kc.ConfigMapRef.Name, nil
+}
+
+// reconcileWithRemoteBuilder runs the reconciler with a fake remoteConfigBuilder
+// injected, so a configMapRef kubeConfig routes through the cloud-provider seam
+// — pointed at envtest here — exactly as the secretRef path does.
+func reconcileWithRemoteBuilder(t *testing.T, c client.Client, ss *stagesv1.StageSet, builder remoteConfigBuilder) {
+	t.Helper()
+	r := &StageSetReconciler{
+		Client:       c,
+		Config:       envtestConfig(t),
+		RESTMapper:   c.RESTMapper(),
+		remoteConfig: builder,
+		Fetcher:      &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
+	}
+	wireRealMinter(t, r)
+	_, _ = driveReconcile(r, ctrl.Request{
+		NamespacedName: apitypes.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
+	})
+}
+
+// A configMapRef kubeConfig (cloud-provider auth) applies to the cluster the
+// seam resolves, with the rest of the pipeline (apply, inventory bookkeeping)
+// behaving identically to the secretRef path. The fake seam stands in for the
+// cloud STS so no AWS/Azure/GCP account is needed.
+func TestReconcile_KubeConfig_ConfigMapRef_AppliesToTargetCluster(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "cloud-cm")})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:   metav1.Duration{Duration: 5 * time.Minute},
+			KubeConfig: &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud-auth"}},
+			Stages:     []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "cm-art"}}},
+		},
+	}
+	mustCreate(t, c, ss)
+	builder := &fakeRemoteConfigBuilder{cfg: envtestConfig(t)}
+	reconcileWithRemoteBuilder(t, c, ss, builder)
+
+	if builder.gotConfigMap != "cloud-auth" {
+		t.Fatalf("seam asked for configMap %q, want %q", builder.gotConfigMap, "cloud-auth")
+	}
+	if r := readyReason(getStageSet(t, c, ns, "cloud")); r != ReasonReady {
+		t.Fatalf("Ready reason = %q, want %q", r, ReasonReady)
+	}
+	if !cmExists(t, c, ns, "cloud-cm") {
+		t.Fatal("ConfigMap should have been applied to the target cluster")
+	}
+	if n := inventoryEntryCount(t, c, ns, "cloud", "stage-a"); n != 1 {
+		t.Fatalf("StageInventory should be recorded on the controller cluster, got %d entries", n)
+	}
+}
+
+// A configMapRef whose ConfigMap names an unknown provider (or is malformed) is
+// terminal: fluxcd/pkg/auth rejects it, the seam wraps it as
+// errInvalidKubeConfigSpec, and the reconciler surfaces ReasonInvalidSpec
+// without applying anything. This drives the real defaultRemoteConfigBuilder
+// against an in-cluster ConfigMap — no cloud account, no network.
+func TestReconcile_KubeConfig_ConfigMapRef_InvalidProvider(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "never")})
+	mustCreate(t, c, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud-auth"},
+		Data:       map[string]string{"provider": "nonsense"},
+	})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "badprovider"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:   metav1.Duration{Duration: 5 * time.Minute},
+			KubeConfig: &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud-auth"}},
+			Stages:     []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "cm-art"}}},
+		},
+	}
+	mustCreate(t, c, ss)
+	// No remoteConfig override: exercise the production defaultRemoteConfigBuilder.
+	reconcileWithConfig(t, c, ss)
+
+	if r := readyReason(getStageSet(t, c, ns, "badprovider")); r != ReasonInvalidSpec {
+		t.Fatalf("Ready reason = %q, want %q", r, ReasonInvalidSpec)
+	}
+	if cmExists(t, c, ns, "never") {
+		t.Fatal("nothing should be applied when the cloud provider is invalid")
+	}
+}
+
+// A configMapRef whose ConfigMap does not exist is also terminal: the seam
+// can't read it and wraps the failure as errInvalidKubeConfigSpec.
+func TestReconcile_KubeConfig_ConfigMapRef_MissingConfigMap(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "never")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cmref"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "missingcm"},
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: 5 * time.Minute},
-			KubeConfig: &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud"}},
+			KubeConfig: &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "absent"}},
 			Stages:     []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "cm-art"}}},
 		},
 	}
 	mustCreate(t, c, ss)
 	reconcileWithConfig(t, c, ss)
 
-	if r := readyReason(getStageSet(t, c, ns, "cmref")); r != ReasonStageFailed {
-		t.Fatalf("Ready reason = %q, want %q", r, ReasonStageFailed)
+	if r := readyReason(getStageSet(t, c, ns, "missingcm")); r != ReasonInvalidSpec {
+		t.Fatalf("Ready reason = %q, want %q", r, ReasonInvalidSpec)
+	}
+	if cmExists(t, c, ns, "never") {
+		t.Fatal("nothing should be applied when the ConfigMap is missing")
 	}
 }

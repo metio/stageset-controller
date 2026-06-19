@@ -57,7 +57,26 @@ func (r *StageSetReconciler) buildDecryptor(ctx context.Context, ss *stagesv1.St
 			}
 		}
 	}
-	return decryptor.New(keys)
+
+	var opts []decryptor.Option
+	// Object-level KMS (opt-in via --object-level-kms): cloud KMS master keys
+	// are decrypted with the StageSet's serviceAccountName federated to a cloud
+	// identity, instead of the controller's ambient credentials. Requires a
+	// serviceAccountName to bind the federation to; without one there is no
+	// tenant identity to assume, so the ambient default is kept. The seam
+	// (CredentialSource) is overridable so tests inject a fake.
+	if r.ObjectLevelKMS && ss.Spec.ServiceAccountName != "" {
+		src := r.credentialSource
+		if src == nil {
+			src = &tenantCredentialSource{
+				client:    r.Client,
+				namespace: ss.Namespace,
+				saName:    ss.Spec.ServiceAccountName,
+			}
+		}
+		opts = append(opts, decryptor.WithCredentialSource(src))
+	}
+	return decryptor.New(keys, opts...)
 }
 
 // decryptFiles applies dec to fetched files in place; a nil dec is a no-op, so

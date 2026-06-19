@@ -137,4 +137,5 @@ same removed object is orphaned.
 - [Secrets encryption](/usage/encryption/) — how `spec.decryption.secretRef` keys are read and used.
 - [Rollback](/usage/rollback/) — the rollback store and `rollbackOnFailure` behavior.
 - [Production](/installation/production/) — hardening a production install.
+- [Scale and capacity](/installation/scale-and-capacity/) — sizing replicas and the state a multi-replica install keeps reachable.
 - [`PreviousRevisionUnavailable` runbook](/runbooks/previousrevisionunavailable/) — remediating a rollback that cannot restore.

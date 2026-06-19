@@ -60,6 +60,7 @@ type Flags struct {
 
 	ShardCap             *int
 	NoCrossNamespaceRefs *bool
+	ObjectLevelKMS       *bool
 	AllowedActionHosts   *StringSlice
 	DefaultInterval      *time.Duration
 
@@ -115,6 +116,7 @@ func Register(fs *flag.FlagSet) *Flags {
 		WatchNamespaces:      new(string),
 		ShardCap:             new(int),
 		NoCrossNamespaceRefs: new(bool),
+		ObjectLevelKMS:       new(bool),
 		AllowedActionHosts:   &StringSlice{},
 		DefaultInterval:      new(time.Duration),
 		RBPath:               new(string),
@@ -169,6 +171,7 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.IntVar(f.ShardCap, group("inventory-shard-cap", recon), inventory.DefaultShardCap, "Maximum entries per StageInventory shard.")
 	fs.Var(f.AllowedActionHosts, group("allowed-action-hosts", recon), "Host glob allowed for http actions; repeatable. Loopback and link-local ranges are always denied unless explicitly listed.")
 	fs.BoolVar(f.NoCrossNamespaceRefs, group("no-cross-namespace-refs", recon), false, "Deny cross-namespace sourceRef and dependsOn references.")
+	fs.BoolVar(f.ObjectLevelKMS, group("object-level-kms", recon), false, "Decrypt SOPS cloud KMS keys with each StageSet's serviceAccountName federated to a cloud identity, instead of the controller's ambient credentials. The tenant ServiceAccount must be federated (IRSA / Workload Identity) to a cloud identity granted KMS decrypt. Off by default (ambient credentials).")
 	fs.StringVar(f.TracingEndpoint, group("tracing-endpoint", tracing), "", "OTLP gRPC collector host:port (e.g. otel-collector.observability.svc:4317). Empty disables tracing entirely.")
 	fs.BoolVar(f.TracingInsecure, group("tracing-insecure", tracing), false, "Skip TLS when dialing the OTLP collector. Use only for in-cluster collectors that don't terminate TLS themselves.")
 	fs.Float64Var(f.TracingSampleRatio, group("tracing-sample-ratio", tracing), 1.0, "TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.")

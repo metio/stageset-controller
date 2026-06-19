@@ -252,10 +252,10 @@ type StageActions struct {
 	OnFailure []Action `json:"onFailure,omitempty"`
 }
 
-// Action is one typed step. Exactly one of Patch, HTTP, Wait, or Job must be
-// set — enforced by the validating admission webhook (and a reconciler
-// fallback), not a CRD CEL rule, so spec.stages and the action lists stay
-// unbounded (CEL cost is multiplied by enclosing array sizes).
+// Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
+// Apply must be set — enforced by the validating admission webhook (and a
+// reconciler fallback), not a CRD CEL rule, so spec.stages and the action lists
+// stay unbounded (CEL cost is multiplied by enclosing array sizes).
 type Action struct {
 	// Name of the action, for status and Events.
 	// +required
@@ -266,6 +266,7 @@ type Action struct {
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
 	// Retries before the action is considered failed.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	Retries *int32 `json:"retries,omitempty"`
 
@@ -322,6 +323,7 @@ type HTTPAction struct {
 	URL string `json:"url"`
 
 	// Method defaults to POST.
+	// +kubebuilder:validation:Enum=GET;POST;PUT;PATCH;DELETE;HEAD
 	// +optional
 	Method string `json:"method,omitempty"`
 
@@ -338,6 +340,8 @@ type HTTPAction struct {
 	HeadersFrom []meta.SecretKeyReference `json:"headersFrom,omitempty"`
 
 	// ExpectedStatus codes; defaults to any 2xx.
+	// +kubebuilder:validation:items:Minimum=100
+	// +kubebuilder:validation:items:Maximum=599
 	// +optional
 	ExpectedStatus []int32 `json:"expectedStatus,omitempty"`
 }
@@ -493,11 +497,15 @@ type Migration struct {
 	// +required
 	Name string `json:"name"`
 
-	// To is the version boundary this migration crosses up to.
+	// To is the exact version boundary this migration crosses up to (a
+	// concrete semver, not a range).
 	// +required
 	To string `json:"to"`
 
-	// From optionally constrains the current version it applies from.
+	// From optionally constrains the current version it applies from. Unlike
+	// To, this is a semver *constraint* (e.g. ">=1.0.0, <2.0.0" or "1.x"),
+	// matched against the currently deployed version. Omit to fire on every
+	// crossing up to To.
 	// +optional
 	From string `json:"from,omitempty"`
 
@@ -515,6 +523,7 @@ type Migration struct {
 type ConflictPolicy struct {
 	// Default action for conflicts with no matching rule.
 	// +kubebuilder:validation:Enum=Fail;Recreate;KeepExisting
+	// +kubebuilder:default=Fail
 	// +optional
 	Default string `json:"default,omitempty"`
 
@@ -775,6 +784,20 @@ type StageSet struct {
 	Spec StageSetSpec `json:"spec,omitempty"`
 	// +optional
 	Status StageSetStatus `json:"status,omitempty"`
+}
+
+// GetConditions returns the status conditions of the StageSet. It satisfies
+// the conditions.Setter/Getter contract the Flux pkg/runtime condition and
+// patch helpers expect. The methods deal only in apimachinery's
+// metav1.Condition, so the API package takes no dependency on the
+// controller-runtime or Flux condition packages.
+func (in *StageSet) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+// SetConditions replaces the status conditions of the StageSet.
+func (in *StageSet) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
 }
 
 // +kubebuilder:object:root=true

@@ -35,7 +35,6 @@ type InventoryEntry struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="Stage",type=string,JSONPath=`.metadata.labels.stages\.metio\.wtf/stage`
-// +kubebuilder:printcolumn:name="Entries",type=integer,JSONPath=`.spec.entries[*]`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // StageInventory is one shard of a stage's recorded inventory.

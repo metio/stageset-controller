@@ -84,8 +84,13 @@ spec:
 - **`serviceAccountName`** — the ServiceAccount the controller applies as (via a
   minted TokenRequest token on the local cluster); the StageSet can do exactly what
   its RBAC allows. See [multi-cluster and tenancy](/usage/multi-cluster/).
-- **`kubeConfig.secretRef`** — a Secret holding a kubeconfig for a remote cluster.
-  Only `secretRef` is accepted.
+- **`kubeConfig`** — apply to a remote cluster. Set exactly one of:
+  - **`secretRef`** — a Secret holding a self-contained kubeconfig (with its own
+    embedded credentials).
+  - **`configMapRef`** — a ConfigMap selecting cloud-provider workload-identity
+    auth (`aws`, `azure`, `gcp`, or `generic`); the cluster bearer token is
+    minted by the cloud's IAM/STS. See
+    [multi-cluster and tenancy](/usage/multi-cluster/).
 - **`decryption`** — decrypt SOPS-encrypted files (`age`) in every stage's source
   before they are built. `provider` is `sops`; `secretRef` names the key Secret,
   read under `serviceAccountName`. See [secrets encryption](/usage/encryption/).
@@ -112,8 +117,8 @@ spec:
 
   migrations:
     - name: backfill-ledger-2-0 # idempotency-ledger / Events name
-      from: "1.*"               # optional: constrain the version it applies from
-      to:   "2.0.0"             # required: the boundary this migration crosses
+      from: ">=1.0.0, <2.0.0"   # optional: a semver CONSTRAINT on the current version
+      to:   "2.0.0"             # required: the EXACT boundary this migration crosses
       stage: app                # runs before this stage's pre-actions
       actions:                  # the same Action shape used by stages (see below)
         - name: backfill
@@ -122,7 +127,12 @@ spec:
               name: ledger-backfill-job
 ```
 
-See [versioned migrations](/usage/versioned-migrations/).
+`to` is an exact version (like `version.value`). `from` is a semver
+**constraint**, not an exact version — it accepts ranges such as
+`>=1.0.0, <2.0.0`, `1.x`, or `^1.2`, matched against the currently deployed
+version. The migration fires only when the deployed version satisfies `from`
+*and* the run crosses up to `to`. See
+[versioned migrations](/usage/versioned-migrations/).
 
 ## Rollback
 
@@ -193,6 +203,13 @@ or any other kind treated as a *producer* and resolved to its `ExternalArtifact`
 the back-pointer index. See
 [stages and sources](/usage/stages-and-sources/#source-kinds) and
 [producer-aware sources](/usage/producer-aware-sources/).
+
+`sourceRef.kind` is intentionally **open**: it defaults to `ExternalArtifact` but
+accepts any producer kind, because a producer reference is resolved through the
+`ExternalArtifact`'s RFC-0012 `spec.sourceRef` back-pointer rather than matched
+against a fixed set. This is a deliberate divergence from a source consumer that
+restricts its source kinds to a closed enum — here the resolution is
+producer-aware, so a new producer kind works without a schema change.
 
 ### patches
 
@@ -388,4 +405,6 @@ status:
 ```
 
 The `Ready` condition's reason is one of the wire-stable values documented in the
-[runbooks](/runbooks/).
+[runbooks](/runbooks/). The happy-state reason is `Succeeded`, matching the
+apply-style success reason kustomize-controller writes, so existing Flux tooling
+and alert routing recognize it unchanged.

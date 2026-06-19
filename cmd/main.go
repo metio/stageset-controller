@@ -162,6 +162,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		ShardCap:             *c.ShardCap,
 		AllowedActionHosts:   []string(*c.AllowedActionHosts),
 		NoCrossNamespaceRefs: *c.NoCrossNamespaceRefs,
+		ObjectLevelKMS:       *c.ObjectLevelKMS,
 		DefaultInterval:      *c.DefaultInterval,
 		RollbackStore:        rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
