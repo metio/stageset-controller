@@ -167,7 +167,7 @@ jobs:
           set -euo pipefail
           ver="${{ needs.prepare.outputs.release_version }}"
           prev="${{ needs.prepare.outputs.previous_version }}"
-          config_url="https://raw.githubusercontent.com/metio/git-cliff-config/6fcc0b65dde726f59c09066fae227cec236ffd76/cliff.toml"
+          config_url="https://raw.githubusercontent.com/metio/git-cliff-config/3dc6a68c93387761e404ac28dbeb60b3d80883f6/cliff.toml"
           common=(--config-url "${config_url}" --tag "${ver}" --tag-pattern '^[0-9]+\.[0-9]+\.[0-9]+$')
           if [ -n "${prev}" ]; then
             git-cliff "${common[@]}" "${prev}..HEAD" > notes.md
