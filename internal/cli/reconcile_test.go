@@ -148,6 +148,46 @@ func TestReconcile_WithSource(t *testing.T) {
 	}
 }
 
+// TestReconcile_WithSourceStrictFails proves --strict turns an unresolvable
+// source into a non-zero exit, instead of warning and exiting 0. The
+// ExternalArtifact is deliberately not created, so its Get fails.
+func TestReconcile_WithSourceStrictFails(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "recstrict")
+	makeStageSet(t, c, ns, "app") // sourceRef "app-artifact" is never created
+
+	_, stderr, code := runCLI(t, cfg, "reconcile", "app", "-n", ns, "--with-source", "--strict")
+	if code == exitOK {
+		t.Fatalf("--strict with an unresolvable source should exit non-zero (stderr=%s)", stderr)
+	}
+	if !strings.Contains(stderr, "warning: cannot reconcile source") {
+		t.Errorf("expected a per-source warning on stderr, got: %s", stderr)
+	}
+}
+
+// TestReconcile_WithSourceStrictSucceeds proves --strict exits 0 when every
+// source resolves, so the flag does not break the happy path.
+func TestReconcile_WithSourceStrictSucceeds(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "recstrictok")
+	makeStageSet(t, c, ns, "app")
+
+	ea := &unstructured.Unstructured{}
+	ea.SetGroupVersionKind(artifact.ExternalArtifactGVK)
+	ea.SetNamespace(ns)
+	ea.SetName("app-artifact")
+	if err := c.Create(context.Background(), ea); err != nil {
+		t.Fatalf("create ExternalArtifact: %v", err)
+	}
+
+	_, stderr, code := runCLI(t, cfg, "reconcile", "app", "-n", ns, "--with-source", "--strict")
+	if code != exitOK {
+		t.Fatalf("--strict with all sources resolvable should exit 0 (code=%d stderr=%s)", code, stderr)
+	}
+}
+
 func TestReconcileHandled(t *testing.T) {
 	mk := func(handled string, stages ...stagesv1.StageStatus) *stagesv1.StageSet {
 		ss := &stagesv1.StageSet{}
