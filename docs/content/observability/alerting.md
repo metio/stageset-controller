@@ -8,6 +8,11 @@ Two layers surface trouble: Kubernetes Events the controller emits on a StageSet
 own timeline, and a Prometheus alert set built on the [metrics](/observability/metrics/).
 Both lead an operator to a [runbook](/runbooks/).
 
+These alerts page on the *causes* of trouble. To alert on a
+[service-level objective](/observability/slos/) directly, and to see availability,
+error budget, and latency against their objectives, use the published
+[dashboard](/observability/dashboard/).
+
 ## The controller binary
 
 ### Kubernetes Events

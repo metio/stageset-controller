@@ -221,6 +221,24 @@ deterministically in the Verify gate's seed-corpus pass.
 jaas repo** — align changes across both. **golangci-lint is banned project-wide**
 and appears nowhere in CI.
 
+`dashboards.yml` publishes the Grafana dashboard(s) under `dashboards/` — authored
+in grafonnet, rendered through **JaaS** (the controller is not a Jsonnet renderer;
+the two projects are intentionally tightly coupled — "Option B") — as a
+**single-layer, multi-arch OCI image** at
+`ghcr.io/metio/stageset-controller-dashboard` (`:latest` + a dated calver tag,
+cosign keyless-signed), the same shape as the JOI library images so it serves as
+both a Flux `OCIRepository` source and an image-volume mount. grafonnet is **not**
+bundled in the image — it is supplied at render time as a `JsonnetLibrary`, so the
+image is just the dashboard source (`dashboards/Containerfile` is `FROM scratch` +
+one `COPY *.jsonnet /`, asserted to be exactly one layer). The dashboard exposes
+`datasource`/`title`/`selector` plus the SLO knobs `window`/`availabilityTarget`/
+`latencyTarget` as TLAs; the consumption flow (OCIRepository → JaaS JsonnetSnippet
+with `spec.tlas` → grafana-operator `GrafanaDashboard`) is in
+`docs/content/observability/dashboard.md`, the SLOs it shows in
+`docs/content/observability/slos.md`. A `validate` job renders every
+`dashboards/*.jsonnet` against `grafonnet@main` (catching API breaks) before any
+push; PRs run `validate` only, `main` pushes publish. Mirrors jaas's `dashboards.yml`.
+
 ## Build & release
 
 Container image: `gcr.io/distroless/static:nonroot` runtime base, built multi-arch

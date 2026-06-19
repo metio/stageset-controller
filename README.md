@@ -14,8 +14,8 @@ pre/post actions, update windows, versioned migrations, and per-stage pruning.
 It is continuously reconciled, drift-corrected, and applied under per-tenant
 impersonation.
 
-**📖 Documentation — installation, usage, API reference, tutorials, and
-contributing — lives at <https://stageset.projects.metio.wtf/>.**
+📖 Documentation — installation, usage, API reference, tutorials, and
+contributing — lives at <https://stageset.projects.metio.wtf/>.
 
 Licensed under [0BSD](LICENSE); the repository is [REUSE](https://reuse.software/)
 compliant.
