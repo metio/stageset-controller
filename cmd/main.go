@@ -164,6 +164,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		NoCrossNamespaceRefs: *c.NoCrossNamespaceRefs,
 		ObjectLevelKMS:       *c.ObjectLevelKMS,
 		DefaultInterval:      *c.DefaultInterval,
+		MaxTeardownWait:      *c.MaxTeardownWait,
 		RollbackStore:        rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("unable to create controller", "error", err, "controller", "StageSet")
@@ -206,9 +207,10 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	}
 
 	if *c.GateAddr != "" {
+		gateLog := logger.With("logger", "gate")
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			mux := http.NewServeMux()
-			mux.Handle("/gate/", &gate.Handler{Client: mgr.GetClient()})
+			mux.Handle("/gate/", &gate.Handler{Client: mgr.GetClient(), Logger: gateLog})
 			srv := &http.Server{Addr: *c.GateAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 			// #nosec G118 -- the manager ctx is already done when this goroutine
 			// runs, so graceful shutdown needs a fresh, bounded context.
@@ -218,8 +220,13 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 				defer cancel()
 				_ = srv.Shutdown(shutdownCtx)
 			}()
+			// The gate is best-effort: a bind failure (e.g. the port is already
+			// taken) must NOT bring the manager down with it. Returning a non-nil
+			// error here makes controller-runtime shut the whole manager (and the
+			// reconciler) down; log and return nil so the gate stays an isolated,
+			// degraded subsystem while reconciliation runs on.
 			if serveErr := srv.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-				return serveErr
+				gateLog.Error("stage-gate server stopped; the gate endpoint is unavailable but reconciliation continues", "error", serveErr, "addr", *c.GateAddr)
 			}
 			return nil
 		})); err != nil {

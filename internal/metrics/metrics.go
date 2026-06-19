@@ -57,6 +57,26 @@ var (
 		Help: "Failures to engage a dynamic producer watch. Sustained non-zero values on a gvk mean dependent StageSets won't re-trigger on that producer kind's upstream changes until the watch engages.",
 	}, []string{"gvk"})
 
+	// TeardownForceDropTotal counts StageSets whose finalizer was force-dropped
+	// because teardown kept failing past --max-teardown-wait. A force-drop
+	// orphans whatever objects the failing stage's Delete could not remove, so
+	// sustained non-zero values flag a permanently-unreachable target cluster
+	// that operators must clean up by hand. See the teardown runbook.
+	TeardownForceDropTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stageset_teardown_force_drop_total",
+		Help: "StageSets whose finalizer was force-dropped after --max-teardown-wait of failing teardown. Sustained non-zero values flag an unreachable target and accumulating orphaned objects.",
+	}, []string{"namespace", "name"})
+
+	// InventorySkippedEntriesTotal counts malformed StageInventory entries that
+	// could not be parsed back into an ObjectRef. A skipped entry means the
+	// object it named escapes pruning forever (the planner never sees it as a
+	// stored ref), so sustained non-zero values flag corrupted inventory shards
+	// and accumulating un-prunable objects.
+	InventorySkippedEntriesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stageset_inventory_skipped_entries_total",
+		Help: "Malformed StageInventory entries skipped during a read. Sustained non-zero values mean named objects escape pruning.",
+	}, []string{"namespace", "stageset", "stage"})
+
 	// StageReady reports whether each stage is currently Ready (1) or not (0).
 	// A progressive-delivery controller that gates on metrics rather than a
 	// webhook — e.g. Argo Rollouts' Prometheus metric provider — can hold a
@@ -68,7 +88,7 @@ var (
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, StageReady)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady)
 }
 
 // SetStageReady publishes the readiness gauge for one stage.

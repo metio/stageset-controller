@@ -25,6 +25,7 @@ metrics:
 | `stageset_drift_corrected_total` | counter | `namespace`, `name`, `stage` | Out-of-band drift re-asserted on a steady-state reconcile. |
 | `stageset_update_deferred_total` | counter | `namespace`, `name` | Rollouts held by a closed update window. |
 | `stageset_webhook_cert_renewal_failures_total` | counter | _(none)_ | Failed self-signed webhook cert renewals. |
+| `stageset_teardown_force_drop_total` | counter | `namespace`, `name` | Finalizers force-dropped after `--max-teardown-wait` of failing teardown; sustained non-zero values flag an unreachable target and orphaned objects. See [TeardownForced](/runbooks/teardown-forced/). |
 | `stageset_stage_ready` | gauge | `namespace`, `stageset`, `stage` | `1` when a stage is Ready, else `0` — for metric-based [progressive delivery](/tutorials/progressive-delivery/#argo-rollouts). |
 
 ## Alerts
@@ -62,7 +63,9 @@ The controller emits Kubernetes Events on every Ready-condition transition, so
 surface what happened. Normal events
 include `Succeeded`, `UpdateDeferred`, `MigrationStarted`, and
 `MigrationCompleted`; warnings include `StageFailed`, `DriftCorrected`,
-`RolledBack`, `MigrationFailed`, `OnFailureAction`, and `RollbackStoreFailed`.
+`RolledBack`, `MigrationFailed`, `OnFailureAction`, `RollbackStoreFailed`, and
+`TeardownForced` (a deleting StageSet's finalizer force-dropped after
+`--max-teardown-wait` — see [TeardownForced](/runbooks/teardown-forced/)).
 
 ## Runbooks
 

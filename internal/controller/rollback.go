@@ -124,17 +124,26 @@ func snapshotStages(ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact,
 // PreviousRevisionUnavailable; an empty reason means restored (or there was
 // nothing to restore). When an external RollbackStore holds the run, its
 // bit-exact copy is used instead of re-fetching.
-func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.StageSet, applier *apply.Applier, fetcher *artifact.Fetcher) (reason, msg string) {
+// The error return carries a TRANSIENT failure (rollback-store outage,
+// apiserver blip on re-apply) so the caller backs off and retries rather than
+// reporting a terminal PreviousRevisionUnavailable for something that can heal.
+// A genuinely terminal rollback failure comes back as (reason, msg, nil).
+func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.StageSet, applier *apply.Applier, fetcher *artifact.Fetcher) (reason, msg string, err error) {
 	snap := ss.Status.LastAppliedSnapshot
 	if len(snap) == 0 {
-		return "", "" // no snapshot (e.g. the first run failed): nothing to roll back to
+		return "", "", nil // no snapshot (e.g. the first run failed): nothing to roll back to
 	}
 	// Re-fetch rollback rebuilds the source, so it must decrypt the same way the
 	// forward path does. The store path holds already-rendered objects and skips
 	// this.
 	dec, derr := r.buildDecryptor(ctx, ss)
 	if derr != nil {
-		return ReasonPreviousRevisionUnavailable, fmt.Sprintf("cannot roll back: configuring decryption failed (%v)", derr)
+		// A transient cloud-KMS throttle while configuring decryption should back
+		// off, not report a terminal PreviousRevisionUnavailable.
+		if isTransientDecryptError(derr) {
+			return "", "", fmt.Errorf("rollback decryptor (transient): %w", derr)
+		}
+		return ReasonPreviousRevisionUnavailable, fmt.Sprintf("cannot roll back: configuring decryption failed (%v)", derr), nil
 	}
 	stages := make(map[string]*stagesv1.Stage, len(ss.Spec.Stages))
 	for i := range ss.Spec.Stages {
@@ -145,45 +154,79 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 		if !ok {
 			continue // stage removed from the spec: not restored, pruned normally
 		}
-		objects, rbReason, rbMsg := r.rollbackStageObjects(ctx, ss, stage, ref, fetcher, dec)
+		objects, rbReason, rbMsg, rbErr := r.rollbackStageObjects(ctx, ss, stage, ref, fetcher, dec)
+		if rbErr != nil {
+			return "", "", rbErr
+		}
 		if rbReason != "" {
-			return rbReason, rbMsg
+			return rbReason, rbMsg, nil
 		}
 		if _, aerr := applier.Apply(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{}); aerr != nil {
 			return ReasonPreviousRevisionUnavailable,
-				fmt.Sprintf("cannot roll back stage %q: re-applying the previous revision failed (%v)", ref.Stage, aerr)
+				fmt.Sprintf("cannot roll back stage %q: re-applying the previous revision failed (%v)", ref.Stage, aerr), nil
 		}
 	}
-	return "", ""
+	return "", "", nil
 }
 
 // rollbackStageObjects re-fetches the recorded revision (digest-verified) and
 // re-renders it under the current spec.
-func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, ref stagesv1.StageArtifactRef, fetcher *artifact.Fetcher, dec *decryptor.Decryptor) ([]*unstructured.Unstructured, string, string) {
+//
+// The error return is reserved for a TRANSIENT rollback-store outage: a failed
+// Get is surfaced (not swallowed) so the reconcile backs off and retries rather
+// than silently falling through to a producer re-fetch — which, when the
+// producer has GC'd the revision, would land a bogus terminal
+// PreviousRevisionUnavailable. A clean store miss (found=false) and a CORRUPT
+// snapshot (decode failure) are both non-transient: they fall through to the
+// producer re-fetch after eventing the corruption, since the store can't serve
+// this revision but the producer still might.
+func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, ref stagesv1.StageArtifactRef, fetcher *artifact.Fetcher, dec *decryptor.Decryptor) ([]*unstructured.Unstructured, string, string, error) {
 	// Bit-exact, GC-independent path: the external store holds the rendered
 	// output from when this revision was last applied.
 	if r.RollbackStore != nil {
-		if data, found, err := r.RollbackStore.Get(ctx, rollbackKey(ss, ref.Stage, ref.Digest)); err == nil && found {
-			if objects, derr := decodeObjects(data); derr == nil {
-				return objects, "", ""
+		data, found, err := r.RollbackStore.Get(ctx, rollbackKey(ss, ref.Stage, ref.Digest))
+		switch {
+		case err != nil:
+			// Transient store outage. Surface it so the reconcile backs off
+			// instead of falling through to a producer re-fetch that could
+			// mislabel a recoverable failure as terminal.
+			r.event(ss, corev1.EventTypeWarning, "RollbackStoreFailed",
+				fmt.Sprintf("reading stage %q from the rollback store failed: %v", ref.Stage, err))
+			return nil, "", "", fmt.Errorf("rollback store get stage %q: %w", ref.Stage, err)
+		case found:
+			objects, derr := decodeObjects(data)
+			if derr == nil {
+				return objects, "", "", nil
 			}
+			// Corrupt snapshot: the bytes are unusable. Event it and fall
+			// through to the producer re-fetch — the producer may still hold
+			// the revision even though the store's copy is unreadable.
+			r.event(ss, corev1.EventTypeWarning, "RollbackStoreFailed",
+				fmt.Sprintf("decoding stage %q from the rollback store failed (corrupt snapshot); falling back to producer re-fetch: %v", ref.Stage, derr))
 		}
-		// store miss/error falls through to producer re-fetch
+		// found=false (clean miss): fall through to producer re-fetch.
 	}
 	files, ferr := fetcher.Fetch(ctx, ref.URL, ref.Digest, "")
 	if ferr != nil {
 		return nil, ReasonPreviousRevisionUnavailable,
-			fmt.Sprintf("cannot roll back: revision %s for stage %q is no longer fetchable (%v)", ref.Revision, ref.Stage, ferr)
+			fmt.Sprintf("cannot roll back: revision %s for stage %q is no longer fetchable (%v)", ref.Revision, ref.Stage, ferr), nil
 	}
 	files, ferr = decryptFiles(dec, files)
 	if ferr != nil {
+		// A transient cloud-KMS throttle is surfaced as an error so the reconcile
+		// backs off and retries, rather than mislabeling a recoverable throttle as
+		// terminal PreviousRevisionUnavailable. Auth / key-policy denials stay
+		// terminal.
+		if isTransientDecryptError(ferr) {
+			return nil, "", "", fmt.Errorf("rollback decrypt stage %q (transient): %w", ref.Stage, ferr)
+		}
 		return nil, ReasonPreviousRevisionUnavailable,
-			fmt.Sprintf("cannot roll back stage %q: decrypting the previous revision failed (%v)", ref.Stage, ferr)
+			fmt.Sprintf("cannot roll back stage %q: decrypting the previous revision failed (%v)", ref.Stage, ferr), nil
 	}
 	vars, verr := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
 	if verr != nil {
 		return nil, ReasonPreviousRevisionUnavailable,
-			fmt.Sprintf("cannot roll back stage %q: resolving postBuild variables failed (%v)", ref.Stage, verr)
+			fmt.Sprintf("cannot roll back stage %q: resolving postBuild variables failed (%v)", ref.Stage, verr), nil
 	}
 	// Faithful-or-fail: if the substitution inputs changed since the recorded
 	// run, re-rendering the old artifact would NOT reproduce the previous state.
@@ -191,12 +234,12 @@ func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stage
 	// digest (pre-upgrade snapshot, or no substitution) skips the check.
 	if ref.SubstitutionDigest != "" && substitutionDigest(vars) != ref.SubstitutionDigest {
 		return nil, ReasonPreviousRevisionUnavailable,
-			fmt.Sprintf("cannot roll back stage %q: its postBuild substitution inputs changed since the last good apply, so the previous rendered state can no longer be reproduced — fix forward instead", ref.Stage)
+			fmt.Sprintf("cannot roll back stage %q: its postBuild substitution inputs changed since the last good apply, so the previous rendered state can no longer be reproduced — fix forward instead", ref.Stage), nil
 	}
 	objects, berr := build.Build(files, build.Options{Path: stage.Path, Patches: stage.Patches}, vars)
 	if berr != nil {
 		return nil, ReasonPreviousRevisionUnavailable,
-			fmt.Sprintf("cannot roll back stage %q: rebuilding the previous revision failed (%v)", ref.Stage, berr)
+			fmt.Sprintf("cannot roll back stage %q: rebuilding the previous revision failed (%v)", ref.Stage, berr), nil
 	}
-	return objects, "", ""
+	return objects, "", "", nil
 }

@@ -127,8 +127,9 @@ func TestReconcile_Impersonation_AppliesUnderGrantedSA(t *testing.T) {
 }
 
 // The impersonated SA's RBAC is the ceiling: an object the SA cannot create is
-// rejected by the apiserver, the stage fails, and nothing is applied — proving
-// the apply really runs as the SA, not the controller's broader identity.
+// rejected by the apiserver, the stage fails terminally with RBACDenied (a
+// Forbidden apply can't heal by retry), and nothing is applied — proving the
+// apply really runs as the SA, not the controller's broader identity.
 func TestReconcile_Impersonation_DeniedBeyondSARBAC(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
@@ -139,8 +140,8 @@ func TestReconcile_Impersonation_DeniedBeyondSARBAC(t *testing.T) {
 	ss := impersonatingStageSet(t, c, ns, "denied", "deployer", "secret-art")
 	reconcileWithConfig(t, c, ss)
 
-	if r := readyReason(getStageSet(t, c, ns, "denied")); r != ReasonStageFailed {
-		t.Fatalf("Ready reason = %q, want %q", r, ReasonStageFailed)
+	if r := readyReason(getStageSet(t, c, ns, "denied")); r != ReasonRBACDenied {
+		t.Fatalf("Ready reason = %q, want %q", r, ReasonRBACDenied)
 	}
 	var sec corev1.Secret
 	err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "forbidden"}, &sec)
