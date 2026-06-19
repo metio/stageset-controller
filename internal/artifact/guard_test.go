@@ -25,6 +25,12 @@ func TestValidateHTTPURL(t *testing.T) {
 		{"bad scheme", "file:///etc/passwd", ErrInvalidScheme},
 		{"no host", "http://", ErrMissingHost},
 		{"trailing-dot loopback", "http://127.0.0.1./x", ErrForbiddenHost},
+		{"inet_aton single-int loopback", "http://2130706433/x", ErrForbiddenHost},
+		{"inet_aton hex loopback", "http://0x7f000001/x", ErrForbiddenHost},
+		{"inet_aton octal loopback", "http://017700000001/x", ErrForbiddenHost},
+		{"inet_aton short-dotted loopback", "http://127.1/x", ErrForbiddenHost},
+		{"inet_aton hex public ok", "https://0x08080808/x", nil},        // 8.8.8.8, permitted
+		{"inet_aton single-int rfc1918 ok", "http://3232235521/x", nil}, // 192.168.0.1, permitted
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,6 +44,44 @@ func TestValidateHTTPURL(t *testing.T) {
 			}
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("validateHTTPURL(%q) = %v, want %v", tc.url, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseInetAtonIPv4(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want string // empty == nil (not an IP literal)
+	}{
+		{"2130706433", "127.0.0.1"},
+		{"0x7f000001", "127.0.0.1"},
+		{"017700000001", "127.0.0.1"},
+		{"127.1", "127.0.0.1"},
+		{"127.0.1", "127.0.0.1"},
+		{"0x08080808", "8.8.8.8"},
+		{"3232235521", "192.168.0.1"},
+		{"4294967296", ""},             // overflows 32 bits
+		{"1.2.3.4.5", ""},              // too many parts
+		{"256.0.0.1", ""},              // leading part out of byte range
+		{"127.0.0.0x100", ""},          // final part out of range for one byte
+		{"not-a-number", ""},           // non-numeric
+		{"", ""},                       // empty
+		{"source.flux-system.svc", ""}, // a real hostname is not an IP literal
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			got := parseInetAtonIPv4(tc.in)
+			if tc.want == "" {
+				if got != nil {
+					t.Fatalf("parseInetAtonIPv4(%q) = %v, want nil", tc.in, got)
+				}
+				return
+			}
+			if got == nil || got.String() != tc.want {
+				t.Fatalf("parseInetAtonIPv4(%q) = %v, want %s", tc.in, got, tc.want)
 			}
 		})
 	}
