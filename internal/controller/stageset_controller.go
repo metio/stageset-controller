@@ -71,6 +71,18 @@ const defaultIntervalJitterFraction = 0.05
 // the StageSet in Terminating forever and block namespace teardown.
 const defaultMaxTeardownWait = 1 * time.Hour
 
+// permanentRetryInterval bounds how soon a StageSet sitting on a terminal
+// Ready=False reason re-enters the workqueue. Terminal failures (RBAC denied,
+// invalid spec, a dependsOn cycle, an invalid version) don't engage
+// controller-runtime's error backoff — the reconcile returns no error so the
+// queue doesn't spin. But several of them heal out-of-band without producing a
+// watch event the StageSet sees: granting the tenant SA an RBAC verb, fixing a
+// referenced source in another namespace, or breaking a dependsOn cycle. A
+// bounded RequeueAfter gives those a self-healing re-check roughly once a
+// minute without hot-looping — the gap between "operator grants RBAC" and
+// "StageSet recovers" stays at worst this interval.
+const permanentRetryInterval = 1 * time.Minute
+
 // StageSetReconciler reconciles StageSet objects. The reconciliation model —
 // resolve and pin artifacts, then BUILD -> APPLY -> PRUNE -> VERIFY each stage
 // in order, with a finalizer for teardown — is the contract documented for users
@@ -263,7 +275,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := ValidateSpec(&ss); err != nil {
 		r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec, err.Error())
 		ss.Status.ObservedGeneration = ss.Generation
-		return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
+		if uerr := r.patchStatus(ctx, patchHelper, &ss); uerr != nil {
+			return ctrl.Result{}, uerr
+		}
+		return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 	}
 
 	// Dependency gating: every spec.dependsOn StageSet must be Ready at its
@@ -281,7 +296,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, uerr
 		}
 		if terminal {
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 		}
 		return jitter.JitteredRequeueInterval(ctrl.Result{RequeueAfter: r.retryInterval(&ss)}), nil
 	}
@@ -354,7 +369,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			ss.Status.ObservedGeneration = ss.Generation
 			metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonInvalidSpec).Inc()
 			r.event(&ss, corev1.EventTypeWarning, ReasonInvalidSpec, err.Error())
-			return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
+			if uerr := r.patchStatus(ctx, patchHelper, &ss); uerr != nil {
+				return ctrl.Result{}, uerr
+			}
+			return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 		}
 		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "connect to target cluster", err, nil, "", nil)
 	}
@@ -386,7 +404,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if mreason != "" {
 		r.setReady(&ss, metav1.ConditionFalse, mreason, mmsg)
 		ss.Status.ObservedGeneration = ss.Generation
-		return ctrl.Result{}, r.patchStatus(ctx, patchHelper, &ss)
+		if uerr := r.patchStatus(ctx, patchHelper, &ss); uerr != nil {
+			return ctrl.Result{}, uerr
+		}
+		return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 	}
 	ss.Status.PendingMigrations = migPlan.pendingNames()
 
@@ -748,10 +769,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 // failResolution records the resolution failure on the Ready condition and
 // chooses a requeue strategy: transient waits (artifact not yet present or not
-// Ready) requeue at RetryInterval; spec/config and permanent-API errors (RBAC
-// denial, missing CRD) wait for a spec/RBAC change rather than burning
-// reconciles; genuinely transient API errors are returned so controller-runtime
-// backs off.
+// Ready) requeue at RetryInterval; terminal spec/config and permanent-API
+// errors (RBAC denial, missing CRD) requeue at the bounded
+// permanentRetryInterval so an out-of-band fix (granted RBAC, installed CRD)
+// self-heals rather than burning reconciles; genuinely transient API errors are
+// returned so controller-runtime backs off.
 //
 // When the failing ref targets another namespace, the message is scrubbed to a
 // single constant so a tenant cannot distinguish NotFound / Forbidden / digest
@@ -802,7 +824,12 @@ func (r *StageSetReconciler) failResolution(ctx context.Context, helper *fluxpat
 	case transient:
 		return jitter.JitteredRequeueInterval(ctrl.Result{RequeueAfter: r.retryInterval(ss)}), nil
 	default:
-		return ctrl.Result{}, nil
+		// Terminal spec/config resolve failure (ambiguous producer,
+		// cross-namespace rejected). No error, so controller-runtime doesn't
+		// back off; a bounded RequeueAfter re-checks so a fix made elsewhere
+		// (the second producer removed, RBAC granted on the source) heals
+		// within the interval without a watch event.
+		return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 	}
 }
 

@@ -8,7 +8,7 @@
 # token for the SA (no `impersonate` verb); kind serves TokenRequest, so this
 # exercises the real mint path. A tenant SA may write ConfigMaps but not Secrets:
 #   - positive: a ConfigMap-only artifact applies and the StageSet goes Ready;
-#   - negative: a Secret artifact is denied, the StageSet reports StageFailed,
+#   - negative: a Secret artifact is denied, the StageSet reports RBACDenied,
 #     and the Secret never appears — proving the apply truly runs as the SA.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,8 +90,8 @@ wait_ready stageset imp-ok tenant
 test "$(kubectl -n tenant get configmap tenant-cm -o jsonpath='{.data.from}')" \
   = "impersonated-deployer" || die "impersonated ConfigMap content mismatch"
 
-log "Negative: the SA cannot create Secrets — apply denied, StageFailed"
-wait_reason stageset imp-denied tenant StageFailed 30 5
+log "Negative: the SA cannot create Secrets — apply denied, RBACDenied"
+wait_reason stageset imp-denied tenant RBACDenied 30 5
 if kubectl -n tenant get secret tenant-secret 2>/dev/null; then
   die "impersonated SA without Secret RBAC managed to create a Secret"
 fi
