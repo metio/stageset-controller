@@ -63,6 +63,14 @@ import (
 // meaningfully shifting the effective cadence.
 const defaultIntervalJitterFraction = 0.05
 
+// defaultMaxTeardownWait is how long a deleting StageSet's finalizer holds
+// while reverse-order teardown keeps failing before reconcileDelete force-drops
+// it. One hour is generous enough to ride out a transient target-cluster
+// outage but short enough that a permanently-unreachable target (deleted
+// kubeConfig Secret, revoked RBAC, decommissioned remote cluster) doesn't pin
+// the StageSet in Terminating forever and block namespace teardown.
+const defaultMaxTeardownWait = 1 * time.Hour
+
 // StageSetReconciler reconciles StageSet objects. The reconciliation model —
 // resolve and pin artifacts, then BUILD -> APPLY -> PRUNE -> VERIFY each stage
 // in order, with a finalizer for teardown — is the contract documented for users
@@ -122,6 +130,12 @@ type StageSetReconciler struct {
 	// DefaultInterval is the global --default-interval flag: the reconcile
 	// cadence used for StageSets that omit spec.interval.
 	DefaultInterval time.Duration
+	// MaxTeardownWait is the global --max-teardown-wait flag: how long a
+	// deleting StageSet's finalizer holds while reverse-order teardown keeps
+	// failing before reconcileDelete force-drops it (emitting a Warning
+	// TeardownForced event and a metric, and possibly orphaning objects the
+	// failing stage couldn't delete). Zero falls back to defaultMaxTeardownWait.
+	MaxTeardownWait time.Duration
 	// RollbackStore is the optional external store for rendered output, making
 	// rollbackOnFailure bit-exact and independent of producer retention. Nil
 	// falls back to re-fetching the producer artifact.
@@ -291,7 +305,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		ra, err := resolver.Resolve(ctx, r.Client, ss.Spec.Stages[i].SourceRef, ss.Namespace)
 		if err != nil {
-			return r.failResolution(ctx, patchHelper, &ss, ss.Spec.Stages[i].Name, err)
+			return r.failResolution(ctx, patchHelper, &ss, ss.Spec.Stages[i].Name, ss.Spec.Stages[i].SourceRef, ss.Namespace, err)
 		}
 		resolved[i] = ra
 		pinned[ra.Key()] = ra.Revision
@@ -429,6 +443,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 	var reconstructedStages []string
+	var partialReconstructStages []string
 	desiredRecords := make([]inventory.StageRecord, 0, len(ss.Spec.Stages))
 	applied := make(map[string]string, len(ss.Spec.Stages))
 	stageStatuses := make([]stagesv1.StageStatus, 0, len(ss.Spec.Stages))
@@ -563,6 +578,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				recovered, rerr := recorder.ReconstructFromCluster(ctx, target, ss.Name, ss.Namespace, stage.Name, objects)
 				if rerr != nil {
 					logger.Error(rerr, "stage inventory reconstruction was partial", "stage", stage.Name)
+					partialReconstructStages = append(partialReconstructStages, stage.Name)
 				}
 				writeRefs = unionRefs(newRefs, recovered)
 				reconstructedStages = append(reconstructedStages, stage.Name)
@@ -608,7 +624,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// no longer fetchable surfaces as a terminal PreviousRevisionUnavailable.
 		if ss.Spec.RollbackOnFailure {
 			rbCtx, rbSpan := observability.Tracer().Start(ctx, "stageset.rollback")
-			rbReason, rbMsg := r.attemptRollback(rbCtx, &ss, applier, fetcher)
+			rbReason, rbMsg, rbErr := r.attemptRollback(rbCtx, &ss, applier, fetcher)
+			if rbErr != nil {
+				// Transient rollback failure (store outage, apiserver blip).
+				// The stage failure status is already written; back off and
+				// retry rather than masking it as terminal. The original
+				// loopErr still drives the requeue below if it's the stronger
+				// signal, but surfacing rbErr keeps the rollback-store outage
+				// visible in logs.
+				rbSpan.RecordError(rbErr)
+				rbSpan.SetStatus(codes.Error, "rollback transient failure")
+				rbSpan.End()
+				logger.Error(rbErr, "rollback deferred by a transient failure; backing off")
+				return ctrl.Result{}, rbErr
+			}
 			if rbReason != "" {
 				rbSpan.SetStatus(codes.Error, rbReason)
 				rbSpan.End()
@@ -620,6 +649,13 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			r.event(&ss, corev1.EventTypeWarning, eventReasonRolledBack,
 				"rolled back to the last-applied revisions after a failed run")
 			logger.Info("rolled back to the last-applied revisions after a failed run")
+		}
+		// A terminal stage failure (RBAC denial, digest mismatch, oversized
+		// tarball) halts the run but must not requeue — the failure status is
+		// already written, and retry can't fix the cause. Return nil so
+		// controller-runtime waits for the next genuine watch event or interval.
+		if errors.Is(loopErr, errTerminalStageFailure) {
+			return ctrl.Result{}, nil
 		}
 		return loopResult, loopErr
 	}
@@ -641,10 +677,19 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// all pruning and teardown to the next reconcile — when the inventory is
 		// authoritative again — rather than deleting against a best-effort
 		// reconstruction. The operator-visible event marks the recovery.
-		r.event(&ss, corev1.EventTypeWarning, inventoryReconstructedEvent,
-			fmt.Sprintf("rebuilt StageInventory for stage(s) %s from live cluster objects; prune deferred to the next reconcile",
-				strings.Join(reconstructedStages, ", ")))
-		logger.Info("StageInventory reconstructed from cluster; prune deferred to next reconcile", "stages", reconstructedStages)
+		msg := fmt.Sprintf("rebuilt StageInventory for stage(s) %s from live cluster objects; prune deferred to the next reconcile",
+			strings.Join(reconstructedStages, ", "))
+		if len(partialReconstructStages) > 0 {
+			// A partial rebuild means some GVKs could not be listed, so the
+			// rebuilt set may miss live objects — the deferred prune could later
+			// orphan them. Surface that so an operator can investigate rather than
+			// trusting the rebuild as complete.
+			msg += fmt.Sprintf("; reconstruction was INCOMPLETE for stage(s) %s (some objects may be missing from the rebuilt inventory — check the controller log)",
+				strings.Join(partialReconstructStages, ", "))
+		}
+		r.event(&ss, corev1.EventTypeWarning, inventoryReconstructedEvent, msg)
+		logger.Info("StageInventory reconstructed from cluster; prune deferred to next reconcile",
+			"stages", reconstructedStages, "partial", partialReconstructStages)
 	} else {
 		prunes := stagePruneByName(&ss)
 		for stageName, refs := range plan.PrunePerStage {
@@ -703,15 +748,26 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 // failResolution records the resolution failure on the Ready condition and
 // chooses a requeue strategy: transient waits (artifact not yet present or not
-// Ready) requeue at RetryInterval; spec/config errors wait for a spec change;
-// unexpected API errors are returned so controller-runtime backs off.
-func (r *StageSetReconciler) failResolution(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage string, err error) (ctrl.Result, error) {
+// Ready) requeue at RetryInterval; spec/config and permanent-API errors (RBAC
+// denial, missing CRD) wait for a spec/RBAC change rather than burning
+// reconciles; genuinely transient API errors are returned so controller-runtime
+// backs off.
+//
+// When the failing ref targets another namespace, the message is scrubbed to a
+// single constant so a tenant cannot distinguish NotFound / Forbidden / digest
+// mismatch / 5xx about a namespace they don't own. Same-namespace failures stay
+// verbatim.
+func (r *StageSetReconciler) failResolution(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage string, ref stagesv1.SourceReference, ownerNS string, err error) (ctrl.Result, error) {
 	var (
 		reason    = ReasonResolveFailed
 		transient bool
 		apiError  bool
 	)
 	switch {
+	case isPermanentAPIError(err):
+		// RBAC denial / missing CRD / schema rejection while reading the source
+		// CR. Non-recoverable by retry — terminal, not backoff.
+		reason = ReasonRBACDenied
 	case errors.Is(err, artifact.ErrSourceNotReady):
 		reason, transient = ReasonSourceNotReady, true
 	case errors.Is(err, artifact.ErrArtifactNotFound), errors.Is(err, artifact.ErrArtifactMissing):
@@ -719,11 +775,23 @@ func (r *StageSetReconciler) failResolution(ctx context.Context, helper *fluxpat
 	case errors.Is(err, artifact.ErrAmbiguousProducer), errors.Is(err, artifact.ErrCrossNamespaceForbidden):
 		reason = ReasonResolveFailed
 	default:
-		// Unexpected (API/list/get failure): report and back off.
+		// Unexpected (transient API/list/get failure): report and back off.
 		reason, apiError = ReasonResolveFailed, true
 	}
 
-	r.setReady(ss, metav1.ConditionFalse, reason, fmt.Sprintf("stage %q: %v", stage, err))
+	var msg string
+	switch {
+	case isCrossNamespaceRef(ref, ownerNS):
+		// Cross-namespace: collapse every failure mode to one constant so the
+		// reachability of another namespace's source CRs can't be probed.
+		msg = scrubbedCrossNamespaceMessage(ref, ref.Namespace)
+	case reason == ReasonRBACDenied:
+		msg = fmt.Sprintf("stage %q: %s", stage, rbacDenialMessage("resolving the source CR", err))
+	default:
+		msg = fmt.Sprintf("stage %q: %v", stage, err)
+	}
+
+	r.setReady(ss, metav1.ConditionFalse, reason, msg)
 	ss.Status.ObservedGeneration = ss.Generation
 	if uerr := r.patchStatus(ctx, helper, ss); uerr != nil {
 		return ctrl.Result{}, uerr
@@ -825,29 +893,66 @@ func (r *StageSetReconciler) fetcher() *artifact.Fetcher {
 
 // failStage records a stage failure on both the Ready condition and the
 // per-stage status — including the action ledger (executed) so a retry skips
-// the side effects already performed — then returns the error so
-// controller-runtime backs off and retries.
+// the side effects already performed.
+//
+// Most failures return the cause so controller-runtime backs off and retries.
+// Two classes are terminal instead — returning a nil error so the workqueue
+// doesn't burn cycles on a failure retry can't fix:
+//
+//   - a permanent apiserver error during an impersonated apply / connect (RBAC
+//     denial, missing CRD, schema rejection) → ReasonRBACDenied;
+//   - a terminal fetch error (SSRF rejection, digest mismatch, oversized
+//     tarball) → still ReasonStageFailed, but no requeue.
+//
+// The next genuine watch event (a spec edit, an upstream republish, or the
+// interval tick) re-runs the reconcile.
 func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, revision string, executed []string) (ctrl.Result, error) {
+	reason := ReasonStageFailed
+	terminal := false
+	stageMsg := fmt.Sprintf("%s: %v", op, cause)
+	readyMsg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
+	switch {
+	case isPermanentAPIError(cause):
+		reason, terminal = ReasonRBACDenied, true
+		stageMsg = fmt.Sprintf("%s: %s", op, rbacDenialMessage(op, cause))
+		readyMsg = fmt.Sprintf("stage %q %s: %s", stage, op, rbacDenialMessage(op, cause))
+	case op == "fetch artifact" && terminalFetchError(cause):
+		terminal = true
+	}
+
 	ss.Status.Stages = append(prior, stagesv1.StageStatus{
 		Name:            stage,
 		Phase:           stagesv1.StageFailed,
 		AppliedRevision: revision,
-		Message:         fmt.Sprintf("%s: %v", op, cause),
+		Message:         stageMsg,
 		ExecutedActions: executed,
 		LedgerRevision:  revision,
 	})
 	publishStageReady(ss)
 	ss.Status.ObservedGeneration = ss.Generation
-	msg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
-	r.setReady(ss, metav1.ConditionFalse, ReasonStageFailed, msg)
+	r.setReady(ss, metav1.ConditionFalse, reason, readyMsg)
 	if uerr := r.patchStatus(ctx, helper, ss); uerr != nil {
 		return ctrl.Result{}, uerr
 	}
-	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonStageFailed).Inc()
-	r.event(ss, corev1.EventTypeWarning, ReasonStageFailed, msg)
-	log.FromContext(ctx).Error(cause, "stage failed", "stage", stage, "op", op)
+	metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, reason).Inc()
+	r.event(ss, corev1.EventTypeWarning, reason, readyMsg)
+	log.FromContext(ctx).Error(cause, "stage failed", "stage", stage, "op", op, "terminal", terminal)
+	// A terminal failure still has to register as a failure to the stage loop
+	// (so the run halts and rollbackOnFailure can engage) WITHOUT engaging
+	// controller-runtime's backoff. Wrap the cause in errTerminalStageFailure so
+	// `loopErr != nil` still trips; the reconcile's loop-error handler unwraps it
+	// to a nil error (no requeue) when returning.
+	if terminal {
+		return ctrl.Result{}, fmt.Errorf("%w: %w", errTerminalStageFailure, cause)
+	}
 	return ctrl.Result{}, cause
 }
+
+// errTerminalStageFailure marks a stage failure as terminal: the run halts and
+// rollbackOnFailure may engage, but controller-runtime must NOT requeue, since
+// retry can't fix the cause (an RBAC denial, a digest mismatch, an oversized
+// tarball). The reconcile's loop-error handler unwraps it back to a nil error.
+var errTerminalStageFailure = errors.New("terminal stage failure")
 
 // runOnFailure runs a stage's onFailure actions best-effort (failures are
 // evented, never blocking the failure report). The ledger gates them so a
@@ -976,6 +1081,14 @@ func stagePrune(stage *stagesv1.Stage) bool {
 // order (skipping prune:false stages, whose objects are deliberately
 // orphaned), then drops the finalizer so the apiserver can complete deletion —
 // the owned StageInventory shards are GC'd by their owner reference.
+//
+// A teardown failure normally returns the error so the finalizer stays and
+// controller-runtime retries. But an unreachable target (deleted kubeConfig
+// Secret, revoked RBAC, decommissioned cluster) would otherwise wedge the
+// StageSet in Terminating forever. teardownTimedOut caps that wait: once the
+// deletion has been pending longer than --max-teardown-wait, the finalizer is
+// force-dropped (emitting a Warning TeardownForced event and a metric, leaving
+// whatever objects couldn't be deleted orphaned for an operator to clean up).
 func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.StageSet) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(ss, FinalizerName) {
 		return ctrl.Result{}, nil
@@ -984,13 +1097,13 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 	// cluster and identity that applied them.
 	target, targetMapper, err := r.targetCluster(ctx, ss.Namespace, ss.Spec.ServiceAccountName, ss.Spec.KubeConfig)
 	if err != nil {
-		return ctrl.Result{}, err
+		return r.teardownFailure(ctx, ss, "connect to target cluster", err)
 	}
 	applier := apply.New(target, targetMapper, stagesv1.GroupVersion.Group)
 	recorder := &stageinv.Recorder{Client: r.Client, ShardCap: r.ShardCap}
 	records, err := recorder.StageRecords(ctx, ss.Name, ss.Namespace)
 	if err != nil {
-		return ctrl.Result{}, err
+		return r.teardownFailure(ctx, ss, "read stage inventory", err)
 	}
 	prune := stagePruneByName(ss)
 	for _, stage := range stagesByPositionDesc(records) {
@@ -999,13 +1112,52 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 		}
 		if refs := records[stage].Refs; len(refs) > 0 {
 			if _, derr := applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(refs)); derr != nil {
-				return ctrl.Result{}, derr // retry; finalizer stays
+				return r.teardownFailure(ctx, ss, fmt.Sprintf("delete stage %q objects", stage), derr)
 			}
 		}
 	}
 	metrics.DeleteStageReady(ss.Namespace, ss.Name)
 	controllerutil.RemoveFinalizer(ss, FinalizerName)
 	return ctrl.Result{}, r.Update(ctx, ss)
+}
+
+// teardownFailure handles a failed step of reverse-order teardown. While the
+// deletion has been pending less than --max-teardown-wait it returns the error
+// so the finalizer stays and controller-runtime retries. Past the bound it
+// force-drops the finalizer (Warning event + metric) so a permanently-broken
+// target can't pin the StageSet in Terminating indefinitely — at the cost of
+// orphaning whatever objects could not be deleted.
+func (r *StageSetReconciler) teardownFailure(ctx context.Context, ss *stagesv1.StageSet, op string, cause error) (ctrl.Result, error) {
+	timedOut, elapsed := r.teardownTimedOut(ss)
+	if !timedOut {
+		return ctrl.Result{}, cause // retry; finalizer stays
+	}
+	msg := fmt.Sprintf("TeardownForced after %s of failing teardown (%s) — finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: %v",
+		elapsed.Round(time.Second), op, cause)
+	log.FromContext(ctx).Error(cause, "force-dropping finalizer after --max-teardown-wait",
+		"elapsed", elapsed.String(), "op", op)
+	metrics.TeardownForceDropTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
+	r.event(ss, corev1.EventTypeWarning, "TeardownForced", msg)
+	metrics.DeleteStageReady(ss.Namespace, ss.Name)
+	controllerutil.RemoveFinalizer(ss, FinalizerName)
+	return ctrl.Result{}, r.Update(ctx, ss)
+}
+
+// teardownTimedOut reports whether the StageSet has been in the deletion path
+// longer than the effective --max-teardown-wait, returning the elapsed time for
+// the Warning event + log line. A zero DeletionTimestamp (impossible in
+// practice — reconcileDelete runs only after the timestamp lands) means "not
+// timed out".
+func (r *StageSetReconciler) teardownTimedOut(ss *stagesv1.StageSet) (bool, time.Duration) {
+	if ss.DeletionTimestamp.IsZero() {
+		return false, 0
+	}
+	wait := r.MaxTeardownWait
+	if wait <= 0 {
+		wait = defaultMaxTeardownWait
+	}
+	elapsed := r.now().Sub(ss.DeletionTimestamp.Time)
+	return elapsed >= wait, elapsed
 }
 
 // publishStageReady mirrors the StageSet's per-stage phases into the
