@@ -160,6 +160,42 @@ func TestResolve_CrossNamespaceRejected(t *testing.T) {
 	}
 }
 
+// TestResolve_CrossNamespaceGating tables the --no-cross-namespace-refs gate
+// across both axes: a cross-namespace ref is rejected only when the flag is set,
+// and a same-namespace ref is always allowed regardless of the flag.
+func TestResolve_CrossNamespaceGating(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		refNS     string // sourceRef.Namespace ("" = owner's namespace)
+		noCross   bool
+		wantError bool
+	}{
+		{name: "cross-namespace allowed when flag unset", refNS: "other", noCross: false},
+		{name: "cross-namespace rejected when flag set", refNS: "other", noCross: true, wantError: true},
+		{name: "same-namespace allowed with flag set", refNS: "ns", noCross: true},
+		{name: "default-namespace ref allowed with flag set", refNS: "", noCross: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			artNS := tc.refNS
+			if artNS == "" {
+				artNS = "ns"
+			}
+			c := buildClient(t, externalArtifactFixture(artNS, "art1", nil, true, readyArtifact()))
+			ref := stagesv1.SourceReference{Name: "art1", Namespace: tc.refNS}
+			_, err := (&Resolver{NoCrossNamespace: tc.noCross}).Resolve(context.Background(), c, ref, "ns")
+			switch {
+			case tc.wantError && !errors.Is(err, ErrCrossNamespaceForbidden):
+				t.Fatalf("want ErrCrossNamespaceForbidden, got %v", err)
+			case !tc.wantError && err != nil:
+				t.Fatalf("ref should resolve, got %v", err)
+			}
+		})
+	}
+}
+
 func TestResolve_ProducerVersionAgnostic(t *testing.T) {
 	t.Parallel()
 	// The EA back-pointer records v1; a stage ref naming v2 of the same group

@@ -97,10 +97,25 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
   - `controller/` — the `StageSet` reconciler, conditions, webhook, tenant
     impersonation, migrations, rollback, windows, conflict handling.
   - `inventory/` + `stageinv/` — sharded ApplySet inventory, plan/diff, refs.
+    If a stage's `StageInventory` is lost while its objects are still live,
+    `Recorder.ReconstructFromCluster` self-heals it: the reconcile that finds no
+    inventory for a stage `status` records as applied rebuilds it from the
+    objects' owner (`stages.metio.wtf/{name,namespace}`) + per-stage
+    (`stages.metio.wtf/stage`) labels across the current render's GVKs, emits an
+    `InventoryReconstructed` event, and **defers pruning that pass** (never
+    deletes against a best-effort rebuild); the next reconcile prunes normally.
+    Best-effort: a kind no longer in the render isn't swept, so back the
+    inventory up too. Stage names are lowercase-validated, so the label match is
+    case-exact without normalisation.
   - `apply/` + `actions/` — server-side apply and the typed action executors.
   - `gate/` + `celeval/` — readiness gating and CEL expression evaluation.
   - `window/` — `updateWindows` (cron+duration / absolute ranges, IANA tz).
   - `artifact/` + `build/` — fetch ExternalArtifact tarballs and build stages.
+    The fetcher enforces four independent byte caps: `MaxArchiveBytes`
+    (compressed download only, 64 MiB), `MaxDecompressedBytes` (inflated gzip
+    stream, 512 MiB), `MaxPerEntryBytes` (one tar entry, 16 MiB), and
+    `MaxExtractedBytes` (extracted result held in memory, 64 MiB). These are not
+    CLI flags.
   - `decryptor/` — SOPS decryption of a fetched source's files **before** the
     kustomize build, driven by `spec.decryption` (provider `sops`). Tenant-scoped
     **age** (`*.agekey`) and **PGP** (`*.asc`) keys from `secretRef` decrypt via

@@ -347,6 +347,18 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, perr
 	}
 	previousRecords := toInventoryRecords(previousMap)
+	// A stage with no stored inventory that status records as previously applied
+	// has lost its inventory (a stray delete, a partial restore) while its
+	// objects are still live. Mark it for best-effort reconstruction from the
+	// cluster during the apply loop; pruning is then deferred this pass.
+	needsReconstruct := map[string]bool{}
+	for i := range ss.Spec.Stages {
+		name := ss.Spec.Stages[i].Name
+		if _, ok := previousMap[name]; !ok && priorStages[name].AppliedRevision != "" {
+			needsReconstruct[name] = true
+		}
+	}
+	var reconstructedStages []string
 	desiredRecords := make([]inventory.StageRecord, 0, len(ss.Spec.Stages))
 	applied := make(map[string]string, len(ss.Spec.Stages))
 	stageStatuses := make([]stagesv1.StageStatus, 0, len(ss.Spec.Stages))
@@ -466,7 +478,22 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				newRefs = append(newRefs, stageinv.RefOf(o))
 			}
 			desiredRecords = append(desiredRecords, inventory.StageRecord{Name: stage.Name, Position: i, Entries: newRefs})
-			if werr := recorder.Write(ctx, &ss, stage.Name, i, newRefs); werr != nil {
+			// On a lost inventory, fold the stage's still-live objects (found by
+			// their owner + stage labels across the current render's GVKs) back
+			// into the recorded set, so the next reconcile can prune what this
+			// render no longer contains. The prune itself is deferred this pass
+			// (below) — a best-effort rebuild never deletes on the same pass that
+			// guessed the contents.
+			writeRefs := newRefs
+			if needsReconstruct[stage.Name] {
+				recovered, rerr := recorder.ReconstructFromCluster(ctx, ss.Name, ss.Namespace, stage.Name, objects)
+				if rerr != nil {
+					logger.Error(rerr, "stage inventory reconstruction was partial", "stage", stage.Name)
+				}
+				writeRefs = unionRefs(newRefs, recovered)
+				reconstructedStages = append(reconstructedStages, stage.Name)
+			}
+			if werr := recorder.Write(ctx, &ss, stage.Name, i, writeRefs); werr != nil {
 				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
 				return r.failStage(ctx, &ss, stage.Name, "record inventory", werr, stageStatuses, ra.Revision, executed)
 			}
@@ -535,25 +562,36 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, r.Status().Update(ctx, &ss)
 	}
 	plan := inventory.ComputePlan(previousRecords, desiredRecords)
-	prunes := stagePruneByName(&ss)
-	for stageName, refs := range plan.PrunePerStage {
-		if allowed, known := prunes[stageName]; known && !allowed {
-			continue
-		}
-		if len(refs) > 0 {
-			if _, derr := applier.Delete(ctx, stageinv.Objects(refs)); derr != nil {
-				return ctrl.Result{}, derr
+	if len(reconstructedStages) > 0 {
+		// A stage's inventory was rebuilt from the live cluster this pass. Defer
+		// all pruning and teardown to the next reconcile — when the inventory is
+		// authoritative again — rather than deleting against a best-effort
+		// reconstruction. The operator-visible event marks the recovery.
+		r.event(&ss, corev1.EventTypeWarning, inventoryReconstructedEvent,
+			fmt.Sprintf("rebuilt StageInventory for stage(s) %s from live cluster objects; prune deferred to the next reconcile",
+				strings.Join(reconstructedStages, ", ")))
+		logger.Info("StageInventory reconstructed from cluster; prune deferred to next reconcile", "stages", reconstructedStages)
+	} else {
+		prunes := stagePruneByName(&ss)
+		for stageName, refs := range plan.PrunePerStage {
+			if allowed, known := prunes[stageName]; known && !allowed {
+				continue
+			}
+			if len(refs) > 0 {
+				if _, derr := applier.Delete(ctx, stageinv.Objects(refs)); derr != nil {
+					return ctrl.Result{}, derr
+				}
 			}
 		}
-	}
-	for _, removed := range plan.RemovedStages {
-		if len(removed.Entries) > 0 {
-			if _, derr := applier.Delete(ctx, stageinv.Objects(removed.Entries)); derr != nil {
+		for _, removed := range plan.RemovedStages {
+			if len(removed.Entries) > 0 {
+				if _, derr := applier.Delete(ctx, stageinv.Objects(removed.Entries)); derr != nil {
+					return ctrl.Result{}, derr
+				}
+			}
+			if derr := recorder.DeleteStageShards(ctx, ss.Namespace, ss.Name, removed.Name); derr != nil {
 				return ctrl.Result{}, derr
 			}
-		}
-		if derr := recorder.DeleteStageShards(ctx, ss.Namespace, ss.Name, removed.Name); derr != nil {
-			return ctrl.Result{}, derr
 		}
 	}
 
@@ -768,6 +806,28 @@ const eventReasonDriftCorrected = "DriftCorrected"
 // eventReasonRolledBack is the Event reason emitted when rollbackOnFailure
 // restored the last-good revisions after a failed run.
 const eventReasonRolledBack = "RolledBack"
+
+// inventoryReconstructedEvent is the Event reason emitted when a stage's lost
+// StageInventory was rebuilt from live cluster objects. It is an Event reason
+// only (not a Ready-condition reason): the run still succeeds, and pruning
+// resumes on the next reconcile once the inventory is authoritative again.
+const inventoryReconstructedEvent = "InventoryReconstructed"
+
+// unionRefs merges two object-reference slices, de-duplicating by object ID.
+func unionRefs(a, b []inventory.ObjectRef) []inventory.ObjectRef {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]inventory.ObjectRef, 0, len(a)+len(b))
+	for _, refs := range [][]inventory.ObjectRef{a, b} {
+		for _, ref := range refs {
+			if _, ok := seen[ref.ID()]; ok {
+				continue
+			}
+			seen[ref.ID()] = struct{}{}
+			out = append(out, ref)
+		}
+	}
+	return out
+}
 
 // reportDrift emits a DriftCorrected Warning Event and bumps a metric when SSA
 // changed or recreated an already-managed object on a reconcile that applied

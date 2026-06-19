@@ -152,6 +152,42 @@ func TestFetch_ArchiveBodyCapExceeded(t *testing.T) {
 	}
 }
 
+// TestFetch_ArchiveAndExtractedCapsIndependent proves the compressed-download
+// cap and the extracted-result cap are two independent knobs. A body that fits
+// the (generous) compressed cap but whose extracted total exceeds a small
+// MaxExtractedBytes trips ErrTarballTooLarge; the inverse — a body over a small
+// MaxArchiveBytes with a generous extracted cap — trips ErrArtifactBodyTooLarge.
+func TestFetch_ArchiveAndExtractedCapsIndependent(t *testing.T) {
+	t.Parallel()
+	tarball := makeTarGz(t, map[string]string{"a.yaml": strings.Repeat("z", 4000)})
+
+	t.Run("extracted cap fires while archive cap is generous", func(t *testing.T) {
+		t.Parallel()
+		srv := serveBytes(t, tarball, 0)
+		f := testFetcher()
+		f.MaxArchiveBytes = 1 << 20      // generous: admits the small compressed body
+		f.MaxPerEntryBytes = 1 << 20     // generous
+		f.MaxDecompressedBytes = 1 << 20 // generous
+		f.MaxExtractedBytes = 100        // the only cap small enough to fire
+		_, err := f.Fetch(context.Background(), srv.URL, sha256Digest(tarball), "")
+		if !errors.Is(err, ErrTarballTooLarge) {
+			t.Fatalf("want ErrTarballTooLarge, got %v", err)
+		}
+	})
+
+	t.Run("archive cap fires while extracted cap is generous", func(t *testing.T) {
+		t.Parallel()
+		srv := serveBytes(t, tarball, 0)
+		f := testFetcher()
+		f.MaxArchiveBytes = 16        // smaller than the served compressed body
+		f.MaxExtractedBytes = 1 << 20 // generous: would admit the extracted total
+		_, err := f.Fetch(context.Background(), srv.URL, sha256Digest(tarball), "")
+		if !errors.Is(err, ErrArtifactBodyTooLarge) {
+			t.Fatalf("want ErrArtifactBodyTooLarge, got %v", err)
+		}
+	})
+}
+
 func TestFetch_RejectsForbiddenURL(t *testing.T) {
 	t.Parallel()
 	// The production constructor wires the URL guard, which rejects loopback

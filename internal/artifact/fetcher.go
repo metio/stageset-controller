@@ -23,17 +23,18 @@ import (
 // Default size caps mirror source-controller's contract and JaaS's fetcher:
 // they bound memory and defend against gzip bombs and lying tar headers.
 const (
-	defaultMaxArchiveBytes      int64 = 64 << 20  // aggregate compressed body
+	defaultMaxArchiveBytes      int64 = 64 << 20  // compressed download only
 	defaultMaxPerEntryBytes     int64 = 16 << 20  // one tar entry
 	defaultMaxDecompressedBytes int64 = 512 << 20 // total inflated stream
+	defaultMaxExtractedBytes    int64 = 64 << 20  // extracted result held in memory
 )
 
 // Fetch-time sentinels.
 var (
 	ErrDigestInvalid        = errors.New("artifact digest is not a valid <algo>:<hex> string")
 	ErrDigestMismatch       = errors.New("tarball digest does not match the artifact digest")
-	ErrArtifactBodyTooLarge = errors.New("artifact body exceeded the aggregate cap")
-	ErrTarballTooLarge      = errors.New("decompressed tarball exceeded the aggregate cap")
+	ErrArtifactBodyTooLarge = errors.New("artifact body exceeded the compressed-download cap")
+	ErrTarballTooLarge      = errors.New("extracted tarball exceeded the extracted-result cap")
 	ErrTarEntryTooLarge     = errors.New("tar entry exceeded the per-entry cap")
 	ErrDecompressedTooLarge = errors.New("decompressed gzip stream exceeded the cap")
 	ErrForbiddenAddress     = errors.New("artifact host resolves to a forbidden address")
@@ -46,12 +47,16 @@ var (
 // multicast/unspecified targets while allowing the private ranges an
 // in-cluster source-controller serves from.
 type Fetcher struct {
-	HTTPClient           *http.Client
-	MaxArchiveBytes      int64
-	MaxPerEntryBytes     int64
+	HTTPClient *http.Client
+	// MaxArchiveBytes bounds ONLY the compressed download body.
+	MaxArchiveBytes  int64
+	MaxPerEntryBytes int64
+	// MaxDecompressedBytes bounds the inflated gzip stream as it is read.
 	MaxDecompressedBytes int64
-	URLValidator         func(string) error
-	IPValidator          func(net.IP) error
+	// MaxExtractedBytes bounds the total extracted result held in memory.
+	MaxExtractedBytes int64
+	URLValidator      func(string) error
+	IPValidator       func(net.IP) error
 }
 
 // New returns a Fetcher with production defaults: the standard size caps and
@@ -62,6 +67,7 @@ func New() *Fetcher {
 		MaxArchiveBytes:      defaultMaxArchiveBytes,
 		MaxPerEntryBytes:     defaultMaxPerEntryBytes,
 		MaxDecompressedBytes: defaultMaxDecompressedBytes,
+		MaxExtractedBytes:    defaultMaxExtractedBytes,
 		URLValidator:         validateHTTPURL,
 		IPValidator:          forbiddenIP,
 	}
@@ -76,8 +82,10 @@ func New() *Fetcher {
 
 // Fetch downloads url, verifies its sha256 against expectedDigest, and
 // extracts the gzip+tar payload into a path->content map filtered by
-// pathPrefix (empty prefix extracts everything). All three byte caps are
-// enforced.
+// pathPrefix (empty prefix extracts everything). All four byte caps are
+// enforced: compressed download (MaxArchiveBytes), inflated gzip stream
+// (MaxDecompressedBytes), per tar entry (MaxPerEntryBytes), and the total
+// extracted result held in memory (MaxExtractedBytes).
 func (f *Fetcher) Fetch(ctx context.Context, url, expectedDigest, pathPrefix string) (map[string]string, error) {
 	if v := f.urlValidator(); v != nil {
 		if err := v(url); err != nil {
@@ -162,7 +170,7 @@ func (f *Fetcher) extract(r io.Reader, pathPrefix string) (map[string]string, er
 	files := map[string]string{}
 	var total int64
 	perEntry := f.maxPerEntryBytes()
-	maxBytes := f.maxArchiveBytes()
+	maxExtracted := f.maxExtractedBytes()
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -196,8 +204,8 @@ func (f *Fetcher) extract(r io.Reader, pathPrefix string) (map[string]string, er
 			return nil, fmt.Errorf("%w: %q body > %d", ErrTarEntryTooLarge, hdr.Name, perEntry)
 		}
 		total += int64(len(body))
-		if total > maxBytes {
-			return nil, fmt.Errorf("%w: %d bytes", ErrTarballTooLarge, maxBytes)
+		if total > maxExtracted {
+			return nil, fmt.Errorf("%w: %d bytes", ErrTarballTooLarge, maxExtracted)
 		}
 		files[name] = string(body)
 	}
@@ -275,6 +283,10 @@ func (f *Fetcher) maxPerEntryBytes() int64 {
 
 func (f *Fetcher) maxDecompressedBytes() int64 {
 	return orDefault(f.MaxDecompressedBytes, defaultMaxDecompressedBytes)
+}
+
+func (f *Fetcher) maxExtractedBytes() int64 {
+	return orDefault(f.MaxExtractedBytes, defaultMaxExtractedBytes)
 }
 
 func orDefault(v, def int64) int64 {

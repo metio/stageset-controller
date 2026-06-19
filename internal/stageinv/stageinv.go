@@ -9,6 +9,7 @@ package stageinv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -33,6 +34,53 @@ func (r *Recorder) shardCap() int {
 		return r.ShardCap
 	}
 	return inventory.DefaultShardCap
+}
+
+// ReconstructFromCluster best-effort rebuilds a stage's object references from
+// the live cluster, for the disaster case where the StageInventory was lost
+// (a stray delete, a partial restore) while its applied objects still exist. It
+// lists objects still carrying the owner labels the applier stamps
+// (<group>/name, <group>/namespace) and the per-stage discovery label, across
+// the GVKs present in the current render.
+//
+// The label values are case-exact matches: object names and namespaces are
+// lowercase by Kubernetes (RFC 1123) and stage names are lowercase by the
+// StageSet CRD's `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` validation, so the values
+// stamped and the values queried here are identical without any normalisation.
+//
+// Reconstruction is best-effort: a GVK no longer in the render cannot be
+// discovered this way, and per-GVK list errors are aggregated and returned
+// while the refs that were listed are still returned for the caller to use.
+func (r *Recorder) ReconstructFromCluster(ctx context.Context, ssName, ssNamespace, stage string, rendered []*unstructured.Unstructured) ([]inventory.ObjectRef, error) {
+	group := stagesv1.GroupVersion.Group
+	sel := client.MatchingLabels{
+		group + "/name":      ssName,
+		group + "/namespace": ssNamespace,
+		stagesv1.StageLabel:  stage,
+	}
+	gvks := map[schema.GroupVersionKind]struct{}{}
+	for _, o := range rendered {
+		gvks[o.GroupVersionKind()] = struct{}{}
+	}
+	seen := map[string]inventory.ObjectRef{}
+	var errs []error
+	for gvk := range gvks {
+		var list unstructured.UnstructuredList
+		list.SetGroupVersionKind(schema.GroupVersionKind{Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind + "List"})
+		if err := r.Client.List(ctx, &list, sel); err != nil {
+			errs = append(errs, fmt.Errorf("list %s: %w", gvk, err))
+			continue
+		}
+		for i := range list.Items {
+			ref := RefOf(&list.Items[i])
+			seen[ref.ID()] = ref
+		}
+	}
+	refs := make([]inventory.ObjectRef, 0, len(seen))
+	for _, ref := range seen {
+		refs = append(refs, ref)
+	}
+	return refs, errors.Join(errs...)
 }
 
 // Stored returns the object references currently recorded for a stage across
