@@ -14,7 +14,7 @@ A stage's `sourceRef` could not be resolved to an `ExternalArtifact` for a spec/
 
 - an **ambiguous producer** — more than one `ExternalArtifact` back-points at the same producer object, so the target is undefined;
 - a **cross-namespace ref rejected** by `--no-cross-namespace-refs`;
-- an **API error** reading the source or artifact (RBAC denial, the artifact CRD not installed).
+- a **transient API error** reading the source or artifact (a list/get blip). A permanent API error — RBAC denial or a missing source CRD — is reported as [`RBACDenied`](/runbooks/rbacdenied/) instead, since retry can't fix it.
 
 When the failing `sourceRef` targets another namespace, the Message is deliberately scrubbed to `cross-namespace <kind> %q is not reachable` so tenants cannot fingerprint other namespaces — check that source CR's status in its own namespace.
 
@@ -30,4 +30,4 @@ kubectl --namespace <namespace> get externalartifact --output yaml | grep -A3 so
 
 - **Ambiguous producer:** ensure exactly one `ExternalArtifact` back-points at the producer, or reference the `ExternalArtifact` directly by name.
 - **Cross-namespace rejected:** move the source into the StageSet's namespace, or run the controller without `--no-cross-namespace-refs` if your [tenancy model](/usage/multi-cluster/) allows it.
-- **RBAC / missing CRD:** grant the controller (or the impersonated `serviceAccountName`) read on the source kind, or install the `source-controller` CRDs.
+- **RBAC / missing CRD:** these surface as [`RBACDenied`](/runbooks/rbacdenied/) — grant the controller (or the impersonated `serviceAccountName`) read on the source kind, or install the `source-controller` CRDs.
