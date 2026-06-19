@@ -4,7 +4,9 @@
 package gate
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,5 +186,22 @@ func TestGate_DoesNotLeakStageMessage(t *testing.T) {
 	}
 	if !strings.Contains(jrec.Body.String(), string(stagesv1.StageFailed)) {
 		t.Errorf("json gate should still report the structured phase: %s", jrec.Body.String())
+	}
+}
+
+// TestGate_LookupFailureLogs proves an apiserver-read failure (here a clean
+// not-found that the client maps to the leak-safe 403) is logged via the
+// injected logger, so a degraded gate is not silent.
+func TestGate_LookupFailureLogs(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	// No StageSet objects, so the Get returns NotFound.
+	h := &Handler{Client: gateClient(t), Logger: logger}
+	if code := gateCode(t, h, http.MethodGet, "/gate/flux-system/absent/migrations"); code != http.StatusForbidden {
+		t.Fatalf("missing stageset gate = %d, want 403", code)
+	}
+	if !strings.Contains(buf.String(), "gate stageset lookup failed") {
+		t.Fatalf("lookup failure should be logged, got: %q", buf.String())
 	}
 }
