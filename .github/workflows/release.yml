@@ -158,9 +158,9 @@ jobs:
         # Render the notes from the org-wide git-cliff config (pinned by commit
         # SHA; Renovate's custom manager bumps it). On a first release the previous
         # version is empty, so the commit range is omitted and git-cliff walks the
-        # whole history; otherwise scope it to <previous>..HEAD. The cosign verify
-        # footer is appended verbatim so the verification instructions stay in the
-        # published release body.
+        # whole history; otherwise scope it to <previous>..HEAD. A static footer is
+        # appended with usage/install lines and pointers to the website's Upgrading
+        # and Verifying releases pages.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -179,7 +179,7 @@ jobs:
           ## Usage
 
           Pull the container from \`ghcr.io/metio/stageset-controller:${ver}\`.
-          Check the [migration guide](https://github.com/metio/stageset-controller/blob/main/MIGRATIONS.md) for any required actions on your part.
+          See **Upgrading** — https://stageset.projects.metio.wtf/installation/upgrading/ — for any required actions on your part.
 
           Prebuilt binaries are attached below for both the **controller**
           (\`stageset-controller_*\`) and the **\`stagesetctl\` CLI** (\`stagesetctl_*\`):
@@ -193,27 +193,7 @@ jobs:
 
           ## Verify
 
-          Both the image and the release artifacts are signed with
-          [cosign](https://github.com/sigstore/cosign) keyless — there is no GPG key to
-          trust; identity is proven by the workflow's OIDC certificate.
-
-          Container image:
-
-          \`\`\`shell
-          cosign verify ghcr.io/metio/stageset-controller:${ver} \\
-            --certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/' \\
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com
-          \`\`\`
-
-          Release artifacts (verify the signed checksum file, then check your download against it):
-
-          \`\`\`shell
-          cosign verify-blob stageset-controller_${ver}_SHA256SUMS \\
-            --bundle stageset-controller_${ver}_SHA256SUMS.bundle \\
-            --certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/' \\
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com
-          sha256sum -c stageset-controller_${ver}_SHA256SUMS
-          \`\`\`
+          All release artifacts are signed with cosign keyless. See **Verifying releases** — https://stageset.projects.metio.wtf/installation/verifying-releases/ — for the verification commands.
           EOF
       - id: download
         name: Download Artifacts

@@ -75,18 +75,22 @@ func forbidden() error {
 		errors.New("serviceaccount cannot get resource"))
 }
 
-// A permanent API error (Forbidden) during resolution is terminal RBACDenied —
-// no requeue.
+// A permanent API error (Forbidden) during resolution is terminal RBACDenied:
+// no error is returned (so controller-runtime doesn't back off), but the
+// reconcile requeues at the bounded permanentRetryInterval. Granting the tenant
+// SA the missing RBAC fires no watch event the StageSet sees, so the bounded
+// requeue is what lets it self-heal within ~1 minute instead of staying stuck
+// until a manual reconcile.
 func TestFailResolution_PermanentAPIError_TerminalRBACDenied(t *testing.T) {
 	r, get, ns := newClassifyReconciler(t)
 	ss := createStageSetFor(t, r, ns, "rbac")
 	res, rerr := r.failResolution(context.Background(), newHelperFor(t, r, ss), ss, "stage-a",
 		stagesv1.SourceReference{Name: "ea"}, ns, fmt.Errorf("get ExternalArtifact: %w", forbidden()))
 	if rerr != nil {
-		t.Fatalf("RBACDenied must be terminal (nil error), got %v", rerr)
+		t.Fatalf("RBACDenied must not return an error (no backoff), got %v", rerr)
 	}
-	if res.RequeueAfter != 0 {
-		t.Fatalf("RBACDenied must not requeue, got %+v", res)
+	if res.RequeueAfter != permanentRetryInterval {
+		t.Fatalf("RBACDenied must requeue at permanentRetryInterval for self-heal, got %+v", res)
 	}
 	if rr := readyReason(get(ns, "rbac")); rr != ReasonRBACDenied {
 		t.Fatalf("Ready reason = %q, want %q", rr, ReasonRBACDenied)

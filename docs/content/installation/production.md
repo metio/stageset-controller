@@ -207,7 +207,7 @@ reasons get no link.
 Calendar-based releases run on a weekly cron. Chart upgrades are `helm upgrade
 --install`; the chart ships CRDs under `templates/`, so schema changes apply
 automatically. Read
-[MIGRATIONS.md](https://github.com/metio/stageset-controller/blob/main/MIGRATIONS.md)
+[Upgrading](/installation/upgrading/)
 before each upgrade — a release that changes an immutable selector field requires
 a manual delete first. For day-two work — forcing a reconcile, drift correction,
 reading events, and following a runbook — see
