@@ -68,6 +68,16 @@ const (
 	// run halts at that stage; later stages do not run.
 	ReasonStageFailed = "StageFailed"
 
+	// ReasonRBACDenied: an apiserver call the reconciler made — resolving a
+	// source CR, an impersonated tenant get/list, or the apply itself — failed
+	// with Forbidden, or referenced a kind the apiserver does not know (the CRD
+	// is not installed), or was rejected as schema-invalid. None recover by
+	// retry: the cluster operator must grant the verb, install the CRD, or fix
+	// the payload. Terminal — the reconciler stops engaging backoff so the
+	// workqueue isn't burning cycles on a permanently-failing call. The message
+	// names the call so kubectl describe sends operators straight to the fix.
+	ReasonRBACDenied = "RBACDenied"
+
 	// ReasonReady: all stages applied and verified at lastAppliedRevisions.
 	ReasonReady = "Succeeded"
 )
@@ -90,5 +100,6 @@ var AllReasons = []string{
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,
+	ReasonRBACDenied,
 	ReasonReady,
 }

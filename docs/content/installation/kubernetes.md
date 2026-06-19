@@ -45,7 +45,9 @@ helm upgrade --install stageset-controller \
   --wait
 ```
 
-The chart pins the image tag to its own `appVersion` by default.
+The chart pins the image tag to its own `appVersion` by default. The chart is
+also listed on [ArtifactHub](https://artifacthub.io/packages/helm/stageset-controller/stageset-controller),
+where you can browse its versions, values, and changelog.
 
 ### What the chart installs
 

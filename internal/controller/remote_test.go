@@ -115,8 +115,8 @@ func TestReconcile_KubeConfig_ComposesWithImpersonation(t *testing.T) {
 	mustCreate(t, c, ss)
 	reconcileWithConfig(t, c, ss)
 
-	if r := readyReason(getStageSet(t, c, ns, "combo")); r != ReasonStageFailed {
-		t.Fatalf("Ready reason = %q, want %q (SA impersonation must apply on the remote config)", r, ReasonStageFailed)
+	if r := readyReason(getStageSet(t, c, ns, "combo")); r != ReasonRBACDenied {
+		t.Fatalf("Ready reason = %q, want %q (SA impersonation must apply on the remote config; a Forbidden apply is terminal RBACDenied)", r, ReasonRBACDenied)
 	}
 	var sec corev1.Secret
 	if err := c.Get(context.Background(), apitypes.NamespacedName{Namespace: ns, Name: "blocked"}, &sec); !apierrors.IsNotFound(err) {

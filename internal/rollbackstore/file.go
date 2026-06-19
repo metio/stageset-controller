@@ -5,6 +5,7 @@ package rollbackstore
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -41,15 +42,42 @@ func flatName(key string) string {
 	return strings.ReplaceAll(key, "/", "_")
 }
 
-// Put writes the rendered output for a key.
+// Put writes the rendered output for a key atomically: it stages the bytes in a
+// sibling temp file, fsyncs, then renames over the destination. A crash or a
+// disk-full mid-write leaves only the temp file — never a truncated destination
+// that Get would return as a valid (but partial) snapshot. os.Root scopes both
+// the temp file and the rename inside the store directory.
 func (f *FileStore) Put(_ context.Context, key string, data []byte) error {
-	file, err := f.root.Create(flatName(key))
+	final := flatName(key)
+	tmp := final + ".tmp"
+	// A stale temp file from a previous crash must not block the create.
+	_ = f.root.Remove(tmp)
+	file, err := f.root.Create(tmp)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
-	_, err = file.Write(data)
-	return err
+	// Remove the temp file on any failure path so a partial write never lingers.
+	committed := false
+	defer func() {
+		_ = file.Close()
+		if !committed {
+			_ = f.root.Remove(tmp)
+		}
+	}()
+	if _, err := file.Write(data); err != nil {
+		return fmt.Errorf("write rollback snapshot: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync rollback snapshot: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close rollback snapshot: %w", err)
+	}
+	if err := f.root.Rename(tmp, final); err != nil {
+		return fmt.Errorf("commit rollback snapshot: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 // Get returns the rendered output for a key, or (nil, false, nil) when absent.

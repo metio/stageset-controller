@@ -12,7 +12,8 @@ tags: [runbooks, stages, actions, troubleshooting]
 
 A stage failed during execution. By operation:
 
-- **fetch artifact** — the artifact URL was unreachable, or its bytes failed digest verification.
+- **fetch artifact** — the artifact URL was unreachable, or its bytes failed digest verification. Transient fetch failures (network, 5xx, source not ready) back off and retry. Terminal ones — a digest mismatch, an oversized tarball, or a URL the SSRF guard rejects — stop requeuing, since the same fetch would fail the same way; the next genuine watch event or interval tick re-runs.
+- **apply RBAC / missing CRD** — a `Forbidden` apply, or a manifest whose kind the apiserver doesn't know, is reported as [`RBACDenied`](/runbooks/rbacdenied/) (terminal), not `StageFailed`.
 - **build** — kustomize build or post-build substitution failed (a missing `substituteFrom` source, an invalid patch, a malformed manifest).
 - **apply** — the server-side apply was rejected: an immutable-field conflict, or an **RBAC denial** under the impersonated `serviceAccountName`.
 - **verify** — applied objects did not become Ready within the stage timeout (kstatus).

@@ -108,8 +108,8 @@ func TestAttemptRollback_StoreSurvivesProducerGC(t *testing.T) {
 	// A fetcher that would fail (the producer is "gone"); it must not be reached.
 	deadFetcher := &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP}
 
-	if reason, msg := r.attemptRollback(context.Background(), ss, applier, deadFetcher); reason != "" {
-		t.Fatalf("store should make rollback succeed despite producer GC, got %q: %s", reason, msg)
+	if reason, msg, err := r.attemptRollback(context.Background(), ss, applier, deadFetcher); err != nil || reason != "" {
+		t.Fatalf("store should make rollback succeed despite producer GC, got reason=%q msg=%q err=%v", reason, msg, err)
 	}
 	if !cmExists(t, c, ns, "restored") {
 		t.Fatal("rollback should have applied the object stored in the rollback store")

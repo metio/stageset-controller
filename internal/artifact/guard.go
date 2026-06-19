@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -43,10 +45,84 @@ func validateHTTPURL(rawURL string) error {
 	if strings.EqualFold(host, "localhost") {
 		return fmt.Errorf("%w: %s", ErrForbiddenHost, host)
 	}
-	if ip := net.ParseIP(host); ip != nil && forbiddenIP(ip) != nil {
+	if ip := parseIPAny(host); ip != nil && forbiddenIP(ip) != nil {
 		return fmt.Errorf("%w: %s", ErrForbiddenHost, host)
 	}
 	return nil
+}
+
+// parseIPAny parses a host as an IP, accepting both the canonical dotted-quad /
+// IPv6 forms net.ParseIP handles AND the inet_aton-style alternate IPv4 forms a
+// libc resolver honors but net.ParseIP rejects: a single integer
+// (0x7f000001 / 2130706433 / 017700000001), or fewer than four dotted parts.
+// Returns nil when the host is not an IP literal in any of these forms. This is
+// the string-level layer's parity with the dial-time pin, which already resolves
+// such a literal and rejects the loopback/link-local address it yields.
+func parseIPAny(host string) net.IP {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip
+	}
+	return parseInetAtonIPv4(host)
+}
+
+// parseInetAtonIPv4 decodes the historical inet_aton alternate IPv4 renderings.
+// Each dotted part (1–4 of them) is parsed in C numeric base (0x… hex, 0…
+// octal, else decimal); the final part absorbs all remaining low-order bytes, so
+// "127.1" is 127.0.0.1 and "0x7f000001" is the whole 32-bit address. Returns nil
+// on any out-of-range part or non-numeric input.
+func parseInetAtonIPv4(host string) net.IP {
+	if host == "" {
+		return nil
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) > 4 {
+		return nil
+	}
+	vals := make([]uint64, len(parts))
+	for i, p := range parts {
+		v, err := parseCNumber(p)
+		if err != nil {
+			return nil
+		}
+		vals[i] = v
+	}
+	// All leading parts are single bytes; the final part fills the remaining
+	// 4-len(parts)+1 low-order bytes.
+	var addr uint64
+	for i := 0; i < len(vals)-1; i++ {
+		if vals[i] > 0xff {
+			return nil
+		}
+		addr |= vals[i] << (8 * (3 - uint(i)))
+	}
+	last := vals[len(vals)-1]
+	maxLast := big.NewInt(1).Lsh(big.NewInt(1), uint(8*(4-len(vals)+1))).Uint64() - 1
+	if last > maxLast {
+		return nil
+	}
+	addr |= last
+	if addr > 0xffffffff {
+		return nil
+	}
+	// #nosec G115 -- addr is bounded to 32 bits above; each byte() truncation
+	// deliberately extracts one octet of the validated address.
+	return net.IPv4(byte(addr>>24), byte(addr>>16), byte(addr>>8), byte(addr)).To4()
+}
+
+// parseCNumber parses one inet_aton component in C numeric convention: a 0x/0X
+// prefix is hex, a leading 0 (with more digits) is octal, otherwise decimal.
+func parseCNumber(s string) (uint64, error) {
+	if s == "" {
+		return 0, strconv.ErrSyntax
+	}
+	switch {
+	case len(s) > 2 && (s[0:2] == "0x" || s[0:2] == "0X"):
+		return strconv.ParseUint(s[2:], 16, 64)
+	case len(s) > 1 && s[0] == '0':
+		return strconv.ParseUint(s[1:], 8, 64)
+	default:
+		return strconv.ParseUint(s, 10, 64)
+	}
 }
 
 // forbiddenIP rejects loopback, link-local (incl. cloud metadata), multicast,

@@ -45,6 +45,7 @@ type reconcileOptions struct {
 	name       string
 	stage      string
 	withSource bool
+	strict     bool
 	updateNow  bool
 	force      bool
 	wait       bool
@@ -67,6 +68,7 @@ func newReconcileCommand(o *options) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.stage, "stage", "", "Force only this stage to re-run its actions (single-stage reconcile).")
 	cmd.Flags().BoolVar(&opts.withSource, "with-source", false, "Also re-request the stage sources (ExternalArtifacts) before reconciling.")
+	cmd.Flags().BoolVar(&opts.strict, "strict", false, "With --with-source, exit non-zero if any source could not be re-requested (instead of warning and continuing).")
 	cmd.Flags().BoolVar(&opts.updateNow, "update-now", false, "Apply a window-held rollout immediately, bypassing update windows.")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Proceed even when the StageSet is suspended.")
 	cmd.Flags().BoolVar(&opts.wait, "wait", false, "Wait until the controller reports the request handled.")
@@ -94,8 +96,12 @@ func runReconcile(ctx context.Context, o *options, opts reconcileOptions) error 
 	token := newToken()
 
 	if opts.withSource {
-		if err := reconcileSources(ctx, c, &ss, token, o.streams.ErrOut); err != nil {
+		failed, err := reconcileSources(ctx, c, &ss, token, o.streams.ErrOut)
+		if err != nil {
 			return err
+		}
+		if opts.strict && failed > 0 {
+			return fmt.Errorf("--strict: %d source(s) could not be re-requested", failed)
 		}
 	}
 
@@ -128,10 +134,13 @@ func runReconcile(ctx context.Context, o *options, opts reconcileOptions) error 
 }
 
 // reconcileSources stamps requestedAt on each stage's ExternalArtifact so an
-// upstream re-publish happens before the StageSet re-reconciles. Sources that
-// cannot be resolved or patched are reported but do not abort the run.
-func reconcileSources(ctx context.Context, c client.Client, ss *stagesv1.StageSet, token string, errOut io.Writer) error {
+// upstream re-publish happens before the StageSet re-reconciles. Per-source
+// failures are reported as warnings and do not abort the run; the count of
+// failed sources is returned so a --strict caller can exit non-zero. The error
+// return is reserved for a failure that aborts the whole sweep (currently none).
+func reconcileSources(ctx context.Context, c client.Client, ss *stagesv1.StageSet, token string, errOut io.Writer) (int, error) {
 	seen := map[string]bool{}
+	failed := 0
 	for i := range ss.Spec.Stages {
 		ref := ss.Spec.Stages[i].SourceRef
 		ns := ref.Namespace
@@ -148,6 +157,7 @@ func reconcileSources(ctx context.Context, c client.Client, ss *stagesv1.StageSe
 		src.SetGroupVersionKind(sourceGVK(ref))
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: ref.Name}, src); err != nil {
 			fmt.Fprintf(errOut, "warning: cannot reconcile source %s: %v\n", key, err)
+			failed++
 			continue
 		}
 		ann := src.GetAnnotations()
@@ -158,9 +168,10 @@ func reconcileSources(ctx context.Context, c client.Client, ss *stagesv1.StageSe
 		src.SetAnnotations(ann)
 		if err := c.Update(ctx, src, client.FieldOwner(reconcileFieldManager)); err != nil {
 			fmt.Fprintf(errOut, "warning: cannot reconcile source %s: %v\n", key, err)
+			failed++
 		}
 	}
-	return nil
+	return failed, nil
 }
 
 // waitForReconcile polls until the controller records the token as handled — at

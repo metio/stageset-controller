@@ -25,6 +25,7 @@ package gate
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -37,6 +38,19 @@ import (
 // Handler answers stage-gate queries against a (cached) client.
 type Handler struct {
 	Client client.Client
+	// Logger records apiserver-read failures (surfaced to clients as a leak-safe
+	// 403) and recovered handler panics, which are otherwise invisible — the
+	// response body deliberately discloses nothing. A nil Logger uses
+	// slog.Default().
+	Logger *slog.Logger
+}
+
+// log returns the configured logger or the process default.
+func (h *Handler) log() *slog.Logger {
+	if h.Logger != nil {
+		return h.Logger
+	}
+	return slog.Default()
 }
 
 // gateResult is the JSON body returned to clients that request application/json.
@@ -54,6 +68,14 @@ type gateResult struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// A panic in a handler goroutine would otherwise crash the gate server (and,
+	// before isolation, the manager). Recover, log, and answer leak-safe.
+	defer func() {
+		if rec := recover(); rec != nil {
+			h.log().Error("gate handler panicked", "panic", rec, "path", req.URL.Path)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+	}()
 	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -69,7 +91,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	var ss stagesv1.StageSet
 	if err := h.Client.Get(req.Context(), types.NamespacedName{Namespace: namespace, Name: name}, &ss); err != nil {
-		// Deny without distinguishing not-found from other errors (leak-safe).
+		// Deny without distinguishing not-found from other errors (leak-safe). An
+		// apiserver-down or RBAC failure looks the same to the client as a clean
+		// not-found, so log it — otherwise a degraded gate is silent.
+		h.log().Warn("gate stageset lookup failed", "namespace", namespace, "stageset", name, "error", err)
 		respond(w, req, res, http.StatusForbidden, "stageset %s/%s is not gateable\n", namespace, name)
 		return
 	}

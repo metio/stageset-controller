@@ -18,9 +18,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/inventory"
+	"github.com/metio/stageset-controller/internal/metrics"
 )
 
 // Recorder reads and writes a stage's StageInventory shards.
@@ -104,12 +106,23 @@ func (r *Recorder) Stored(ctx context.Context, ssName, namespace, stage string) 
 		for _, e := range list.Items[i].Spec.Entries {
 			ref, err := inventory.ParseID(e.ID, e.V)
 			if err != nil {
+				skippedEntry(ctx, namespace, ssName, stage, e.ID, err)
 				continue
 			}
 			refs = append(refs, ref)
 		}
 	}
 	return refs, nil
+}
+
+// skippedEntry records a malformed inventory entry: a debug log line with the
+// offending ID and a counter bump. A skipped entry means the object it named
+// drops out of the stored set and so escapes pruning, so the signal must not be
+// silent.
+func skippedEntry(ctx context.Context, namespace, stageset, stage, id string, err error) {
+	log.FromContext(ctx).V(1).Info("skipping malformed StageInventory entry",
+		"namespace", namespace, "stageset", stageset, "stage", stage, "id", id, "error", err)
+	metrics.InventorySkippedEntriesTotal.WithLabelValues(namespace, stageset, stage).Inc()
 }
 
 // Write replaces the stored shards for a stage with refs, owned by the
@@ -194,9 +207,12 @@ func (r *Recorder) StageRecords(ctx context.Context, ssName, namespace string) (
 		rec := records[stage]
 		rec.Position = int(item.Spec.StagePosition)
 		for _, e := range item.Spec.Entries {
-			if ref, err := inventory.ParseID(e.ID, e.V); err == nil {
-				rec.Refs = append(rec.Refs, ref)
+			ref, err := inventory.ParseID(e.ID, e.V)
+			if err != nil {
+				skippedEntry(ctx, namespace, ssName, stage, e.ID, err)
+				continue
 			}
+			rec.Refs = append(rec.Refs, ref)
 		}
 		records[stage] = rec
 	}

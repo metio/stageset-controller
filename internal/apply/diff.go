@@ -5,6 +5,7 @@ package apply
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/fluxcd/pkg/ssa"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -51,7 +52,8 @@ func (a *Applier) Diff(ctx context.Context, name, namespace string, objects []*u
 	for _, obj := range objects {
 		cse, existing, merged, err := a.rm.Diff(ctx, obj, opts)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("diff %s %s/%s: %w",
+				obj.GroupVersionKind(), obj.GetNamespace(), obj.GetName(), err)
 		}
 		e := DiffEntry{
 			GVK:       obj.GroupVersionKind(),
