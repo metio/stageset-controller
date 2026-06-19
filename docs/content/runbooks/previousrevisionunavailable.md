@@ -21,10 +21,16 @@ Rollback is best-effort by contract: it works exactly when producers retain. Com
   or deleted — rollback re-runs decryption rather than restoring plaintext, so it
   fails closed when the key is gone, even for a revision the rollback store holds
 
+A configured external rollback store changes the failure shape rather than masking it:
+
+- a **transient store outage** (an S3 5xx, a connection reset) is _not_ reported as `PreviousRevisionUnavailable`. The controller emits a `RollbackStoreFailed` Warning Event and backs off so the rollback retries once the store recovers — it never silently re-fetches the producer, which could have already garbage-collected the revision and turned a recoverable blip into a false terminal.
+- a **corrupt snapshot** in the store (the object decodes to garbage) emits a `RollbackStoreFailed` Warning Event and falls back to a producer re-fetch. If the producer still retains the revision, rollback succeeds; if not, this terminal reason is set.
+
 ## Diagnosis
 
 ```shell
 kubectl --namespace <namespace> describe stageset <name>   # Message names the stage + revision
+kubectl --namespace <namespace> get events --field-selector reason=RollbackStoreFailed
 ```
 
 Check the producer's retention. For a JaaS snippet:
