@@ -142,6 +142,79 @@ jobs:
         name: Install Cosign
         if: needs.prepare.outputs.commit_count > 0 || needs.prepare.outputs.previous_version == ''
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - id: git_cliff_install
+        name: Install git-cliff
+        if: needs.prepare.outputs.commit_count > 0 || needs.prepare.outputs.previous_version == ''
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/git-cliff.tar.gz \
+            https://github.com/orhun/git-cliff/releases/download/v2.10.1/git-cliff-2.10.1-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf /tmp/git-cliff.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/git-cliff-2.10.1/git-cliff /usr/local/bin/git-cliff
+          git-cliff --version
+      - id: release_notes
+        name: Generate Release Notes
+        if: needs.prepare.outputs.commit_count > 0 || needs.prepare.outputs.previous_version == ''
+        # Render the notes from the org-wide git-cliff config (pinned by commit
+        # SHA; Renovate's custom manager bumps it). On a first release the previous
+        # version is empty, so the commit range is omitted and git-cliff walks the
+        # whole history; otherwise scope it to <previous>..HEAD. The cosign verify
+        # footer is appended verbatim so the verification instructions stay in the
+        # published release body.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ver="${{ needs.prepare.outputs.release_version }}"
+          prev="${{ needs.prepare.outputs.previous_version }}"
+          config_url="https://raw.githubusercontent.com/metio/git-cliff-config/6fcc0b65dde726f59c09066fae227cec236ffd76/cliff.toml"
+          common=(--config-url "${config_url}" --tag "${ver}" --tag-pattern '^[0-9]+\.[0-9]+\.[0-9]+$')
+          if [ -n "${prev}" ]; then
+            git-cliff "${common[@]}" "${prev}..HEAD" > notes.md
+          else
+            git-cliff "${common[@]}" > notes.md
+          fi
+          cat >> notes.md <<EOF
+
+          ## Usage
+
+          Pull the container from \`ghcr.io/metio/stageset-controller:${ver}\`.
+          Check the [migration guide](https://github.com/metio/stageset-controller/blob/main/MIGRATIONS.md) for any required actions on your part.
+
+          Prebuilt binaries are attached below for both the **controller**
+          (\`stageset-controller_*\`) and the **\`stagesetctl\` CLI** (\`stagesetctl_*\`):
+
+          - \`linux\`: \`amd64\`, \`arm\` (v7), \`arm64\`, \`ppc64le\`, \`riscv64\`, \`s390x\`
+          - \`windows\`: \`amd64\`, \`arm64\` (\`.zip\`)
+          - \`darwin\` (macOS): \`amd64\`, \`arm64\`
+
+          The CLI doubles as a \`kubectl\` plugin: rename it to \`kubectl-stageset\`
+          on your \`PATH\` and run \`kubectl stageset …\`.
+
+          ## Verify
+
+          Both the image and the release artifacts are signed with
+          [cosign](https://github.com/sigstore/cosign) keyless — there is no GPG key to
+          trust; identity is proven by the workflow's OIDC certificate.
+
+          Container image:
+
+          \`\`\`shell
+          cosign verify ghcr.io/metio/stageset-controller:${ver} \\
+            --certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+
+          Release artifacts (verify the signed checksum file, then check your download against it):
+
+          \`\`\`shell
+          cosign verify-blob stageset-controller_${ver}_SHA256SUMS \\
+            --bundle stageset-controller_${ver}_SHA256SUMS.bundle \\
+            --certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          sha256sum -c stageset-controller_${ver}_SHA256SUMS
+          \`\`\`
+          EOF
       - id: download
         name: Download Artifacts
         if: needs.prepare.outputs.commit_count > 0 || needs.prepare.outputs.previous_version == ''
@@ -181,46 +254,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           prerelease: false
-          body: |
-            ## Usage
-
-            Pull the container from `ghcr.io/metio/stageset-controller:${{ needs.prepare.outputs.release_version }}`.
-            Check the [migration guide](https://github.com/metio/stageset-controller/blob/main/MIGRATIONS.md) for any required actions on your part.
-
-            Prebuilt binaries are attached below for both the **controller**
-            (`stageset-controller_*`) and the **`stagesetctl` CLI** (`stagesetctl_*`):
-
-            - `linux`: `amd64`, `arm` (v7), `arm64`, `ppc64le`, `riscv64`, `s390x`
-            - `windows`: `amd64`, `arm64` (`.zip`)
-            - `darwin` (macOS): `amd64`, `arm64`
-
-            The CLI doubles as a `kubectl` plugin: rename it to `kubectl-stageset`
-            on your `PATH` and run `kubectl stageset …`.
-
-            ## Verify
-
-            Both the image and the release artifacts are signed with
-            [cosign](https://github.com/sigstore/cosign) keyless — there is no GPG key to
-            trust; identity is proven by the workflow's OIDC certificate.
-
-            Container image:
-
-            ```shell
-            cosign verify ghcr.io/metio/stageset-controller:${{ needs.prepare.outputs.release_version }} \
-              --certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/' \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-            ```
-
-            Release artifacts (verify the signed checksum file, then check your download against it):
-
-            ```shell
-            cosign verify-blob stageset-controller_${{ needs.prepare.outputs.release_version }}_SHA256SUMS \
-              --bundle stageset-controller_${{ needs.prepare.outputs.release_version }}_SHA256SUMS.bundle \
-              --certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/' \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-            sha256sum -c stageset-controller_${{ needs.prepare.outputs.release_version }}_SHA256SUMS
-            ```
-          generate_release_notes: true
+          body_path: notes.md
           files: |
             dist/*.tar.gz
             dist/*.zip
