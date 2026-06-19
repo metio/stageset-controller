@@ -68,6 +68,61 @@ func TestValidateStages_ChecksEveryPhase(t *testing.T) {
 	}
 }
 
+// Action names are the per-stage idempotency-ledger key, shared across
+// pre/post/onFailure, so empty or duplicated names must be rejected at
+// validation — otherwise the second action with the same key silently skips.
+func TestValidateStages_ActionNameUniqueness(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		actions *stagesv1.StageActions
+		wantErr bool
+	}{
+		{
+			name: "distinct names across phases accepted",
+			actions: &stagesv1.StageActions{
+				Pre:       []stagesv1.Action{{Name: "a", Wait: &stagesv1.WaitAction{}}},
+				Post:      []stagesv1.Action{{Name: "b", Wait: &stagesv1.WaitAction{}}},
+				OnFailure: []stagesv1.Action{{Name: "c", Wait: &stagesv1.WaitAction{}}},
+			},
+		},
+		{
+			name: "empty name rejected",
+			actions: &stagesv1.StageActions{
+				Pre: []stagesv1.Action{{Name: "", Wait: &stagesv1.WaitAction{}}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate within a phase rejected",
+			actions: &stagesv1.StageActions{
+				Pre: []stagesv1.Action{
+					{Name: "dup", Wait: &stagesv1.WaitAction{}},
+					{Name: "dup", Wait: &stagesv1.WaitAction{}},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate across phases rejected",
+			actions: &stagesv1.StageActions{
+				Pre:  []stagesv1.Action{{Name: "shared", Wait: &stagesv1.WaitAction{}}},
+				Post: []stagesv1.Action{{Name: "shared", Wait: &stagesv1.WaitAction{}}},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateStages(stageSetWith(tc.actions))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ValidateStages err = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // A delete action satisfies the action oneof as a single verb and is accepted
 // (it is implemented, not reserved).
 func TestValidateSpec_DeleteVerbAccepted(t *testing.T) {

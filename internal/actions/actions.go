@@ -48,6 +48,10 @@ var (
 	ErrActionUnsupported = errors.New("action type not yet supported")
 	// ErrForbiddenHost reports an http action URL rejected by the SSRF guard.
 	ErrForbiddenHost = errors.New("action url host is not allowed")
+	// ErrForbiddenAddress reports an http action whose host resolved to a
+	// forbidden IP at dial time (the dial-time pin behind the string-level
+	// allowedURL check).
+	ErrForbiddenAddress = errors.New("action url host resolves to a forbidden address")
 )
 
 const maxResponseBytes = 1 << 16 // bound the action response body we drain
@@ -62,6 +66,13 @@ type Executor struct {
 	// HTTPClient overrides the SSRF-guarded default (tests inject a plain one
 	// to reach httptest loopback listeners).
 	HTTPClient *http.Client
+	// IPValidator pins each resolved address at dial time; a nil value uses the
+	// production forbiddenIP check. Tests inject a permissive validator so
+	// httptest loopback listeners stay reachable.
+	IPValidator func(net.IP) error
+	// lookupIP resolves a host to its addresses; nil uses net.DefaultResolver.
+	// The seam lets a test point a hostname at loopback/link-local without DNS.
+	lookupIP func(ctx context.Context, host string) ([]net.IP, error)
 	// Resolver and Fetcher render job and apply actions from an
 	// ExternalArtifact; nil makes those actions fail-closed.
 	Resolver *artifact.Resolver
@@ -116,8 +127,10 @@ func (e *Executor) exec(ctx context.Context, ns string, a *stagesv1.Action) erro
 		if err = e.dispatch(ctx, ns, a); err == nil {
 			return nil
 		}
-		// Config errors will not improve on retry.
-		if errors.Is(err, ErrActionUnsupported) || errors.Is(err, ErrForbiddenHost) {
+		// Config errors will not improve on retry. A host that resolves to a
+		// forbidden address is steady-state too — the DNS record, not transient
+		// load, is the cause.
+		if errors.Is(err, ErrActionUnsupported) || errors.Is(err, ErrForbiddenHost) || errors.Is(err, ErrForbiddenAddress) {
 			return err
 		}
 		if attempt == retries {
@@ -479,6 +492,9 @@ func (e *Executor) httpClient() *http.Client {
 	}
 	return &http.Client{
 		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: e.safeDialContext,
+		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("stopped after 10 redirects")
@@ -487,6 +503,73 @@ func (e *Executor) httpClient() *http.Client {
 		},
 	}
 }
+
+// safeDialContext resolves the host once, rejects the connection if any
+// resolved IP is forbidden, then dials a validated address — closing the
+// DNS-rebinding window between check and connect. The string-level allowedURL
+// guard runs first, but a hostname (or inet_aton-form literal) that passes it
+// can still resolve to a loopback/link-local/metadata address; this is the
+// only check that sees the actual dialed IP.
+func (e *Executor) safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := e.resolve(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	check := e.ipValidator()
+	for _, ip := range ips {
+		if check(ip) != nil {
+			return nil, fmt.Errorf("%w: %s", ErrForbiddenAddress, ip)
+		}
+	}
+	var d net.Dialer
+	var lastErr error
+	for _, ip := range ips {
+		conn, derr := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if derr == nil {
+			return conn, nil
+		}
+		lastErr = derr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no addresses for %s", host)
+	}
+	return nil, lastErr
+}
+
+func (e *Executor) resolve(ctx context.Context, host string) ([]net.IP, error) {
+	if e.lookupIP != nil {
+		return e.lookupIP(ctx, host)
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		ips = append(ips, a.IP)
+	}
+	return ips, nil
+}
+
+func (e *Executor) ipValidator() func(net.IP) error {
+	if e.IPValidator != nil {
+		return e.IPValidator
+	}
+	return func(ip net.IP) error {
+		if forbiddenIP(ip) {
+			return fmt.Errorf("%w: %s", ErrForbiddenAddress, ip)
+		}
+		return nil
+	}
+}
+
+// PermissiveIP allows any resolved address; for tests reaching loopback
+// listeners through the dial-time guard.
+func PermissiveIP(net.IP) error { return nil }
 
 func forbiddenIP(ip net.IP) bool {
 	return ip.IsLoopback() ||

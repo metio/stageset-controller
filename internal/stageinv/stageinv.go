@@ -51,7 +51,13 @@ func (r *Recorder) shardCap() int {
 // Reconstruction is best-effort: a GVK no longer in the render cannot be
 // discovered this way, and per-GVK list errors are aggregated and returned
 // while the refs that were listed are still returned for the caller to use.
-func (r *Recorder) ReconstructFromCluster(ctx context.Context, ssName, ssNamespace, stage string, rendered []*unstructured.Unstructured) ([]inventory.ObjectRef, error) {
+//
+// listClient is the cluster the applied objects live on — the target cluster
+// when spec.kubeConfig retargets the apply, else the controller's own client.
+// It is separate from r.Client (which reads/writes the StageInventory shards on
+// the controller cluster), because a remote apply's objects are never visible
+// to r.Client.
+func (r *Recorder) ReconstructFromCluster(ctx context.Context, listClient client.Client, ssName, ssNamespace, stage string, rendered []*unstructured.Unstructured) ([]inventory.ObjectRef, error) {
 	group := stagesv1.GroupVersion.Group
 	sel := client.MatchingLabels{
 		group + "/name":      ssName,
@@ -67,7 +73,7 @@ func (r *Recorder) ReconstructFromCluster(ctx context.Context, ssName, ssNamespa
 	for gvk := range gvks {
 		var list unstructured.UnstructuredList
 		list.SetGroupVersionKind(schema.GroupVersionKind{Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind + "List"})
-		if err := r.Client.List(ctx, &list, sel); err != nil {
+		if err := listClient.List(ctx, &list, sel); err != nil {
 			errs = append(errs, fmt.Errorf("list %s: %w", gvk, err))
 			continue
 		}

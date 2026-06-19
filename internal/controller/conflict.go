@@ -4,6 +4,8 @@
 package controller
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -17,10 +19,22 @@ import (
 // in-cluster object the way kustomize-controller's force annotation does.
 const (
 	forceAnnotation        = "stages.metio.wtf/force"
-	forceEnabledValue      = "enabled"
 	keepExistingAnnotation = "stages.metio.wtf/keep-existing"
 	keepExistingValue      = "true"
 )
+
+// newForceToken mints a fresh per-apply force token. It is a package-level seam
+// so tests can substitute a deterministic value; see resolveConflictHandling for
+// why the value must be unique per apply.
+var newForceToken = func() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand never fails on supported platforms; fall back to a fixed
+		// non-empty value rather than an empty selector that matches nothing.
+		return "enabled"
+	}
+	return hex.EncodeToString(b[:])
+}
 
 // Conflict-policy action values, matching the CRD enum.
 const (
@@ -40,7 +54,15 @@ const (
 // allowDataLoss — recreating those destroys data, so it must be said out loud.
 // The blunt stage.force and the explicit per-object annotation are treated as
 // the operator already having opted in, and are not gated.
-func resolveConflictHandling(objects []*unstructured.Unstructured, stage *stagesv1.Stage) (apply.ConflictHandling, error) {
+// forceToken is the per-apply value stamped on this-pass Recreate objects and
+// used as the ForceSelector value; the caller mints a fresh one per apply (via
+// newForceToken). It MUST be unique per apply: ssa's shouldForceApply matches
+// ForceSelector against the live object too, so a stale force annotation left on
+// an in-cluster object from an earlier Recreate pass would match a constant
+// selector and force-recreate an object whose current policy is Fail (PVC/PV
+// data loss). A fresh token per apply means a stale annotation carries an older
+// value that can never match the current selector.
+func resolveConflictHandling(objects []*unstructured.Unstructured, stage *stagesv1.Stage, forceToken string) (apply.ConflictHandling, error) {
 	effectiveDefault := conflictFail
 	if stage.Force {
 		effectiveDefault = conflictRecreate
@@ -61,8 +83,8 @@ func resolveConflictHandling(objects []*unstructured.Unstructured, stage *stages
 					obj.GetKind(), obj.GetName(),
 				)
 			}
-			setAnnotation(obj, forceAnnotation, forceEnabledValue)
-			ch.ForceSelector = map[string]string{forceAnnotation: forceEnabledValue}
+			setAnnotation(obj, forceAnnotation, forceToken)
+			ch.ForceSelector = map[string]string{forceAnnotation: forceToken}
 		case conflictKeepExisting:
 			setAnnotation(obj, keepExistingAnnotation, keepExistingValue)
 			ch.IfNotPresentSelector = map[string]string{keepExistingAnnotation: keepExistingValue}
@@ -75,7 +97,11 @@ func resolveConflictHandling(objects []*unstructured.Unstructured, stage *stages
 // permitted, and whether the action came from a rule (which gates the PV/PVC
 // recreate guard).
 func conflictActionFor(obj *unstructured.Unstructured, policy *stagesv1.ConflictPolicy, fallback string) (action string, allowDataLoss, fromRule bool) {
-	if obj.GetAnnotations()[forceAnnotation] == forceEnabledValue {
+	// Any non-empty force annotation on the desired object is an explicit
+	// operator opt-in to recreate. The value carried on the desired object is
+	// authoritative for this pass; resolveConflictHandling re-stamps it with the
+	// per-apply token so the selector matches.
+	if obj.GetAnnotations()[forceAnnotation] != "" {
 		return conflictRecreate, false, false
 	}
 	if policy != nil {

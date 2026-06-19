@@ -95,7 +95,18 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
   with the locally-built image and overlays HEAD's CRDs.
 - `internal/` — the reconciler and its collaborators:
   - `controller/` — the `StageSet` reconciler, conditions, webhook, tenant
-    impersonation, migrations, rollback, windows, conflict handling.
+    impersonation, migrations, rollback, windows, conflict handling. Remote
+    targets go through a `remoteConfigBuilder` seam: `spec.kubeConfig.secretRef`
+    (self-contained kubeconfig) or `spec.kubeConfig.configMapRef` (cloud-provider
+    auth — aws/azure/gcp/generic — via `fluxcd/pkg/auth`'s
+    `authutils.GetRESTConfig`); the webhook shape-validates `kubeConfig` at
+    admission. Adopts `pkg/runtime/{conditions,predicates,patch,jitter}`: the
+    watch predicate is `Or(GenerationChanged, ReconcileRequested,
+    reconcileStageRequested)` — the third covers the per-stage
+    `stages.metio.wtf/reconcile-stage` annotation. **Trap:** a finalizer-add
+    returns `Requeue` because it doesn't bump `.metadata.generation` (the
+    generation predicate would otherwise drop the event). Status writes are
+    conflict-safe patches; requeue intervals jittered.
   - `inventory/` + `stageinv/` — sharded ApplySet inventory, plan/diff, refs.
     If a stage's `StageInventory` is lost while its objects are still live,
     `Recorder.ReconstructFromCluster` self-heals it: the reconcile that finds no
@@ -121,7 +132,12 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
     **age** (`*.agekey`) and **PGP** (`*.asc`) keys from `secretRef` decrypt via
     custom in-memory key services (no global `SOPS_AGE_KEY`/no gpg binary/no
     keyring); **cloud KMS** rides the appended stock local key service via the
-    controller's ambient creds (so `secretRef` is optional for KMS-only). Encrypted
+    controller's ambient creds (so `secretRef` is optional for KMS-only). The
+    opt-in `--object-level-kms` flag instead mints per-tenant cloud credentials
+    (the StageSet's `spec.serviceAccountName` federated via `fluxcd/pkg/auth`) for
+    the KMS key service, so a tenant only decrypts with KMS keys its own identity
+    can reach; default off (ambient), and it falls back to ambient when no SA is
+    set. age/PGP are unaffected. Encrypted
     files feeding a `secretGenerator` work for free (decrypted pre-build). Wired in
     both the forward apply and the re-fetch rollback paths. **Build-time** (not a
     post-build chokepoint) is deliberate: kustomize never sees a half-stripped `sops`

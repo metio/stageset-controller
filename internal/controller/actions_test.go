@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/actions"
 	"github.com/metio/stageset-controller/internal/artifact"
 )
 
@@ -31,6 +32,9 @@ func reconcileWith(t *testing.T, c client.Client, ss *stagesv1.StageSet, allowed
 		RESTMapper:         c.RESTMapper(),
 		Fetcher:            &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		AllowedActionHosts: allowedHosts,
+		// httptest action listeners bind loopback; the production dial-time pin
+		// would reject them, so opt the test path into a permissive validator.
+		ActionIPValidator: actions.PermissiveIP,
 	}
 	_, err := driveReconcile(r, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
 	return err

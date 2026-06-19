@@ -139,6 +139,19 @@ func TestValidateMigrations_ActionOneof(t *testing.T) {
 			actions: []stagesv1.Action{{Name: "two", Delete: &stagesv1.DeleteAction{}, Wait: &stagesv1.WaitAction{}}},
 			wantErr: true,
 		},
+		{
+			name:    "empty action name rejected",
+			actions: []stagesv1.Action{{Name: "", Delete: &stagesv1.DeleteAction{}}},
+			wantErr: true,
+		},
+		{
+			name: "duplicate action names rejected",
+			actions: []stagesv1.Action{
+				{Name: "dup", Delete: &stagesv1.DeleteAction{}},
+				{Name: "dup", Wait: &stagesv1.WaitAction{}},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

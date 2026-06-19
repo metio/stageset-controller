@@ -84,6 +84,62 @@ func TestShardCap_ClampsToDefaultWhenUnset(t *testing.T) {
 	}
 }
 
+// labelledConfigMap builds an applied ConfigMap carrying the owner + stage
+// labels the applier stamps, so ReconstructFromCluster's selector finds it.
+func labelledConfigMap(name, ssName, ssNamespace, stage string) *unstructured.Unstructured {
+	group := stagesv1.GroupVersion.Group
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"})
+	u.SetNamespace(ssNamespace)
+	u.SetName(name)
+	u.SetLabels(map[string]string{
+		group + "/name":      ssName,
+		group + "/namespace": ssNamespace,
+		stagesv1.StageLabel:  stage,
+	})
+	return u
+}
+
+// ReconstructFromCluster must list applied objects through the supplied
+// listClient (the target cluster), not the recorder's own client (the
+// controller cluster). With spec.kubeConfig the applied objects only exist on
+// the target, so a reconstruction against r.Client would silently recover
+// nothing and the next prune would delete live objects.
+func TestReconstructFromCluster_ListsViaTargetClient(t *testing.T) {
+	t.Parallel()
+	const (
+		ssName = "app"
+		ns     = "ns"
+		stage  = "deploy"
+	)
+	s := testScheme(t)
+	// Controller cluster (r.Client): holds no applied objects.
+	controllerClient := fake.NewClientBuilder().WithScheme(s).Build()
+	// Target cluster (listClient): holds the live applied ConfigMaps.
+	applied := labelledConfigMap("live-cm", ssName, ns, stage)
+	targetClient := fake.NewClientBuilder().WithScheme(s).WithObjects(applied).Build()
+
+	r := &Recorder{Client: controllerClient}
+	rendered := []*unstructured.Unstructured{labelledConfigMap("live-cm", ssName, ns, stage)}
+
+	recovered, err := r.ReconstructFromCluster(context.Background(), targetClient, ssName, ns, stage, rendered)
+	if err != nil {
+		t.Fatalf("ReconstructFromCluster: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].Name != "live-cm" {
+		t.Fatalf("recovered = %v, want the live-cm from the target cluster", recovered)
+	}
+
+	// The same call against the controller client (the bug) recovers nothing.
+	none, err := r.ReconstructFromCluster(context.Background(), controllerClient, ssName, ns, stage, rendered)
+	if err != nil {
+		t.Fatalf("ReconstructFromCluster (controller client): %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("recovered %v from the controller cluster, want nothing (the objects live on the target)", none)
+	}
+}
+
 func TestWrite_ShardsAtBoundaryAndRoundTrips(t *testing.T) {
 	t.Parallel()
 	r := newRecorder(t, 2) // cap of 2 → 5 refs span 3 shards (2,2,1)

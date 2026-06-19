@@ -39,7 +39,7 @@ func TestResolveConflictHandling(t *testing.T) {
 	t.Run("default Fail: no selectors, no annotations", func(t *testing.T) {
 		t.Parallel()
 		obj := uobj("v1", "ConfigMap", "cm")
-		ch, err := resolveConflictHandling([]*unstructured.Unstructured{obj}, &stagesv1.Stage{})
+		ch, err := resolveConflictHandling([]*unstructured.Unstructured{obj}, &stagesv1.Stage{}, "tok-test")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -51,18 +51,22 @@ func TestResolveConflictHandling(t *testing.T) {
 		}
 	})
 
-	t.Run("stage.force: Recreate fallback stamps force", func(t *testing.T) {
+	t.Run("stage.force: Recreate fallback stamps force with the selector token", func(t *testing.T) {
 		t.Parallel()
 		obj := uobj("v1", "ConfigMap", "cm")
-		ch, err := resolveConflictHandling([]*unstructured.Unstructured{obj}, &stagesv1.Stage{Force: true})
+		ch, err := resolveConflictHandling([]*unstructured.Unstructured{obj}, &stagesv1.Stage{Force: true}, "tok-test")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
-		if ch.ForceSelector[forceAnnotation] != forceEnabledValue {
+		token := ch.ForceSelector[forceAnnotation]
+		if token == "" {
 			t.Fatalf("stage.force should set ForceSelector, got %+v", ch)
 		}
-		if obj.GetAnnotations()[forceAnnotation] != forceEnabledValue {
-			t.Fatal("stage.force should stamp the force annotation")
+		// The stamp on the object and the selector value must be the same token,
+		// so the desired object matches the selector this pass.
+		if obj.GetAnnotations()[forceAnnotation] != token {
+			t.Fatalf("force stamp %q must equal selector token %q",
+				obj.GetAnnotations()[forceAnnotation], token)
 		}
 	})
 
@@ -73,15 +77,15 @@ func TestResolveConflictHandling(t *testing.T) {
 		stage := &stagesv1.Stage{ConflictPolicy: &stagesv1.ConflictPolicy{
 			Rules: []stagesv1.ConflictRule{recreateRule("Secret", "", false)},
 		}}
-		ch, err := resolveConflictHandling([]*unstructured.Unstructured{secret, cm}, stage)
+		ch, err := resolveConflictHandling([]*unstructured.Unstructured{secret, cm}, stage, "tok-test")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
 		if ch.ForceSelector == nil {
 			t.Fatal("Secret rule should set ForceSelector")
 		}
-		if secret.GetAnnotations()[forceAnnotation] != forceEnabledValue {
-			t.Fatal("Secret should be force-stamped")
+		if secret.GetAnnotations()[forceAnnotation] != ch.ForceSelector[forceAnnotation] {
+			t.Fatal("Secret should be force-stamped with the selector token")
 		}
 		if cm.GetAnnotations()[forceAnnotation] != "" {
 			t.Fatal("ConfigMap (default Fail) should not be force-stamped")
@@ -94,7 +98,7 @@ func TestResolveConflictHandling(t *testing.T) {
 		stage := &stagesv1.Stage{ConflictPolicy: &stagesv1.ConflictPolicy{
 			Rules: []stagesv1.ConflictRule{{Target: stagesv1.ConflictTarget{Kind: "ConfigMap"}, Action: conflictKeepExisting}},
 		}}
-		ch, err := resolveConflictHandling([]*unstructured.Unstructured{cm}, stage)
+		ch, err := resolveConflictHandling([]*unstructured.Unstructured{cm}, stage, "tok-test")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -109,7 +113,7 @@ func TestResolveConflictHandling(t *testing.T) {
 		stage := &stagesv1.Stage{ConflictPolicy: &stagesv1.ConflictPolicy{
 			Rules: []stagesv1.ConflictRule{recreateRule("PersistentVolumeClaim", "", false)},
 		}}
-		if _, err := resolveConflictHandling([]*unstructured.Unstructured{pvc}, stage); err == nil {
+		if _, err := resolveConflictHandling([]*unstructured.Unstructured{pvc}, stage, "tok-test"); err == nil {
 			t.Fatal("recreating a PVC without allowDataLoss must be refused")
 		}
 	})
@@ -120,7 +124,7 @@ func TestResolveConflictHandling(t *testing.T) {
 		stage := &stagesv1.Stage{ConflictPolicy: &stagesv1.ConflictPolicy{
 			Rules: []stagesv1.ConflictRule{recreateRule("PersistentVolumeClaim", "", true)},
 		}}
-		ch, err := resolveConflictHandling([]*unstructured.Unstructured{pvc}, stage)
+		ch, err := resolveConflictHandling([]*unstructured.Unstructured{pvc}, stage, "tok-test")
 		if err != nil {
 			t.Fatalf("allowDataLoss should permit PVC recreate, err = %v", err)
 		}
@@ -132,7 +136,7 @@ func TestResolveConflictHandling(t *testing.T) {
 	t.Run("blunt stage.force on a PVC is not gated", func(t *testing.T) {
 		t.Parallel()
 		pvc := uobj("v1", "PersistentVolumeClaim", "data")
-		if _, err := resolveConflictHandling([]*unstructured.Unstructured{pvc}, &stagesv1.Stage{Force: true}); err != nil {
+		if _, err := resolveConflictHandling([]*unstructured.Unstructured{pvc}, &stagesv1.Stage{Force: true}, "tok-test"); err != nil {
 			t.Fatalf("blunt force is an explicit opt-in and must not be gated, err = %v", err)
 		}
 	})
@@ -140,9 +144,9 @@ func TestResolveConflictHandling(t *testing.T) {
 	t.Run("per-object force annotation wins over policy default Fail", func(t *testing.T) {
 		t.Parallel()
 		obj := uobj("v1", "ConfigMap", "cm")
-		obj.SetAnnotations(map[string]string{forceAnnotation: forceEnabledValue})
+		obj.SetAnnotations(map[string]string{forceAnnotation: "operator-set"})
 		stage := &stagesv1.Stage{ConflictPolicy: &stagesv1.ConflictPolicy{Default: conflictFail}}
-		ch, err := resolveConflictHandling([]*unstructured.Unstructured{obj}, stage)
+		ch, err := resolveConflictHandling([]*unstructured.Unstructured{obj}, stage, "tok-test")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}

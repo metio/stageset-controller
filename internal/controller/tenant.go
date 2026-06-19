@@ -90,11 +90,21 @@ func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta
 		// (aws|azure|gcp|generic), validates the per-provider inputs, and mints
 		// the cluster bearer token from the cloud's IAM/STS. A bad provider name
 		// or missing required key is terminal — wrap it as such.
+		//
+		// The cache key folds in the ConfigMap's resourceVersion so an in-place
+		// edit (a changed provider/cluster/region) rebuilds the connection
+		// instead of being masked until token rotation or a restart — mirroring
+		// the secretRef path. A missing ConfigMap is terminal: no retry brings it
+		// back without a spec/object change.
+		version, err := b.r.configMapResourceVersion(ctx, namespace, kc.ConfigMapRef.Name)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: cloud-provider kubeConfig configMap %q: %w", errInvalidKubeConfigSpec, kc.ConfigMapRef.Name, err)
+		}
 		cfg, err := authutils.GetRESTConfig(ctx, *kc, namespace, b.r.Client)
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: cloud-provider kubeConfig configMap %q: %w", errInvalidKubeConfigSpec, kc.ConfigMapRef.Name, err)
 		}
-		return cfg, "configmap/" + namespace + "/" + kc.ConfigMapRef.Name, nil
+		return cfg, "configmap/" + namespace + "/" + kc.ConfigMapRef.Name + "/" + version, nil
 	default:
 		return nil, "", fmt.Errorf("%w: spec.kubeConfig sets neither secretRef nor configMapRef", errInvalidKubeConfigSpec)
 	}
@@ -259,4 +269,16 @@ func (r *StageSetReconciler) kubeconfigBytes(ctx context.Context, ns string, ref
 		return nil, "", fmt.Errorf("kubeConfig secret %q has no non-empty key %q", ref.Name, key)
 	}
 	return data, sec.ResourceVersion, nil
+}
+
+// configMapResourceVersion reads the configMapRef ConfigMap's resourceVersion so
+// the target-cluster cache key tracks in-place edits. The ConfigMap is read with
+// the controller's own client — connecting to the target cluster is the
+// controller's job, not the tenant's.
+func (r *StageSetReconciler) configMapResourceVersion(ctx context.Context, ns, name string) (string, error) {
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &cm); err != nil {
+		return "", fmt.Errorf("kubeConfig configMap %q: %w", name, err)
+	}
+	return cm.ResourceVersion, nil
 }

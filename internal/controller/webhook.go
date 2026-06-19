@@ -162,10 +162,19 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 		if !stages[m.Stage] {
 			return fmt.Errorf("migration %q anchors to unknown stage %q", m.Name, m.Stage)
 		}
+		seen := map[string]bool{}
 		for j := range m.Actions {
-			if n := actionTypeCount(&m.Actions[j]); n != 1 {
-				return fmt.Errorf("migration %q action %q: exactly one verb must be set, found %d", m.Name, m.Actions[j].Name, n)
+			a := &m.Actions[j]
+			if n := actionTypeCount(a); n != 1 {
+				return fmt.Errorf("migration %q action %q: exactly one verb must be set, found %d", m.Name, a.Name, n)
 			}
+			if a.Name == "" {
+				return fmt.Errorf("migration %q has an action with an empty name; action names are the idempotency-ledger key and must be set", m.Name)
+			}
+			if seen[a.Name] {
+				return fmt.Errorf("migration %q has duplicate action name %q; action names are the idempotency-ledger key and must be unique", m.Name, a.Name)
+			}
+			seen[a.Name] = true
 		}
 	}
 	return nil
@@ -190,12 +199,24 @@ func ValidateStages(ss *stagesv1.StageSet) error {
 			{"post", stage.Actions.Post},
 			{"onFailure", stage.Actions.OnFailure},
 		}
+		// The stage's pre/post/onFailure share one idempotency ledger keyed by
+		// action name (a recorded name is skipped on retry), so a name that is
+		// empty or repeated across the three phases would silently skip the
+		// second action. Reject both up front.
+		seen := map[string]string{} // name -> phase it first appeared in
 		for _, phase := range phases {
 			for j := range phase.actions {
 				a := &phase.actions[j]
 				if n := actionTypeCount(a); n != 1 {
 					return fmt.Errorf("stage %q action %q (%s): exactly one of patch, http, wait, job, delete, apply must be set, found %d", stage.Name, a.Name, phase.name, n)
 				}
+				if a.Name == "" {
+					return fmt.Errorf("stage %q has an action with an empty name in %s; action names are the idempotency-ledger key and must be set", stage.Name, phase.name)
+				}
+				if first, dup := seen[a.Name]; dup {
+					return fmt.Errorf("stage %q has duplicate action name %q (%s and %s); action names are the idempotency-ledger key and must be unique across pre, post, and onFailure", stage.Name, a.Name, first, phase.name)
+				}
+				seen[a.Name] = phase.name
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -106,6 +107,10 @@ type StageSetReconciler struct {
 	ShardCap int
 	// AllowedActionHosts is the global --allowed-action-hosts flag.
 	AllowedActionHosts []string
+	// ActionIPValidator pins each resolved action-URL address at dial time; nil
+	// uses the production loopback/link-local/metadata denylist. Tests inject a
+	// permissive validator so httptest loopback listeners stay reachable.
+	ActionIPValidator func(net.IP) error
 	// NoCrossNamespaceRefs is the global --no-cross-namespace-refs flag.
 	NoCrossNamespaceRefs bool
 	// ObjectLevelKMS is the global --object-level-kms flag: when true, SOPS
@@ -345,6 +350,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	executor := &actions.Executor{
 		Client:       target,
 		AllowedHosts: r.AllowedActionHosts,
+		IPValidator:  r.ActionIPValidator,
 		Resolver:     &artifact.Resolver{NoCrossNamespace: r.NoCrossNamespaceRefs},
 		Fetcher:      fetcher,
 		Applier:      &manifestApplier{applier: applier, name: ss.Name, namespace: ss.Namespace},
@@ -510,7 +516,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// `kubectl get -l stages.metio.wtf/stage=<stage>` answers "what does
 			// this stage own" with no project-specific tooling.
 			apply.StampStageLabel(objects, stagesv1.StageLabel, stage.Name)
-			conflicts, cerr := resolveConflictHandling(objects, stage)
+			conflicts, cerr := resolveConflictHandling(objects, stage, newForceToken())
 			if cerr != nil {
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
 			}
@@ -550,7 +556,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// guessed the contents.
 			writeRefs := newRefs
 			if needsReconstruct[stage.Name] {
-				recovered, rerr := recorder.ReconstructFromCluster(ctx, ss.Name, ss.Namespace, stage.Name, objects)
+				// Reconstruction lists the applied objects, which live on the
+				// target cluster (the remote cluster when spec.kubeConfig is set,
+				// else the controller's own). The recorder's r.Client stays on the
+				// controller cluster for the StageInventory shard read/write.
+				recovered, rerr := recorder.ReconstructFromCluster(ctx, target, ss.Name, ss.Namespace, stage.Name, objects)
 				if rerr != nil {
 					logger.Error(rerr, "stage inventory reconstruction was partial", "stage", stage.Name)
 				}
@@ -642,14 +652,14 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				continue
 			}
 			if len(refs) > 0 {
-				if _, derr := applier.Delete(ctx, stageinv.Objects(refs)); derr != nil {
+				if _, derr := applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(refs)); derr != nil {
 					return ctrl.Result{}, derr
 				}
 			}
 		}
 		for _, removed := range plan.RemovedStages {
 			if len(removed.Entries) > 0 {
-				if _, derr := applier.Delete(ctx, stageinv.Objects(removed.Entries)); derr != nil {
+				if _, derr := applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(removed.Entries)); derr != nil {
 					return ctrl.Result{}, derr
 				}
 			}
@@ -988,7 +998,7 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 			continue // prune:false: objects orphaned deliberately
 		}
 		if refs := records[stage].Refs; len(refs) > 0 {
-			if _, derr := applier.Delete(ctx, stageinv.Objects(refs)); derr != nil {
+			if _, derr := applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(refs)); derr != nil {
 				return ctrl.Result{}, derr // retry; finalizer stays
 			}
 		}

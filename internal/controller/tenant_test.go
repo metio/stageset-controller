@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -149,5 +150,55 @@ func TestDefaultRemoteConfigBuilder_NoRef(t *testing.T) {
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{}, "team-a")
 	if !errors.Is(err, errInvalidKubeConfigSpec) {
 		t.Fatalf("err = %v, want errInvalidKubeConfigSpec", err)
+	}
+}
+
+// The configMapRef cache key embeds the ConfigMap's resourceVersion so an
+// in-place edit (a changed provider/cluster/region) rebuilds the target-cluster
+// connection instead of being masked until token rotation or a restart. The key
+// is computed before the cloud auth dispatch, so this exercises it via the
+// resourceVersion helper that feeds the key — no cloud account needed.
+func TestConfigMapResourceVersion_TracksEdits(t *testing.T) {
+	t.Parallel()
+	const ns = "team-a"
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud"},
+		Data:       map[string]string{"cluster": "one"},
+	}
+	r := builderWith(t, cm)
+
+	v1, err := r.configMapResourceVersion(context.Background(), ns, "cloud")
+	if err != nil {
+		t.Fatalf("configMapResourceVersion err = %v", err)
+	}
+	if v1 == "" {
+		t.Fatal("resourceVersion is empty; the cache key would not track edits")
+	}
+
+	// An in-place edit must change the resourceVersion the key folds in.
+	var fresh corev1.ConfigMap
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "cloud"}, &fresh); err != nil {
+		t.Fatalf("get configmap: %v", err)
+	}
+	fresh.Data["cluster"] = "two"
+	if err := r.Update(context.Background(), &fresh); err != nil {
+		t.Fatalf("update configmap: %v", err)
+	}
+	v2, err := r.configMapResourceVersion(context.Background(), ns, "cloud")
+	if err != nil {
+		t.Fatalf("configMapResourceVersion (post-edit) err = %v", err)
+	}
+	if v1 == v2 {
+		t.Fatalf("resourceVersion unchanged after edit (%q); an in-place ConfigMap edit would be ignored", v2)
+	}
+}
+
+// A configMapRef cache key for a missing ConfigMap is terminal — the helper
+// surfaces the not-found so RESTConfig wraps it as errInvalidKubeConfigSpec.
+func TestConfigMapResourceVersion_Missing(t *testing.T) {
+	t.Parallel()
+	r := builderWith(t)
+	if _, err := r.configMapResourceVersion(context.Background(), "team-a", "absent"); err == nil {
+		t.Fatal("configMapResourceVersion err = nil, want a not-found error")
 	}
 }

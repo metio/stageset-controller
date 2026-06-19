@@ -6,6 +6,7 @@ package actions
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -109,6 +110,88 @@ func TestRun_HTTPForbiddenHost(t *testing.T) {
 		[]stagesv1.Action{{Name: "ping", HTTP: &stagesv1.HTTPAction{URL: "http://127.0.0.1:1/x"}}}, nil, nil)
 	if !errors.Is(err, ErrForbiddenHost) {
 		t.Fatalf("want ErrForbiddenHost, got %v", err)
+	}
+}
+
+// TestHTTPAction_DialPinsResolvedIP proves the dial-time guard: a host on the
+// allowlist that resolves to a forbidden address is rejected at connect, after
+// the string-level allowedURL check has already passed.
+func TestHTTPAction_DialPinsResolvedIP(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		resolve net.IP
+	}{
+		{"loopback", net.ParseIP("127.0.0.1")},
+		{"link-local metadata", net.ParseIP("169.254.169.254")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := &Executor{
+				AllowedHosts: []string{"internal.example"},
+				lookupIP: func(_ context.Context, _ string) ([]net.IP, error) {
+					return []net.IP{tc.resolve}, nil
+				},
+			}
+			err := e.Run(context.Background(), "ns",
+				[]stagesv1.Action{{Name: "ping", HTTP: &stagesv1.HTTPAction{URL: "http://internal.example/x"}}}, nil, nil)
+			if !errors.Is(err, ErrForbiddenAddress) {
+				t.Fatalf("want ErrForbiddenAddress, got %v", err)
+			}
+		})
+	}
+}
+
+// TestHTTPAction_InetAtonRejectedAtDial proves an inet_aton-form literal that
+// the libc resolver honors (2130706433 == 127.0.0.1) is rejected at dial: the
+// resolver returns the loopback IP and the dial-time pin denies it.
+func TestHTTPAction_InetAtonRejectedAtDial(t *testing.T) {
+	t.Parallel()
+	e := &Executor{
+		lookupIP: func(_ context.Context, host string) ([]net.IP, error) {
+			// The single-int form 2130706433 decodes to 127.0.0.1.
+			if host == "2130706433" {
+				return []net.IP{net.ParseIP("127.0.0.1")}, nil
+			}
+			return nil, errors.New("unexpected host " + host)
+		},
+	}
+	err := e.Run(context.Background(), "ns",
+		[]stagesv1.Action{{Name: "ping", HTTP: &stagesv1.HTTPAction{URL: "http://2130706433/"}}}, nil, nil)
+	if !errors.Is(err, ErrForbiddenAddress) {
+		t.Fatalf("want ErrForbiddenAddress, got %v", err)
+	}
+}
+
+// TestHTTPAction_AllowedHostStillDials proves the dial guard does not break the
+// happy path: a permitted host that resolves to the httptest listener connects.
+func TestHTTPAction_AllowedHostStillDials(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	srvHost := hostOf(t, srv.URL)
+	e := &Executor{
+		AllowedHosts: []string{srvHost},
+		// Permit the loopback the httptest server listens on; production would
+		// reject it, but the allowlist + this validator opt the test in.
+		IPValidator: PermissiveIP,
+		lookupIP: func(_ context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(context.Background(), "ip", host)
+		},
+	}
+	err := e.Run(context.Background(), "ns",
+		[]stagesv1.Action{{Name: "ping", HTTP: &stagesv1.HTTPAction{URL: srv.URL}}}, nil, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if atomic.LoadInt32(&hits) != 1 {
+		t.Fatalf("hits = %d, want 1", hits)
 	}
 }
 

@@ -70,7 +70,14 @@ func (a *Applier) Wait(ctx context.Context, set object.ObjMetadataSet, timeout t
 }
 
 // Delete removes the given objects (background propagation). Used to prune the
-// objects that fell out of a stage's inventory.
-func (a *Applier) Delete(ctx context.Context, objects []*unstructured.Unstructured) (*ssa.ChangeSet, error) {
-	return a.rm.DeleteAll(ctx, objects, ssa.DefaultDeleteOptions())
+// objects that fell out of a stage's inventory and to tear a StageSet down.
+//
+// Inclusions is set to this StageSet's owner labels so ssa re-checks the live
+// object and skips any object that no longer carries them — an object adopted or
+// relabeled by another manager between reconciles is left untouched rather than
+// deleted out from under its new owner.
+func (a *Applier) Delete(ctx context.Context, name, namespace string, objects []*unstructured.Unstructured) (*ssa.ChangeSet, error) {
+	opts := ssa.DefaultDeleteOptions()
+	opts.Inclusions = a.rm.GetOwnerLabels(name, namespace)
+	return a.rm.DeleteAll(ctx, objects, opts)
 }
