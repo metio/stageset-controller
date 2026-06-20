@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -164,7 +163,7 @@ func (r *StageSetReconciler) planVersionMigrations(ctx context.Context, ss *stag
 	if lreason != "" {
 		return nil, lreason, lmsg, nil
 	}
-	pending, perr := selectMigrations(ladder, currentV, desiredV)
+	pending, perr := migrations.Select(ladder, currentV, desiredV)
 	if perr != nil {
 		return nil, ReasonInvalidVersion, perr.Error(), nil
 	}
@@ -302,44 +301,6 @@ func (r *StageSetReconciler) checkMigrationSourcePinned(ss *stagesv1.StageSet, r
 	r.event(ss, corev1.EventTypeWarning, eventReasonMigrationSourceMutable,
 		"migrations source is pinned to a mutable tag/branch; an upstream overwrite can auto-roll new destructive content — pin to a digest/commit")
 	return "", ""
-}
-
-// selectMigrations returns the migrations whose target version is crossed by
-// current -> desired (current < to <= desired) and whose optional `from`
-// constraint the current version satisfies, ordered by ascending target.
-func selectMigrations(migrations []stagesv1.Migration, currentV, desiredV *semver.Version) ([]*stagesv1.Migration, error) {
-	type scored struct {
-		m  *stagesv1.Migration
-		to *semver.Version
-	}
-	var picked []scored
-	for i := range migrations {
-		m := &migrations[i]
-		toV, err := semver.NewVersion(m.To)
-		if err != nil {
-			return nil, fmt.Errorf("%w: migration %q has invalid to %q", errInvalidVersion, m.Name, m.To)
-		}
-		if !toV.GreaterThan(currentV) || toV.GreaterThan(desiredV) {
-			continue // boundary not crossed by this transition
-		}
-		if m.From != "" {
-			constraint, err := semver.NewConstraint(m.From)
-			if err != nil {
-				return nil, fmt.Errorf("%w: migration %q has invalid from %q", errInvalidVersion, m.Name, m.From)
-			}
-			if !constraint.Check(currentV) {
-				continue // current version does not satisfy the from constraint
-			}
-		}
-		picked = append(picked, scored{m: m, to: toV})
-	}
-	// Ascending target version; equal targets keep spec order (stable sort).
-	sort.SliceStable(picked, func(i, j int) bool { return picked[i].to.LessThan(picked[j].to) })
-	out := make([]*stagesv1.Migration, 0, len(picked))
-	for _, s := range picked {
-		out = append(out, s.m)
-	}
-	return out, nil
 }
 
 // resolveDesiredVersion reads the desired version from spec.version: an inline

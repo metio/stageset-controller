@@ -127,3 +127,71 @@ func semverIsBare(s string) bool {
 	_, err := semver.StrictNewVersion(s)
 	return err == nil
 }
+
+// Outcome reports whether a current→desired transition selects a migration, and
+// why not when it doesn't.
+type Outcome struct {
+	Migration *stagesv1.Migration
+	Fires     bool
+	Reason    string // why excluded; empty when Fires
+}
+
+// Explain reports, for every migration in the ladder, whether the transition
+// current→desired selects it — the boundary is crossed (current < to <= desired)
+// and the optional from-constraint admits current — ordered by ascending target
+// version, the order they would run. It errors only on an unparseable to/from,
+// which a ladder that passed ValidateLadder has none of. It is the shared
+// selection logic behind both the reconciler's Select and the CLI's transition
+// report, so the two never diverge.
+func Explain(ladder []stagesv1.Migration, currentV, desiredV *semver.Version) ([]Outcome, error) {
+	type scored struct {
+		o  Outcome
+		to *semver.Version
+	}
+	list := make([]scored, 0, len(ladder))
+	for i := range ladder {
+		m := &ladder[i]
+		toV, err := semver.NewVersion(m.To)
+		if err != nil {
+			return nil, fmt.Errorf("migration %q has invalid to %q: %w", m.Name, m.To, err)
+		}
+		o := Outcome{Migration: m}
+		switch {
+		case !toV.GreaterThan(currentV) || toV.GreaterThan(desiredV):
+			o.Reason = fmt.Sprintf("to %s is not in the crossed range (%s, %s]", m.To, currentV, desiredV)
+		case m.From != "":
+			constraint, err := semver.NewConstraint(m.From)
+			if err != nil {
+				return nil, fmt.Errorf("migration %q has invalid from %q: %w", m.Name, m.From, err)
+			}
+			if !constraint.Check(currentV) {
+				o.Reason = fmt.Sprintf("from %q does not match current %s", m.From, currentV)
+			}
+		}
+		o.Fires = o.Reason == ""
+		list = append(list, scored{o: o, to: toV})
+	}
+	// Ascending target version; equal targets keep ladder order (stable sort).
+	sort.SliceStable(list, func(i, j int) bool { return list[i].to.LessThan(list[j].to) })
+	out := make([]Outcome, len(list))
+	for i := range list {
+		out[i] = list[i].o
+	}
+	return out, nil
+}
+
+// Select returns the migrations the transition current→desired fires, in run
+// order (ascending target version). A thin filter over Explain.
+func Select(ladder []stagesv1.Migration, currentV, desiredV *semver.Version) ([]*stagesv1.Migration, error) {
+	outcomes, err := Explain(ladder, currentV, desiredV)
+	if err != nil {
+		return nil, err
+	}
+	var out []*stagesv1.Migration
+	for i := range outcomes {
+		if outcomes[i].Fires {
+			out = append(out, outcomes[i].Migration)
+		}
+	}
+	return out, nil
+}

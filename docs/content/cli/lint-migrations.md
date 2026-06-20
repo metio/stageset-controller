@@ -31,6 +31,26 @@ and action verbs — so you can eyeball what will run:
   drop-legacy  1.x → 2.0.0  before db-pre  delete
 ```
 
+## Simulating a transition
+
+The `from`/`to` selection math (`current < to <= desired` and the `from`
+constraint matching `current`) is otherwise invisible until a reconcile runs.
+Pass `--from` and `--to` to simulate a transition and see, using the controller's
+own selection logic, which migrations fire and why the rest are excluded:
+
+```text
+$ stagesetctl lint-migrations migrations/ --from 1.2.0 --to 2.0.0
+✓ 3 migration(s) valid
+  …
+transition 1.2.0 → 2.0.0:
+  drop-legacy     FIRES     delete
+  add-2-1         excluded  to 2.1.0 is not in the crossed range (1.2.0, 2.0.0]
+  backfill        excluded  from ">=1.5.0" does not match current 1.2.0
+```
+
+This is the quickest way to catch a migration that silently won't fire — for
+example a `from` constraint that excludes the version you're upgrading from.
+
 ## Exit codes
 
 | Code | Meaning |
