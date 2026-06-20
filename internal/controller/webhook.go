@@ -144,23 +144,53 @@ func validateVersion(ss *stagesv1.StageSet) error {
 	return nil
 }
 
-// validateMigrations enforces that migrations require a version, anchor to a
-// real stage, and that each migration action sets exactly one verb.
+// validateMigrations enforces migration invariants checkable at admission:
+// migrations require a version; the inline list and a source ref are mutually
+// exclusive; stage anchor keys (Name plus MigrationAnchor) are unique so a
+// migration resolves to exactly one stage; and each INLINE migration anchors to
+// a known stage/anchor (or, when empty, the first stage) with well-formed
+// actions. A SOURCED ladder's entries aren't available here — they are validated
+// at fetch time (reason MigrationArtifactInvalid).
 func validateMigrations(ss *stagesv1.StageSet) error {
-	if len(ss.Spec.Migrations) == 0 {
+	hasInline := len(ss.Spec.Migrations) > 0
+	hasSource := ss.Spec.MigrationsSourceRef != nil
+	if hasInline && hasSource {
+		return fmt.Errorf("spec.migrations and spec.migrationsSourceRef are mutually exclusive")
+	}
+	if !hasInline && !hasSource {
 		return nil
 	}
 	if ss.Spec.Version == nil {
-		return fmt.Errorf("spec.migrations requires spec.version")
+		return fmt.Errorf("migrations require spec.version")
 	}
-	stages := make(map[string]bool, len(ss.Spec.Stages))
+
+	// Anchor keys = stage Names plus declared MigrationAnchors; they must be
+	// unique across the union so a migration's Stage value resolves to exactly
+	// one stage (by anchor preferred, else name).
+	anchors := make(map[string]bool, len(ss.Spec.Stages))
 	for i := range ss.Spec.Stages {
-		stages[ss.Spec.Stages[i].Name] = true
+		st := &ss.Spec.Stages[i]
+		if anchors[st.Name] {
+			return fmt.Errorf("stage name %q collides with another stage name or migrationAnchor", st.Name)
+		}
+		anchors[st.Name] = true
+		if st.MigrationAnchor != "" {
+			if anchors[st.MigrationAnchor] {
+				return fmt.Errorf("stage %q migrationAnchor %q collides with another stage name or migrationAnchor", st.Name, st.MigrationAnchor)
+			}
+			anchors[st.MigrationAnchor] = true
+		}
 	}
+
+	// A sourced ladder is fetched and validated at reconcile time.
+	if hasSource {
+		return nil
+	}
+
 	for i := range ss.Spec.Migrations {
 		m := &ss.Spec.Migrations[i]
-		if !stages[m.Stage] {
-			return fmt.Errorf("migration %q anchors to unknown stage %q", m.Name, m.Stage)
+		if m.Stage != "" && !anchors[m.Stage] {
+			return fmt.Errorf("migration %q anchors to unknown stage or anchor %q", m.Name, m.Stage)
 		}
 		seen := map[string]bool{}
 		for j := range m.Actions {

@@ -190,7 +190,7 @@ spec:
                 description: |-
                   Migrations are version-gated action ladders run when crossing a
                   version boundary, anchored before a named stage's pre-actions.
-                  Requires spec.version.
+                  Requires spec.version. Mutually exclusive with MigrationsSourceRef.
                 items:
                   description: Migration is a version-gated action ladder.
                   properties:
@@ -489,8 +489,12 @@ spec:
                       type: string
                     stage:
                       description: |-
-                        Stage anchors when the migration runs: before this stage's
-                        pre-actions.
+                        Stage anchors when the migration runs: before the pre-actions of the
+                        stage whose MigrationAnchor (preferred) or Name equals this value. Omit
+                        to anchor before the first stage. A value matching no stage in a
+                        consuming StageSet fails closed (reason MigrationStageNotFound) rather
+                        than silently skipping — important for a ladder shared across StageSets
+                        whose stages may be named differently.
                       type: string
                     to:
                       description: |-
@@ -499,10 +503,53 @@ spec:
                       type: string
                   required:
                   - name
-                  - stage
                   - to
                   type: object
                 type: array
+              migrationsSourceRef:
+                description: |-
+                  MigrationsSourceRef sources the migration ladder from a Flux source's
+                  artifact instead of inlining it, so one ladder can be authored once and
+                  shared across many StageSets. The artifact holds a serialized
+                  []Migration. Mutually exclusive with Migrations; requires spec.version.
+                properties:
+                  path:
+                    description: |-
+                      Path inside the artifact selecting the migrations file or directory.
+                      Defaults to the artifact root.
+                    type: string
+                  sourceRef:
+                    description: |-
+                      SourceRef references the artifact-producing source (an ExternalArtifact,
+                      or a producer kind resolved via the back-pointer index — the same
+                      reference shape a stage uses). Resolved in the StageSet's namespace;
+                      cross-namespace references are gated by --no-cross-namespace-refs.
+                    properties:
+                      apiVersion:
+                        description: |-
+                          APIVersion of the referent. Defaults to
+                          source.toolkit.fluxcd.io/v1. Required when Kind is set to a
+                          producer kind.
+                        type: string
+                      kind:
+                        description: |-
+                          Kind of the referent. Defaults to ExternalArtifact; any other kind
+                          is treated as a producer and resolved via the back-pointer index.
+                        type: string
+                      name:
+                        description: Name of the referent.
+                        type: string
+                      namespace:
+                        description: |-
+                          Namespace of the referent; defaults to the StageSet's namespace.
+                          Cross-namespace references are gated by --no-cross-namespace-refs.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - sourceRef
+                type: object
               retryInterval:
                 description: RetryInterval overrides Interval after a failed run.
                 type: string
@@ -1443,6 +1490,14 @@ spec:
                     force:
                       description: Force recreates objects on immutable-field conflicts.
                       type: boolean
+                    migrationAnchor:
+                      description: |-
+                        MigrationAnchor declares a stable anchor role this stage fulfils, so a
+                        shared migration ladder can anchor to it by role rather than by this
+                        stage's Name. A migration's Stage value resolves to the stage whose
+                        MigrationAnchor (preferred) or Name matches it. Anchor keys must be
+                        unique across stage Names and MigrationAnchors within a StageSet.
+                      type: string
                     name:
                       description: Name of the stage; unique within the StageSet,
                         used as inventory key.
