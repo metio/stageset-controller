@@ -174,6 +174,13 @@ would skip a required migration is refused with the `DowngradeRequiresMigration`
 reason — see its [runbook](/runbooks/downgraderequiresmigration/). For the
 failure path, see [When a migration fails](#when-a-migration-fails).
 
+**First adoption (baselining).** The first time a StageSet sets `spec.version` and
+has no `status.version` yet, the controller records the version and runs **no**
+migrations — an existing deployment is assumed to already be at that version. It
+emits a `MigrationsBaselined` event so you can tell this apart from a real no-op
+and confirm the deployment really is at the recorded version. Migrations run only
+on a subsequent transition that crosses their boundary.
+
 ## Sharing one ladder across StageSets
 
 Deploying the same application into many namespaces — one `StageSet` each — means

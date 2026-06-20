@@ -268,6 +268,47 @@ func readyReason(ss *stagesv1.StageSet) string {
 	return c.Reason
 }
 
+// First-adoption baselining emits a MigrationsBaselined event exactly once, so an
+// operator can tell "recorded the version, ran nothing" from a real no-op.
+func TestReconcile_Migration_BaselineEmitsEvent(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
+	ss := versionedStageSet(ns, "baseline-ev", "ea", "2.0.0", nil)
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	rec := &capturingRecorder{}
+	r := &StageSetReconciler{
+		Client:     c,
+		RESTMapper: c.RESTMapper(),
+		Recorder:   rec,
+		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "baseline-ev"}}
+	if _, err := driveReconcile(r, req); err != nil {
+		t.Fatalf("baseline reconcile: %v", err)
+	}
+	if !rec.has(eventReasonBaselined) {
+		t.Fatal("first-adoption baseline should emit a MigrationsBaselined event")
+	}
+	if getStageSet(t, c, ns, "baseline-ev").Status.Version != "2.0.0" {
+		t.Fatal("baseline should record the version")
+	}
+
+	// A steady reconcile (no version transition) must not re-baseline / re-emit.
+	rec.mu.Lock()
+	rec.events = nil
+	rec.mu.Unlock()
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("steady reconcile: %v", err)
+	}
+	if rec.has(eventReasonBaselined) {
+		t.Fatal("a steady reconcile must not re-emit the baseline event")
+	}
+}
+
 // The primary JaaS integration end-to-end: a stage referencing a JsonnetSnippet
 // resolves through the ExternalArtifact's RFC-0012 back-pointer, the run pins
 // and fetches that artifact, and the rendered manifests are applied to the

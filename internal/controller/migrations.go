@@ -536,4 +536,8 @@ const (
 	eventReasonMigrationCompleted     = "MigrationCompleted"
 	eventReasonMigrationFailed        = "MigrationFailed"
 	eventReasonMigrationSourceMutable = "MigrationSourceMutable"
+	// eventReasonBaselined marks the first-adoption reconcile that records the
+	// version without running migrations, so an operator can tell a baseline from
+	// a real no-op and sanity-check the deployment is actually at that version.
+	eventReasonBaselined = "MigrationsBaselined"
 )

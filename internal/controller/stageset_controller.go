@@ -766,6 +766,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// in-flight migration ledger (baselining records the version, having run
 	// no migrations).
 	if migPlan.versionSet {
+		if migPlan.baseline {
+			r.event(&ss, corev1.EventTypeNormal, eventReasonBaselined,
+				fmt.Sprintf("baselined at %s on first adoption: no migrations were run; the deployment is assumed already at this version", migPlan.desired))
+		}
 		ss.Status.Version = migPlan.desired
 		ss.Status.ExecutedMigrations = nil
 		ss.Status.ExecutedMigrationActions = nil
