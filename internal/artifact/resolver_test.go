@@ -303,3 +303,32 @@ func TestIsDirectSourceKind(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifiedState(t *testing.T) {
+	t.Parallel()
+	mk := func(conds ...map[string]any) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{Object: map[string]any{}}
+		if len(conds) > 0 {
+			s := make([]any, len(conds))
+			for i := range conds {
+				s[i] = conds[i]
+			}
+			if err := unstructured.SetNestedSlice(u.Object, s, "status", "conditions"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return u
+	}
+	if v := verifiedState(mk()); v != nil {
+		t.Fatal("no conditions should yield nil")
+	}
+	if v := verifiedState(mk(map[string]any{"type": "Ready", "status": "True"})); v != nil {
+		t.Fatal("no SourceVerified condition should yield nil")
+	}
+	if v := verifiedState(mk(map[string]any{"type": "SourceVerified", "status": "True"})); v == nil || !*v {
+		t.Fatalf("SourceVerified=True should yield true, got %v", v)
+	}
+	if v := verifiedState(mk(map[string]any{"type": "SourceVerified", "status": "False"})); v == nil || *v {
+		t.Fatalf("SourceVerified=False should yield false, got %v", v)
+	}
+}

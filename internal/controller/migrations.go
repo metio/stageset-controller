@@ -194,6 +194,9 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 			return nil, "", "", rerr // transient API error
 		}
 	}
+	if reason, msg := r.checkMigrationSourceVerified(ra); reason != "" {
+		return nil, reason, msg, nil
+	}
 	files, ferr := fetcher.Fetch(ctx, ra.URL, ra.Digest, src.Path)
 	if ferr != nil {
 		return nil, "", "", fmt.Errorf("fetch migrations artifact: %w", ferr) // transient
@@ -226,6 +229,24 @@ func ladderHasHTTP(ladder []stagesv1.Migration) bool {
 		}
 	}
 	return false
+}
+
+// checkMigrationSourceVerified gates a sourced ladder on signature provenance.
+// A source whose verification FAILED (SourceVerified=False) is always refused;
+// when --require-verified-migration-sources is set, a source that configures no
+// verification at all (no SourceVerified condition) is refused too. Returns an
+// empty reason to proceed. Fails closed — unverified destructive instructions
+// are never executed.
+func (r *StageSetReconciler) checkMigrationSourceVerified(ra artifact.ResolvedArtifact) (reason, msg string) {
+	switch {
+	case ra.Verified != nil && !*ra.Verified:
+		return ReasonMigrationSourceNotVerified,
+			"migrations source signature verification failed (SourceVerified=False); the source's spec.verify did not pass"
+	case r.RequireVerifiedMigrationSources && ra.Verified == nil:
+		return ReasonMigrationSourceNotVerified,
+			"migrations source is not signature-verified and --require-verified-migration-sources is set; configure spec.verify (cosign/notation) on the source"
+	}
+	return "", ""
 }
 
 // migrationFileExts are the artifact file extensions parsed as migration

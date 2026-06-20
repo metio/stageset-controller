@@ -68,6 +68,13 @@ const (
 	// until the artifact is fixed and republished.
 	ReasonMigrationArtifactInvalid = "MigrationArtifactInvalid"
 
+	// ReasonMigrationSourceNotVerified: a sourced migration ladder's source is
+	// not signature-verified — its verification FAILED (SourceVerified=False),
+	// or --require-verified-migration-sources is set and the source configures
+	// no verification at all. Fails closed: unverified destructive instructions
+	// are not executed. Terminal until the source's spec.verify passes.
+	ReasonMigrationSourceNotVerified = "MigrationSourceNotVerified"
+
 	// ReasonPreviousRevisionUnavailable: rollbackOnFailure could not restore
 	// the last-good revisions because a producer has garbage-collected one.
 	// Rollback is best-effort: it works only while producers retain.
@@ -113,6 +120,7 @@ var AllReasons = []string{
 	ReasonDowngradeRequiresMigration,
 	ReasonMigrationStageNotFound,
 	ReasonMigrationArtifactInvalid,
+	ReasonMigrationSourceNotVerified,
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,

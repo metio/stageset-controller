@@ -68,6 +68,12 @@ type ResolvedArtifact struct {
 	Revision string
 	// Digest is status.artifact.digest in "<algo>:<hex>" form.
 	Digest string
+
+	// Verified reflects status.conditions[type=SourceVerified] on the resolved
+	// source CR: nil when the source declares no such condition (spec.verify not
+	// configured — e.g. an in-cluster ExternalArtifact), else its boolean status.
+	// Flux sources with spec.verify (cosign/notation) carry it.
+	Verified *bool
 }
 
 // Key is the "namespace/name" key recorded in
@@ -130,7 +136,35 @@ func (r *Resolver) Resolve(ctx context.Context, c client.Client, ref stagesv1.So
 	}
 	art.Namespace = ea.GetNamespace()
 	art.Name = ea.GetName()
+	art.Verified = verifiedState(ea)
 	return art, nil
+}
+
+// sourceVerifiedCondition is the condition type Flux source-controller sets on a
+// source when its spec.verify (cosign/notation) check passes.
+const sourceVerifiedCondition = "SourceVerified"
+
+// verifiedState reports the source's signature-verification state from
+// status.conditions[type=SourceVerified]: nil when the source declares no such
+// condition (spec.verify not configured), else whether it is True.
+func verifiedState(obj *unstructured.Unstructured) *bool {
+	conds, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err != nil || !found {
+		return nil
+	}
+	for _, c := range conds {
+		m, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := m["type"].(string); t != sourceVerifiedCondition {
+			continue
+		}
+		s, _ := m["status"].(string)
+		v := s == "True"
+		return &v
+	}
+	return nil
 }
 
 // directSourceKinds are the classic Flux source kinds (besides ExternalArtifact)
