@@ -202,6 +202,13 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 	}
 	files, ferr := fetcher.Fetch(ctx, ra.URL, ra.Digest, src.Path)
 	if ferr != nil {
+		// A digest mismatch, SSRF rejection, or oversized/decompression-bomb
+		// artifact would fail identically on every retry — surface it as terminal
+		// MigrationArtifactInvalid rather than backing off forever. Genuinely
+		// transient fetch failures (network, 5xx) still requeue.
+		if terminalFetchError(ferr) {
+			return nil, ReasonMigrationArtifactInvalid, fmt.Sprintf("fetch migrations artifact: %v", ferr), nil
+		}
 		return nil, "", "", fmt.Errorf("fetch migrations artifact: %w", ferr) // transient
 	}
 	ladder, perr := parseMigrationLadder(files)
