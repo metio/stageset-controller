@@ -61,3 +61,27 @@ func TestLintMigrations_MissingPath(t *testing.T) {
 		t.Fatalf("exit = %d, want %d (runtime error)\nstderr=%s", code, exitError, stderr)
 	}
 }
+
+func TestLintMigrations_TransitionReport(t *testing.T) {
+	path := writeLadder(t, ""+
+		"- name: fires\n  to: \"2.0.0\"\n  stage: s\n  actions: [{name: del, delete: {target: {apiVersion: v1, kind: ConfigMap, name: x}}}]\n"+
+		"- name: out-of-range\n  to: \"5.0.0\"\n  stage: s\n"+
+		"- name: from-excluded\n  to: \"2.0.0\"\n  from: \">=1.5.0\"\n  stage: s\n")
+	stdout, _, code := runCLI(t, nil, "lint-migrations", path, "--from", "1.0.0", "--to", "2.0.0")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	for _, want := range []string{"transition 1.0.0 → 2.0.0", "fires", "FIRES", "out-of-range", "excluded", "from-excluded"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("report missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestLintMigrations_FromWithoutTo(t *testing.T) {
+	path := writeLadder(t, "- name: a\n  to: \"2.0.0\"\n  stage: s\n")
+	_, _, code := runCLI(t, nil, "lint-migrations", path, "--from", "1.0.0")
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d (--from without --to)", code, exitError)
+	}
+}

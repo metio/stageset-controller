@@ -23,54 +23,9 @@ import (
 	"github.com/metio/stageset-controller/internal/artifact"
 )
 
-// --- selectMigrations (pure) ------------------------------------------------
-
-func TestSelectMigrations_OrdersByAscendingTargetAndHonorsBoundary(t *testing.T) {
-	t.Parallel()
-	migs := []stagesv1.Migration{
-		{Name: "to-3", To: "3.0.0", Stage: "s"},
-		{Name: "to-2b", To: "2.0.0", Stage: "s"},
-		{Name: "to-2a", To: "2.0.0", Stage: "s"},
-		{Name: "below", To: "1.0.0", Stage: "s"}, // not crossed by 1.0.0 -> 3.0.0
-		{Name: "above", To: "4.0.0", Stage: "s"}, // beyond desired
-	}
-	cur := semver.MustParse("1.0.0")
-	des := semver.MustParse("3.0.0")
-	got, err := selectMigrations(migs, cur, des)
-	if err != nil {
-		t.Fatalf("selectMigrations: %v", err)
-	}
-	var names []string
-	for _, m := range got {
-		names = append(names, m.Name)
-	}
-	want := []string{"to-2b", "to-2a", "to-3"} // ascending target; equal targets keep spec order
-	if len(names) != len(want) {
-		t.Fatalf("got %v, want %v", names, want)
-	}
-	for i := range want {
-		if names[i] != want[i] {
-			t.Fatalf("got %v, want %v", names, want)
-		}
-	}
-}
-
-func TestSelectMigrations_FromConstraintFiltersByCurrent(t *testing.T) {
-	t.Parallel()
-	migs := []stagesv1.Migration{
-		{Name: "gated", To: "2.0.0", From: ">=1.5.0", Stage: "s"},
-	}
-	// current 1.2.0 does not satisfy >=1.5.0 → excluded
-	got, err := selectMigrations(migs, semver.MustParse("1.2.0"), semver.MustParse("2.0.0"))
-	if err != nil || len(got) != 0 {
-		t.Fatalf("from-constraint should exclude: got %v err %v", got, err)
-	}
-	// current 1.6.0 satisfies → included
-	got, err = selectMigrations(migs, semver.MustParse("1.6.0"), semver.MustParse("2.0.0"))
-	if err != nil || len(got) != 1 {
-		t.Fatalf("from-constraint should include: got %v err %v", got, err)
-	}
-}
+// Migration selection (selectMigrations → migrations.Select) is unit- and
+// property-tested in the internal/migrations package; the tests below cover the
+// controller's planning, anchoring, ledger, and gate behavior.
 
 func TestCoverageGap(t *testing.T) {
 	t.Parallel()

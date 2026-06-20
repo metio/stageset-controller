@@ -11,28 +11,40 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/spf13/cobra"
 
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/migrations"
 )
 
 func newLintMigrationsCommand(o *options) *cobra.Command {
-	return &cobra.Command{
+	var from, to string
+	cmd := &cobra.Command{
 		Use:   "lint-migrations PATH",
 		Short: "Validate a migration ladder file or directory before publishing",
 		Long: "Parse and validate a migration ladder — a single file, or a directory of .yaml/.yml/.json files — with " +
 			"the exact checks the controller runs at admission and at sourced-artifact fetch time: strict parsing " +
 			"(a misspelled field is rejected), exactly one verb per action, unique migration and action names, and " +
 			"valid semver in `to` plus a valid constraint in `from`. Prints the parsed ladder on success; on the first " +
-			"problem it prints the problem and exits 1, so it can gate CI before the ladder is published to a source.",
+			"problem it prints the problem and exits 1, so it can gate CI before the ladder is published to a source.\n\n" +
+			"With --from and --to it also simulates a version transition and reports which migrations would fire and " +
+			"which are excluded and why — the same selection the controller runs — so the otherwise-invisible " +
+			"from/to math is visible before it hits a cluster.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return runLintMigrations(o, args[0])
+			return runLintMigrations(o, args[0], from, to)
 		},
 	}
+	cmd.Flags().StringVar(&from, "from", "", "Simulate a transition from this (current) version; reports which migrations fire. Requires --to.")
+	cmd.Flags().StringVar(&to, "to", "", "Simulate a transition to this (desired) version. Requires --from.")
+	return cmd
 }
 
-func runLintMigrations(o *options, path string) error {
+func runLintMigrations(o *options, path, from, to string) error {
+	if (from == "") != (to == "") {
+		return runtimeErr(fmt.Errorf("--from and --to must be given together"))
+	}
 	files, err := readLadderFiles(path)
 	if err != nil {
 		return runtimeErr(err)
@@ -65,6 +77,44 @@ func runLintMigrations(o *options, path string) error {
 			verbs[j] = m.Actions[j].Verb()
 		}
 		fmt.Fprintf(tw, "  %s\t%s\tbefore %s\t%s\n", m.Name, boundary, anchor, strings.Join(verbs, ", "))
+	}
+	_ = tw.Flush()
+
+	if from != "" {
+		return reportTransition(o, ladder, from, to)
+	}
+	return nil
+}
+
+// reportTransition prints which migrations a from→to transition fires and why
+// the rest are excluded, using the controller's own selection logic.
+func reportTransition(o *options, ladder []stagesv1.Migration, from, to string) error {
+	fromV, err := semver.NewVersion(from)
+	if err != nil {
+		return runtimeErr(fmt.Errorf("--from %q is not a semver: %w", from, err))
+	}
+	toV, err := semver.NewVersion(to)
+	if err != nil {
+		return runtimeErr(fmt.Errorf("--to %q is not a semver: %w", to, err))
+	}
+	outcomes, err := migrations.Explain(ladder, fromV, toV)
+	if err != nil {
+		return runtimeErr(err)
+	}
+
+	w := o.streams.Out
+	fmt.Fprintf(w, "\ntransition %s → %s:\n", from, to)
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	for _, oc := range outcomes {
+		if oc.Fires {
+			verbs := make([]string, len(oc.Migration.Actions))
+			for j := range oc.Migration.Actions {
+				verbs[j] = oc.Migration.Actions[j].Verb()
+			}
+			fmt.Fprintf(tw, "  %s\tFIRES\t%s\n", oc.Migration.Name, strings.Join(verbs, ", "))
+		} else {
+			fmt.Fprintf(tw, "  %s\texcluded\t%s\n", oc.Migration.Name, oc.Reason)
+		}
 	}
 	_ = tw.Flush()
 	return nil
