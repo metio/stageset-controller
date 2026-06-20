@@ -332,3 +332,43 @@ func TestVerifiedState(t *testing.T) {
 		t.Fatalf("SourceVerified=False should yield false, got %v", v)
 	}
 }
+
+func TestPinnedState(t *testing.T) {
+	t.Parallel()
+	mk := func(kind string, refField, refVal string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{Object: map[string]any{}}
+		u.SetKind(kind)
+		if refField != "" {
+			if err := unstructured.SetNestedField(u.Object, refVal, "spec", "ref", refField); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return u
+	}
+	cases := []struct {
+		name string
+		obj  *unstructured.Unstructured
+		want *bool
+	}{
+		{"oci digest is pinned", mk("OCIRepository", "digest", "sha256:abc"), boolp(true)},
+		{"oci tag is not pinned", mk("OCIRepository", "tag", "latest"), boolp(false)},
+		{"oci no ref is not pinned", mk("OCIRepository", "", ""), boolp(false)},
+		{"git commit is pinned", mk("GitRepository", "commit", "deadbeef"), boolp(true)},
+		{"git branch is not pinned", mk("GitRepository", "branch", "main"), boolp(false)},
+		{"bucket is never pinned", mk("Bucket", "", ""), boolp(false)},
+		{"external artifact is exempt", mk("ExternalArtifact", "", ""), nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := pinnedState(c.obj)
+			switch {
+			case c.want == nil && got != nil:
+				t.Fatalf("want nil, got %v", *got)
+			case c.want != nil && (got == nil || *got != *c.want):
+				t.Fatalf("want %v, got %v", *c.want, got)
+			}
+		})
+	}
+}
+
+func boolp(b bool) *bool { return &b }

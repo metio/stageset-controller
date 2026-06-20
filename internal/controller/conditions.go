@@ -75,6 +75,12 @@ const (
 	// are not executed. Terminal until the source's spec.verify passes.
 	ReasonMigrationSourceNotVerified = "MigrationSourceNotVerified"
 
+	// ReasonMigrationSourceNotPinned: --require-pinned-migration-sources is set
+	// and a sourced migration ladder's source is pinned to a mutable tag/branch
+	// rather than an immutable digest/commit, so an upstream overwrite could
+	// auto-roll new destructive content. Terminal until the source is pinned.
+	ReasonMigrationSourceNotPinned = "MigrationSourceNotPinned"
+
 	// ReasonPreviousRevisionUnavailable: rollbackOnFailure could not restore
 	// the last-good revisions because a producer has garbage-collected one.
 	// Rollback is best-effort: it works only while producers retain.
@@ -121,6 +127,7 @@ var AllReasons = []string{
 	ReasonMigrationStageNotFound,
 	ReasonMigrationArtifactInvalid,
 	ReasonMigrationSourceNotVerified,
+	ReasonMigrationSourceNotPinned,
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,

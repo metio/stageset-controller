@@ -63,6 +63,7 @@ type Flags struct {
 	NoCrossNamespaceRefs            *bool
 	ObjectLevelKMS                  *bool
 	RequireVerifiedMigrationSources *bool
+	RequirePinnedMigrationSources   *bool
 	AllowedActionHosts              *StringSlice
 	DefaultInterval                 *time.Duration
 	MaxTeardownWait                 *time.Duration
@@ -124,6 +125,7 @@ func Register(fs *flag.FlagSet) *Flags {
 		NoCrossNamespaceRefs:            new(bool),
 		ObjectLevelKMS:                  new(bool),
 		RequireVerifiedMigrationSources: new(bool),
+		RequirePinnedMigrationSources:   new(bool),
 		AllowedActionHosts:              &StringSlice{},
 		DefaultInterval:                 new(time.Duration),
 		MaxTeardownWait:                 new(time.Duration),
@@ -184,6 +186,7 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.BoolVar(f.NoCrossNamespaceRefs, group("no-cross-namespace-refs", recon), false, "Deny cross-namespace sourceRef and dependsOn references.")
 	fs.BoolVar(f.ObjectLevelKMS, group("object-level-kms", recon), false, "Decrypt SOPS cloud KMS keys with each StageSet's serviceAccountName federated to a cloud identity, instead of the controller's ambient credentials. The tenant ServiceAccount must be federated (IRSA / Workload Identity) to a cloud identity granted KMS decrypt. Off by default (ambient credentials).")
 	fs.BoolVar(f.RequireVerifiedMigrationSources, group("require-verified-migration-sources", recon), false, "Require a spec.migrationsSourceRef source to be signature-verified (status.conditions[SourceVerified]=True from the source's spec.verify cosign/notation config) before its destructive migration ladder runs. A source whose verification FAILED is always refused; this flag additionally refuses sources that configure no verification at all. Off by default; strongly recommended in production.")
+	fs.BoolVar(f.RequirePinnedMigrationSources, group("require-pinned-migration-sources", recon), false, "Require a spec.migrationsSourceRef source to be pinned to an immutable revision (OCIRepository spec.ref.digest or GitRepository spec.ref.commit) before its destructive migration ladder runs, so a tag/branch overwrite can't auto-roll new destructive content. When off, a mutable-pinned source still runs but emits a Warning event. Off by default; recommended in production.")
 	fs.StringVar(f.TracingEndpoint, group("tracing-endpoint", tracing), "", "OTLP gRPC collector host:port (e.g. otel-collector.observability.svc:4317). Empty disables tracing entirely.")
 	fs.BoolVar(f.TracingInsecure, group("tracing-insecure", tracing), false, "Skip TLS when dialing the OTLP collector. Use only for in-cluster collectors that don't terminate TLS themselves.")
 	fs.Float64Var(f.TracingSampleRatio, group("tracing-sample-ratio", tracing), 1.0, "TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.")

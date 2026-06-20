@@ -138,6 +138,11 @@ type StageSetReconciler struct {
 	// ladder runs only if its source carries SourceVerified=True. A source whose
 	// verification FAILED is refused regardless of this flag.
 	RequireVerifiedMigrationSources bool
+	// RequirePinnedMigrationSources is the global
+	// --require-pinned-migration-sources flag: when true, a sourced migration
+	// ladder runs only if its source is pinned to an immutable revision
+	// (digest/commit). When false, a mutable-pinned source runs but warns.
+	RequirePinnedMigrationSources bool
 	// ObjectLevelKMS is the global --object-level-kms flag: when true, SOPS
 	// cloud KMS decryption uses the StageSet's serviceAccountName federated to
 	// a cloud identity (object-level identity) instead of the controller's

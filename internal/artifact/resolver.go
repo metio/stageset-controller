@@ -74,6 +74,14 @@ type ResolvedArtifact struct {
 	// configured — e.g. an in-cluster ExternalArtifact), else its boolean status.
 	// Flux sources with spec.verify (cosign/notation) carry it.
 	Verified *bool
+
+	// Pinned reports whether the resolved source is pinned to an immutable
+	// revision (OCIRepository spec.ref.digest, GitRepository spec.ref.commit) as
+	// opposed to a mutable tag/branch whose content an upstream push can change.
+	// nil when pinning does not apply to the resolved kind (an in-cluster
+	// ExternalArtifact or a producer back-pointer, whose revision the producer
+	// controls).
+	Pinned *bool
 }
 
 // Key is the "namespace/name" key recorded in
@@ -137,7 +145,32 @@ func (r *Resolver) Resolve(ctx context.Context, c client.Client, ref stagesv1.So
 	art.Namespace = ea.GetNamespace()
 	art.Name = ea.GetName()
 	art.Verified = verifiedState(ea)
+	art.Pinned = pinnedState(ea)
 	return art, nil
+}
+
+// pinnedState reports whether the source is pinned to an immutable revision.
+// OCIRepository is pinned by spec.ref.digest, GitRepository by spec.ref.commit;
+// a Bucket has no immutable ref and is never pinned. Other kinds (ExternalArtifact,
+// producer back-pointers) return nil — pinning does not apply, the producer owns
+// the revision.
+func pinnedState(obj *unstructured.Unstructured) *bool {
+	pin := func(fields ...string) *bool {
+		v, _, _ := unstructured.NestedString(obj.Object, fields...)
+		b := v != ""
+		return &b
+	}
+	switch obj.GetKind() {
+	case "OCIRepository":
+		return pin("spec", "ref", "digest")
+	case "GitRepository":
+		return pin("spec", "ref", "commit")
+	case "Bucket":
+		b := false
+		return &b
+	default:
+		return nil
+	}
 }
 
 // sourceVerifiedCondition is the condition type Flux source-controller sets on a
