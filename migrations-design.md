@@ -197,6 +197,14 @@ an already-hardened mechanism onto the migration path.
 4. **(NEW) Restrict `spec.serviceAccountName`** via webhook (same namespace;
    optional naming convention) so a StageSet can't name a more-privileged SA. The
    TokenRequest mint path is already least-privilege; bound *which* identity it mints.
+   **Decision: deferred / out of scope for sourced migrations.** `serviceAccountName`
+   governs *all* of a StageSet's actions (stages and migrations alike), not the
+   migration source specifically — restricting which SA a tenant may name is a
+   general StageSet multi-tenancy/admission-policy concern best handled by cluster
+   policy (Kyverno/Gatekeeper) or a future StageSet-wide control, not bolted onto
+   the migration feature. The migration-specific blast-radius controls
+   (same-namespace source, signature/pinning gates, action-host allowlist) stand on
+   their own.
 5. **(EXISTING) Reuse the SSRF-guarded fetcher + dial-time IP pin + size/decompression
    caps + tar-path validation** for the migration artifact and any `job`/`apply`
    sub-artifacts. All four byte-caps and redirect re-validation apply unchanged.
