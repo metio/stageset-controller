@@ -1,7 +1,7 @@
 ---
 title: Versioned migrations
-description: Run migrations once, when the deployed version crosses a release boundary.
-tags: [migrations, versioning, actions]
+description: Run migrations once, when the deployed version crosses a release boundary — inline, or sourced from a Flux artifact and shared across StageSets.
+tags: [migrations, versioning, actions, sources, security]
 ---
 
 Some changes only need to happen once, when you cross a release boundary — a
@@ -165,9 +165,134 @@ retry doesn't re-run a completed migration:
 - `status.version` — the deployed version, written only after a fully successful
   run.
 - `status.pendingMigrations` — migrations the next run will execute.
-- `status.executedMigrations` — the in-flight ledger for the current transition.
+- `status.executedMigrations` / `status.executedMigrationActions` — the in-flight
+  ledgers (per migration, and per action within a migration) for the current
+  transition, cleared once the version advances.
 
-Migrations emit `MigrationStarted` / `MigrationCompleted` events (and
-`MigrationFailed` on error). A downgrade that would skip a required migration is
-refused with the `DowngradeRequiresMigration` reason — see its
-[runbook](/runbooks/downgraderequiresmigration/).
+Migrations emit `MigrationStarted` / `MigrationCompleted` events. A downgrade that
+would skip a required migration is refused with the `DowngradeRequiresMigration`
+reason — see its [runbook](/runbooks/downgraderequiresmigration/). For the
+failure path, see [When a migration fails](#when-a-migration-fails).
+
+## Sharing one ladder across StageSets
+
+Deploying the same application into many namespaces — one `StageSet` each — means
+the same migration ladder in every one. Copying a destructive ladder into N specs
+and keeping them in sync is exactly where a missed edit becomes a data-loss
+incident. Author the ladder **once** as an artifact and point every StageSet at it
+with `migrationsSourceRef` instead:
+
+```yaml
+spec:
+  version:
+    fromObject:
+      stage: app
+      kind: Deployment
+      name: web
+  migrationsSourceRef:
+    sourceRef:
+      kind: OCIRepository
+      name: orders-migrations
+    path: migrations          # optional: a file or directory within the artifact
+  stages:
+    - name: app
+      sourceRef:
+        name: my-app
+```
+
+`migrationsSourceRef` is **mutually exclusive** with the inline `spec.migrations`.
+The artifact holds the ladder as YAML or JSON — each `.yaml`, `.yml`, or `.json`
+file is one migration or a list of them, parsed strictly so a misspelled field is
+rejected rather than ignored. The ladder lives once in the registry; each
+namespace carries only a small Flux source plus an identical StageSet, and a new
+release is a push to the registry, not an edit to N specs.
+
+Sourcing reuses the same fetch path as stage sources — revision pinning, the SSRF
+guard, and the size caps all apply. A source that is not yet ready holds the
+transition (the version is not advanced) rather than running a half-loaded ladder;
+a malformed or oversized artifact fails terminally with the
+`MigrationArtifactInvalid` reason — see its
+[runbook](/runbooks/migrationartifactinvalid/).
+
+### Anchoring a shared ladder
+
+A migration's `stage` says *where in the rollout it runs* — before that stage's
+pre-actions. A ladder shared across StageSets can't hard-code one StageSet's stage
+names, so give each stage an **anchor role** and let migrations reference the role:
+
+```yaml
+spec:
+  stages:
+    - name: prepare
+      migrationAnchor: db-pre     # this stage plays the "db-pre" role
+      sourceRef:
+        name: my-app
+    - name: rollout
+      sourceRef:
+        name: my-app
+```
+
+A migration in the shared ladder anchors to `db-pre` and resolves to whichever
+stage declares that role — `prepare` here, `db-migrate` in another StageSet — so
+one ladder travels across differently-named stages. A migration's `stage` resolves
+to the stage whose `migrationAnchor` matches, then by stage `name`; omit it to
+anchor before the first stage. Anchor keys are unique across names and roles. A
+migration that resolves to no stage fails closed with `MigrationStageNotFound`
+(see its [runbook](/runbooks/migrationstagenotfound/)) — never silently skipped.
+
+## Verifying and pinning the source
+
+A sourced ladder runs remote-authored, destructive instructions, so the controller
+can require the source prove its provenance and immutability before running:
+
+- **Signature verification.** Configure `spec.verify` (cosign or notation) on the
+  Flux source. A source whose verification *fails* is always refused
+  (`MigrationSourceNotVerified`). The controller flag
+  `--require-verified-migration-sources` additionally refuses a source that
+  configures no verification at all. Off by default; recommended in production.
+- **Immutable pinning.** Pin the source to a digest (`OCIRepository`
+  `spec.ref.digest`) or commit (`GitRepository` `spec.ref.commit`) so a tag
+  overwrite can't auto-roll new destructive content. A mutable-pinned source emits
+  a `Warning` event; `--require-pinned-migration-sources` makes it a hard refusal
+  (`MigrationSourceNotPinned`). Off by default; recommended in production.
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: orders-migrations
+spec:
+  ref:
+    digest: sha256:…            # immutable; bump deliberately to ship new migrations
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: https://token.actions.githubusercontent.com
+        subject: ^https://github.com/your-org/.+$
+  # url, interval, …
+```
+
+Two further guards apply to a sourced ladder: it is always resolved in the
+StageSet's own namespace (a cross-namespace `migrationsSourceRef` is rejected), and
+an `http` action requires the controller's `--allowed-action-hosts` allowlist to be
+set, so remote-authored calls cannot reach arbitrary in-cluster endpoints.
+
+## When a migration fails
+
+A failed migration halts the run at its anchoring stage under the
+`MigrationFailed` reason — distinct from a stage's own `StageFailed` — then retries
+with backoff. Retries are safe: the per-action ledger records each completed
+action keyed by the migration's content digest, so a retry resumes at the failed
+action rather than re-running a destructive one.
+
+After repeated failures the migration escalates to `MigrationDirty`: the controller
+stops auto-retrying destructive work against an uncertain state. Fix the cause,
+then clear the halt with a manual reconcile:
+
+```shell
+kubectl annotate stageset orders \
+  reconcile.fluxcd.io/requestedAt="$(date +%s)" --overwrite
+```
+
+See the [`MigrationFailed`](/runbooks/migrationfailed/) and
+[`MigrationDirty`](/runbooks/migrationdirty/) runbooks.
