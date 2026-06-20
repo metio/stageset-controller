@@ -173,7 +173,12 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 	if src == nil {
 		return ss.Spec.Migrations, "", "", nil
 	}
-	resolver := &artifact.Resolver{NoCrossNamespace: r.NoCrossNamespaceRefs}
+	// A migration source is always resolved same-namespace, independent of the
+	// global --no-cross-namespace-refs: remote-authored destructive instructions
+	// must not be pulled across a namespace boundary even where stage sources may
+	// be. Admission rejects a cross-namespace migrationsSourceRef too; this is
+	// the defense-in-depth fallback.
+	resolver := &artifact.Resolver{NoCrossNamespace: true}
 	ra, rerr := resolver.Resolve(ctx, r.Client, src.SourceRef, ss.Namespace)
 	if rerr != nil {
 		switch {
@@ -200,7 +205,27 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 	if verr := validateLadderContent(ladder); verr != nil {
 		return nil, ReasonMigrationArtifactInvalid, verr.Error(), nil
 	}
+	// A remote-authored http action with no host allowlist could reach any
+	// in-cluster endpoint (the IP denylist deliberately permits private ranges
+	// for in-cluster sources). Refuse a sourced ladder that uses http unless
+	// --allowed-action-hosts scopes where those actions may connect.
+	if len(r.AllowedActionHosts) == 0 && ladderHasHTTP(ladder) {
+		return nil, ReasonInvalidSpec,
+			"the migration ladder sourced from spec.migrationsSourceRef uses an http action, but --allowed-action-hosts is not configured; remote-authored http actions require a host allowlist", nil
+	}
 	return ladder, "", "", nil
+}
+
+// ladderHasHTTP reports whether any migration in the ladder uses an http action.
+func ladderHasHTTP(ladder []stagesv1.Migration) bool {
+	for i := range ladder {
+		for j := range ladder[i].Actions {
+			if ladder[i].Actions[j].HTTP != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // migrationFileExts are the artifact file extensions parsed as migration

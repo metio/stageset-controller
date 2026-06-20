@@ -483,6 +483,18 @@ func TestMigrationDigest(t *testing.T) {
 	}
 }
 
+func TestLadderHasHTTP(t *testing.T) {
+	t.Parallel()
+	no := []stagesv1.Migration{{Name: "a", Actions: []stagesv1.Action{{Name: "x", Delete: &stagesv1.DeleteAction{}}}}}
+	yes := []stagesv1.Migration{{Name: "a", Actions: []stagesv1.Action{{Name: "x", HTTP: &stagesv1.HTTPAction{}}}}}
+	if ladderHasHTTP(no) {
+		t.Fatal("no http action but reported true")
+	}
+	if !ladderHasHTTP(yes) {
+		t.Fatal("http action present but reported false")
+	}
+}
+
 func TestActionsDoneFor(t *testing.T) {
 	t.Parallel()
 	ledger := []string{"m@abc/a", "m@abc/b", "other@xyz/a", "m@def/a"}
