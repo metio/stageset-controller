@@ -65,9 +65,16 @@ type StageSetSpec struct {
 
 	// Migrations are version-gated action ladders run when crossing a
 	// version boundary, anchored before a named stage's pre-actions.
-	// Requires spec.version.
+	// Requires spec.version. Mutually exclusive with MigrationsSourceRef.
 	// +optional
 	Migrations []Migration `json:"migrations,omitempty"`
+
+	// MigrationsSourceRef sources the migration ladder from a Flux source's
+	// artifact instead of inlining it, so one ladder can be authored once and
+	// shared across many StageSets. The artifact holds a serialized
+	// []Migration. Mutually exclusive with Migrations; requires spec.version.
+	// +optional
+	MigrationsSourceRef *MigrationsSource `json:"migrationsSourceRef,omitempty"`
 
 	// RollbackOnFailure restores the last-applied artifact revisions under
 	// the current spec when a run fails (best-effort: works only while the
@@ -131,6 +138,14 @@ type Stage struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +required
 	Name string `json:"name"`
+
+	// MigrationAnchor declares a stable anchor role this stage fulfils, so a
+	// shared migration ladder can anchor to it by role rather than by this
+	// stage's Name. A migration's Stage value resolves to the stage whose
+	// MigrationAnchor (preferred) or Name matches it. Anchor keys must be
+	// unique across stage Names and MigrationAnchors within a StageSet.
+	// +optional
+	MigrationAnchor string `json:"migrationAnchor,omitempty"`
 
 	// SourceRef references the ExternalArtifact providing this stage's
 	// manifests.
@@ -509,14 +524,35 @@ type Migration struct {
 	// +optional
 	From string `json:"from,omitempty"`
 
-	// Stage anchors when the migration runs: before this stage's
-	// pre-actions.
-	// +required
-	Stage string `json:"stage"`
+	// Stage anchors when the migration runs: before the pre-actions of the
+	// stage whose MigrationAnchor (preferred) or Name equals this value. Omit
+	// to anchor before the first stage. A value matching no stage in a
+	// consuming StageSet fails closed (reason MigrationStageNotFound) rather
+	// than silently skipping — important for a ladder shared across StageSets
+	// whose stages may be named differently.
+	// +optional
+	Stage string `json:"stage,omitempty"`
 
 	// Actions run in list order when the boundary is crossed.
 	// +optional
 	Actions []Action `json:"actions,omitempty"`
+}
+
+// MigrationsSource references a Flux source whose artifact holds a serialized
+// []Migration ladder, letting the ladder be authored once and shared across
+// many StageSets instead of inlined into each. Used by spec.migrationsSourceRef.
+type MigrationsSource struct {
+	// SourceRef references the artifact-producing source (an ExternalArtifact,
+	// or a producer kind resolved via the back-pointer index — the same
+	// reference shape a stage uses). Resolved in the StageSet's namespace;
+	// cross-namespace references are gated by --no-cross-namespace-refs.
+	// +required
+	SourceRef SourceReference `json:"sourceRef"`
+
+	// Path inside the artifact selecting the migrations file or directory.
+	// Defaults to the artifact root.
+	// +optional
+	Path string `json:"path,omitempty"`
 }
 
 // ConflictPolicy gives per-resource answers to immutable-field conflicts.

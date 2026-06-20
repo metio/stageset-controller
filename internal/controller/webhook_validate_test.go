@@ -163,3 +163,85 @@ func TestValidateMigrations_ActionOneof(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateMigrations_SourceAndAnchors covers the sourced-ladder admission
+// rules: inline vs source mutual exclusivity, the version requirement, that a
+// sourced ladder's content is deferred to fetch time, late-binding anchors
+// (empty = before first stage; match by Name or MigrationAnchor), and
+// anchor-key uniqueness.
+func TestValidateMigrations_SourceAndAnchors(t *testing.T) {
+	t.Parallel()
+	ver := &stagesv1.VersionSource{}
+	mig := func(stage string) []stagesv1.Migration {
+		return []stagesv1.Migration{{Name: "m", To: "2.0.0", Stage: stage}}
+	}
+	src := &stagesv1.MigrationsSource{SourceRef: stagesv1.SourceReference{Name: "ladder"}}
+	spec := func(s stagesv1.StageSetSpec) *stagesv1.StageSet { return &stagesv1.StageSet{Spec: s} }
+
+	tests := []struct {
+		name    string
+		ss      *stagesv1.StageSet
+		wantErr bool
+	}{
+		{name: "no migrations is fine", ss: spec(stagesv1.StageSetSpec{})},
+		{
+			name: "inline + source are mutually exclusive",
+			ss: spec(stagesv1.StageSetSpec{
+				Version: ver, Stages: []stagesv1.Stage{{Name: "deploy"}},
+				Migrations: mig("deploy"), MigrationsSourceRef: src,
+			}),
+			wantErr: true,
+		},
+		{
+			name:    "source requires version",
+			ss:      spec(stagesv1.StageSetSpec{Stages: []stagesv1.Stage{{Name: "deploy"}}, MigrationsSourceRef: src}),
+			wantErr: true,
+		},
+		{
+			name: "source with version is fine (content checked at fetch time)",
+			ss:   spec(stagesv1.StageSetSpec{Version: ver, Stages: []stagesv1.Stage{{Name: "deploy"}}, MigrationsSourceRef: src}),
+		},
+		{
+			name:    "inline requires version",
+			ss:      spec(stagesv1.StageSetSpec{Stages: []stagesv1.Stage{{Name: "deploy"}}, Migrations: mig("deploy")}),
+			wantErr: true,
+		},
+		{
+			name: "empty stage anchors before first stage",
+			ss:   spec(stagesv1.StageSetSpec{Version: ver, Stages: []stagesv1.Stage{{Name: "deploy"}}, Migrations: mig("")}),
+		},
+		{
+			name: "anchor by migrationAnchor alias",
+			ss: spec(stagesv1.StageSetSpec{
+				Version:    ver,
+				Stages:     []stagesv1.Stage{{Name: "deploy", MigrationAnchor: "db-pre"}},
+				Migrations: mig("db-pre"),
+			}),
+		},
+		{
+			name:    "unknown anchor rejected",
+			ss:      spec(stagesv1.StageSetSpec{Version: ver, Stages: []stagesv1.Stage{{Name: "deploy"}}, Migrations: mig("nope")}),
+			wantErr: true,
+		},
+		{
+			name: "anchor alias colliding with another stage name rejected",
+			ss: spec(stagesv1.StageSetSpec{
+				Version: ver,
+				Stages: []stagesv1.Stage{
+					{Name: "deploy"},
+					{Name: "verify", MigrationAnchor: "deploy"},
+				},
+				Migrations: mig("deploy"),
+			}),
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateMigrations(tc.ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validateMigrations err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
