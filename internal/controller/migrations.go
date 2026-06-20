@@ -37,6 +37,11 @@ type migrationPlan struct {
 	desired    string
 	baseline   bool
 	pending    []*stagesv1.Migration
+	// byStage maps a concrete stage name to the migrations anchored before it,
+	// resolved from each migration's Stage value (anchor alias / name / empty).
+	// Populated by resolveAnchors; a migration that resolves to no stage is a
+	// terminal MigrationStageNotFound, never silently dropped.
+	byStage map[string][]*stagesv1.Migration
 }
 
 func (p *migrationPlan) pendingNames() []string {
@@ -51,13 +56,48 @@ func (p *migrationPlan) pendingNames() []string {
 }
 
 func (p *migrationPlan) forStage(stage string) []*stagesv1.Migration {
-	var out []*stagesv1.Migration
-	for _, m := range p.pending {
-		if m.Stage == stage {
-			out = append(out, m)
+	return p.byStage[stage]
+}
+
+// anchorStage resolves a migration's Stage value to a concrete stage name:
+// empty anchors before the first stage; otherwise it matches the stage whose
+// MigrationAnchor (preferred) or Name equals the value. Returns "" when nothing
+// matches. Resolving by a stage-declared anchor role (not the literal stage
+// name) is what lets one ladder be shared across StageSets named differently.
+func anchorStage(ss *stagesv1.StageSet, anchor string) string {
+	if anchor == "" {
+		if len(ss.Spec.Stages) > 0 {
+			return ss.Spec.Stages[0].Name
+		}
+		return ""
+	}
+	for i := range ss.Spec.Stages {
+		if ss.Spec.Stages[i].MigrationAnchor == anchor {
+			return ss.Spec.Stages[i].Name
 		}
 	}
-	return out
+	for i := range ss.Spec.Stages {
+		if ss.Spec.Stages[i].Name == anchor {
+			return ss.Spec.Stages[i].Name
+		}
+	}
+	return ""
+}
+
+// resolveAnchors maps every pending migration to the stage it runs before,
+// populating plan.byStage. A migration whose anchor resolves to no stage fails
+// closed with MigrationStageNotFound rather than silently never running.
+func resolveAnchors(ss *stagesv1.StageSet, plan *migrationPlan) (reason, msg string) {
+	plan.byStage = make(map[string][]*stagesv1.Migration, len(ss.Spec.Stages))
+	for _, m := range plan.pending {
+		stage := anchorStage(ss, m.Stage)
+		if stage == "" {
+			return ReasonMigrationStageNotFound,
+				fmt.Sprintf("migration %q anchors to %q, which matches no stage name or migrationAnchor", m.Name, m.Stage)
+		}
+		plan.byStage[stage] = append(plan.byStage[stage], m)
+	}
+	return "", ""
 }
 
 // planVersionMigrations resolves the desired version and the ordered migrations
@@ -104,6 +144,9 @@ func (r *StageSetReconciler) planVersionMigrations(ctx context.Context, ss *stag
 		return nil, ReasonInvalidVersion, perr.Error(), nil
 	}
 	plan.pending = pending
+	if reason, msg := resolveAnchors(ss, plan); reason != "" {
+		return nil, reason, msg, nil
+	}
 	return plan, "", "", nil
 }
 

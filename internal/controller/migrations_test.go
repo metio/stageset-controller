@@ -292,3 +292,54 @@ func TestValidateMigrations_RequiresVersionAndKnownStage(t *testing.T) {
 		t.Fatalf("valid migrations rejected: %v", err)
 	}
 }
+
+func TestAnchorStage(t *testing.T) {
+	t.Parallel()
+	ss := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{
+		{Name: "prepare", MigrationAnchor: "db-pre"},
+		{Name: "rollout"},
+	}}}
+	cases := []struct{ anchor, want string }{
+		{"", "prepare"},        // empty anchors before the first stage
+		{"db-pre", "prepare"},  // by migrationAnchor alias
+		{"rollout", "rollout"}, // by stage name
+		{"ghost", ""},          // unresolved
+	}
+	for _, c := range cases {
+		if got := anchorStage(ss, c.anchor); got != c.want {
+			t.Errorf("anchorStage(%q) = %q, want %q", c.anchor, got, c.want)
+		}
+	}
+}
+
+func TestResolveAnchors(t *testing.T) {
+	t.Parallel()
+	ss := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{
+		{Name: "prepare", MigrationAnchor: "db-pre"},
+		{Name: "rollout"},
+	}}}
+
+	t.Run("resolves alias, name, and empty (empty anchors to first stage)", func(t *testing.T) {
+		plan := &migrationPlan{pending: []*stagesv1.Migration{
+			{Name: "a", Stage: "db-pre"},
+			{Name: "b", Stage: "rollout"},
+			{Name: "c", Stage: ""},
+		}}
+		if reason, _ := resolveAnchors(ss, plan); reason != "" {
+			t.Fatalf("unexpected reason %q", reason)
+		}
+		if got := len(plan.forStage("prepare")); got != 2 { // a (db-pre) + c (empty → first)
+			t.Fatalf("prepare migrations = %d, want 2", got)
+		}
+		if got := len(plan.forStage("rollout")); got != 1 {
+			t.Fatalf("rollout migrations = %d, want 1", got)
+		}
+	})
+
+	t.Run("unresolved anchor fails closed", func(t *testing.T) {
+		plan := &migrationPlan{pending: []*stagesv1.Migration{{Name: "x", Stage: "ghost"}}}
+		if reason, _ := resolveAnchors(ss, plan); reason != ReasonMigrationStageNotFound {
+			t.Fatalf("reason = %q, want %q", reason, ReasonMigrationStageNotFound)
+		}
+	})
+}
