@@ -168,11 +168,23 @@ func (r *StageSetReconciler) planVersionMigrations(ctx context.Context, ss *stag
 	if perr != nil {
 		return nil, ReasonInvalidVersion, perr.Error(), nil
 	}
+	if coverageGap(ss.Spec.Version.RequireMigrationCoverage, currentV, desiredV, len(pending)) {
+		return nil, ReasonMigrationCoverageMissing,
+			fmt.Sprintf("version crosses a major boundary %s → %s but no migration covers it, and requireMigrationCoverage is set", current, desired), nil
+	}
 	plan.pending = pending
 	if reason, msg := resolveAnchors(ss, plan); reason != "" {
 		return nil, reason, msg, nil
 	}
 	return plan, "", "", nil
+}
+
+// coverageGap reports whether requireMigrationCoverage should fail the
+// transition: the flag is set, no migration is pending, and the transition
+// crosses a major-version boundary (the case where advancing unmigrated is most
+// likely a mistake).
+func coverageGap(require bool, currentV, desiredV *semver.Version, pending int) bool {
+	return require && pending == 0 && desiredV.Major() > currentV.Major()
 }
 
 // resolveMigrationLadder returns the migration ladder to plan against: the

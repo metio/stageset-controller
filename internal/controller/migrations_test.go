@@ -72,7 +72,71 @@ func TestSelectMigrations_FromConstraintFiltersByCurrent(t *testing.T) {
 	}
 }
 
+func TestCoverageGap(t *testing.T) {
+	t.Parallel()
+	v := semver.MustParse
+	cases := []struct {
+		name    string
+		require bool
+		cur     string
+		des     string
+		pending int
+		want    bool
+	}{
+		{"off → never gaps", false, "1.4.0", "2.0.0", 0, false},
+		{"major + no migration → gap", true, "1.4.0", "2.0.0", 0, true},
+		{"major + a migration → ok", true, "1.4.0", "2.0.0", 1, false},
+		{"minor + no migration → ok", true, "1.4.0", "1.5.0", 0, false},
+		{"patch + no migration → ok", true, "1.4.0", "1.4.1", 0, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := coverageGap(c.require, v(c.cur), v(c.des), c.pending); got != c.want {
+				t.Fatalf("coverageGap = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 // --- envtest ----------------------------------------------------------------
+
+// requireMigrationCoverage holds a major-version bump that has no migration.
+func TestReconcile_Migration_RequireCoverageBlocksMajor(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
+	mk := func(version string) *stagesv1.StageSet {
+		return &stagesv1.StageSet{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "coverage"},
+			Spec: stagesv1.StageSetSpec{
+				Interval: metav1.Duration{Duration: time.Minute},
+				Version:  &stagesv1.VersionSource{Value: version, RequireMigrationCoverage: true},
+				Stages:   []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea"}}},
+			},
+		}
+	}
+	ss := mk("1.0.0")
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	reconcileOnce(t, c, ss) // baseline 1.0.0
+
+	cur := getStageSet(t, c, ns, "coverage")
+	cur.Spec.Version = &stagesv1.VersionSource{Value: "2.0.0", RequireMigrationCoverage: true}
+	if err := c.Update(context.Background(), cur); err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	reconcileOnce(t, c, cur)
+
+	got := getStageSet(t, c, ns, "coverage")
+	if readyReason(got) != ReasonMigrationCoverageMissing {
+		t.Fatalf("Ready reason = %q, want %q", readyReason(got), ReasonMigrationCoverageMissing)
+	}
+	if got.Status.Version != "1.0.0" {
+		t.Fatalf("an uncovered major bump must not advance the version, got %q", got.Status.Version)
+	}
+}
 
 func deleteMigration(name, to, stage, targetName, ns string) stagesv1.Migration {
 	return stagesv1.Migration{

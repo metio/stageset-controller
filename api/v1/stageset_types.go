@@ -499,6 +499,12 @@ type VersionSource struct {
 	// Value pins the version inline, for fully pin-tagged setups.
 	// +optional
 	Value string `json:"value,omitempty"`
+
+	// RequireMigrationCoverage fails the reconcile when a version transition
+	// crosses a major-version boundary with no migration covering it, instead of
+	// advancing the major change silently. Off by default.
+	// +optional
+	RequireMigrationCoverage bool `json:"requireMigrationCoverage,omitempty"`
 }
 
 // ObjectVersionRef reads the version from a field of one rendered object in a
