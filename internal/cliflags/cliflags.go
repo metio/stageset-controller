@@ -34,6 +34,7 @@ func Groups() []string {
 		"Tracing",
 		"Webhook and TLS provisioning",
 		"Gate endpoint",
+		"MCP",
 		"Logging",
 	}
 }
@@ -94,6 +95,9 @@ type Flags struct {
 
 	GateAddr *string
 
+	MCPAddr           *string
+	MCPAllowMutations *bool
+
 	LogLevel  *string
 	LogFormat *string
 }
@@ -145,6 +149,8 @@ func Register(fs *flag.FlagSet) *Flags {
 		WebhookServiceNS:     new(string),
 		WebhookVWCName:       new(string),
 		GateAddr:             new(string),
+		MCPAddr:              new(string),
+		MCPAllowMutations:    new(bool),
 		LogLevel:             new(string),
 		LogFormat:            new(string),
 	}
@@ -164,6 +170,7 @@ func Register(fs *flag.FlagSet) *Flags {
 		tracing = "Tracing"
 		webhook = "Webhook and TLS provisioning"
 		gate    = "Gate endpoint"
+		mcpg    = "MCP"
 		logging = "Logging"
 	)
 
@@ -186,6 +193,8 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.StringVar(f.WebhookServiceNS, group("webhook-service-namespace", webhook), "", "Namespace of the webhook Service; empty falls back to the in-cluster ServiceAccount namespace.")
 	fs.StringVar(f.WebhookVWCName, group("webhook-validating-config-name", webhook), "", "Name of the ValidatingWebhookConfiguration whose caBundle to patch. Required for self-signed mode.")
 	fs.StringVar(f.GateAddr, group("gate-bind-address", gate), ":8082", "Address for the read-only Flagger stage-gate endpoint (GET /gate/{namespace}/{stageset}/{stage}). Empty disables it.")
+	fs.StringVar(f.MCPAddr, group("mcp-bind-address", mcpg), "", "Address for the MCP (Model Context Protocol) server exposing StageSet introspection tools over streamable HTTP (list_stagesets, get_stageset). Empty disables it.")
+	fs.BoolVar(f.MCPAllowMutations, group("mcp-allow-mutations", mcpg), false, "Also expose the gated MCP write tools (reconcile/suspend/resume) in addition to the read tools. Off by default; has no effect unless --mcp-bind-address is set.")
 	fs.StringVar(f.WatchNamespaces, group("watch-namespaces", watch), "", "Comma-separated list of namespaces this controller watches. Empty (the default) means cluster-wide. When set, the manager's cache only observes StageSets and sources in these namespaces — the multi-tenant controller-instances pattern. Falls back to STAGESET_WATCH_NAMESPACES env when the flag is empty.")
 	fs.DurationVar(f.DefaultInterval, group("default-interval", recon), 10*time.Minute, "Reconcile cadence for StageSets that omit spec.interval.")
 	fs.DurationVar(f.MaxTeardownWait, group("max-teardown-wait", recon), time.Hour, "How long a deleting StageSet's finalizer holds while reverse-order teardown keeps failing before it is force-dropped. Past this bound the controller emits a Warning TeardownForced event and removes the finalizer anyway, so a permanently-unreachable target cannot wedge the StageSet in Terminating — at the cost of orphaning objects the failing stage could not delete.")

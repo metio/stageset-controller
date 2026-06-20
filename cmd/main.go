@@ -41,6 +41,7 @@ import (
 	"github.com/metio/stageset-controller/internal/cliflags"
 	"github.com/metio/stageset-controller/internal/controller"
 	"github.com/metio/stageset-controller/internal/gate"
+	"github.com/metio/stageset-controller/internal/mcp"
 	"github.com/metio/stageset-controller/internal/metrics"
 	"github.com/metio/stageset-controller/internal/observability"
 	"github.com/metio/stageset-controller/internal/rollbackstore"
@@ -233,6 +234,40 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 			setupLog.Error("unable to add stage-gate server", "error", err)
 			return 1
 		}
+	}
+
+	if *c.MCPAddr != "" {
+		mcpLog := logger.With("logger", "mcp")
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			handler := mcp.NewHTTPHandler(mcp.Config{
+				KubeClient:     mgr.GetClient(),
+				RunbookBaseURL: controller.RunbookBaseURL,
+				AllowMutations: *c.MCPAllowMutations,
+				Version:        version,
+				Logger:         mcpLog,
+			})
+			srv := &http.Server{Addr: *c.MCPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+			// #nosec G118 -- the manager ctx is already done when this goroutine
+			// runs, so graceful shutdown needs a fresh, bounded context.
+			go func() {
+				<-ctx.Done()
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = srv.Shutdown(shutdownCtx)
+			}()
+			// Like the gate, the MCP server is best-effort: a bind failure must
+			// NOT bring the manager (and the reconciler) down. Log and return nil
+			// so it stays an isolated, degraded subsystem while reconciliation
+			// runs on.
+			if serveErr := srv.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				mcpLog.Error("MCP server stopped; the endpoint is unavailable but reconciliation continues", "error", serveErr, "addr", *c.MCPAddr)
+			}
+			return nil
+		})); err != nil {
+			setupLog.Error("unable to add MCP server", "error", err)
+			return 1
+		}
+		mcpLog.Info("MCP server enabled", "addr", *c.MCPAddr, "mutations", *c.MCPAllowMutations)
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
