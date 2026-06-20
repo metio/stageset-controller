@@ -314,6 +314,28 @@ type Action struct {
 	Apply *ApplyAction `json:"apply,omitempty"`
 }
 
+// Verb returns the action's operation type ("patch", "http", "wait", "job",
+// "delete", "apply"), or "action" when none is set. It names the single
+// operation the action performs.
+func (a *Action) Verb() string {
+	switch {
+	case a.Patch != nil:
+		return "patch"
+	case a.HTTP != nil:
+		return "http"
+	case a.Wait != nil:
+		return "wait"
+	case a.Job != nil:
+		return "job"
+	case a.Delete != nil:
+		return "delete"
+	case a.Apply != nil:
+		return "apply"
+	default:
+		return "action"
+	}
+}
+
 // PatchAction patches an existing in-cluster object under the impersonated
 // ServiceAccount.
 type PatchAction struct {
@@ -555,6 +577,29 @@ type MigrationsSource struct {
 	Path string `json:"path,omitempty"`
 }
 
+// PendingMigration is a status preview of a migration the next run will execute:
+// its boundary, the concrete stage it anchors before, the action verbs it runs,
+// and its content digest — so operators see what is about to happen even when the
+// ladder is sourced from an artifact rather than the spec.
+type PendingMigration struct {
+	// Name of the migration.
+	Name string `json:"name"`
+	// To is the version boundary this migration crosses up to.
+	To string `json:"to"`
+	// From is the optional version constraint it applies from.
+	// +optional
+	From string `json:"from,omitempty"`
+	// Stage is the concrete stage this migration resolved to anchor before.
+	// +optional
+	Stage string `json:"stage,omitempty"`
+	// Actions lists the action verbs (e.g. delete, apply, job) in run order.
+	// +optional
+	Actions []string `json:"actions,omitempty"`
+	// Digest is the migration's resolved content digest, the idempotency-ledger key.
+	// +optional
+	Digest string `json:"digest,omitempty"`
+}
+
 // ConflictPolicy gives per-resource answers to immutable-field conflicts.
 type ConflictPolicy struct {
 	// Default action for conflicts with no matching rule.
@@ -674,10 +719,13 @@ type StageSetStatus struct {
 	// +optional
 	Version string `json:"version,omitempty"`
 
-	// PendingMigrations lists the migrations the next run will execute, so
-	// operators see unusual work before it happens.
+	// PendingMigrations lists the migrations the next run will execute, with
+	// enough detail (boundary, resolved anchor stage, action verbs, content
+	// digest) that operators see exactly what destructive work is about to run
+	// — including for a ladder sourced from spec.migrationsSourceRef, whose
+	// content is not in the spec.
 	// +optional
-	PendingMigrations []string `json:"pendingMigrations,omitempty"`
+	PendingMigrations []PendingMigration `json:"pendingMigrations,omitempty"`
 
 	// ExecutedMigrations is the in-flight migration ledger: the
 	// "name@contentDigest" keys of migrations fully completed for the current

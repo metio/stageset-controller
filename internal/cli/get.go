@@ -159,7 +159,11 @@ func writeDetail(w io.Writer, ss *stagesv1.StageSet) {
 
 	fmt.Fprintf(w, "Version:    %s\n", versionOrDash(ss.Status.Version))
 	if len(ss.Status.PendingMigrations) > 0 {
-		fmt.Fprintf(w, "Pending migrations: %s\n", strings.Join(ss.Status.PendingMigrations, ", "))
+		names := make([]string, len(ss.Status.PendingMigrations))
+		for i, m := range ss.Status.PendingMigrations {
+			names[i] = m.Name
+		}
+		fmt.Fprintf(w, "Pending migrations: %s\n", strings.Join(names, ", "))
 	}
 	if rev := ss.Status.GetLastHandledReconcileRequest(); rev != "" {
 		fmt.Fprintf(w, "Last handled reconcile: %s\n", rev)

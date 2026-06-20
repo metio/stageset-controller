@@ -232,21 +232,17 @@ func describeAction(a *stagesv1.Action) (kind, detail string) {
 }
 
 // pendingMigrations maps the controller-computed status.pendingMigrations to
-// previews, joining each name to its spec for the version boundary and action
-// count. It returns entries only for migrations the next run will execute.
+// previews directly — the rich status already carries the boundary, resolved
+// anchor stage, and action verbs, so a sourced ladder (whose content is not in
+// the spec) previews just as fully as an inline one.
 func pendingMigrations(ss *stagesv1.StageSet) []diffrender.MigrationPreview {
 	if len(ss.Status.PendingMigrations) == 0 {
 		return nil
 	}
-	bySpec := map[string]stagesv1.Migration{}
-	for _, m := range ss.Spec.Migrations {
-		bySpec[m.Name] = m
-	}
-	var out []diffrender.MigrationPreview
-	for _, name := range ss.Status.PendingMigrations {
-		m := bySpec[name]
+	out := make([]diffrender.MigrationPreview, 0, len(ss.Status.PendingMigrations))
+	for _, m := range ss.Status.PendingMigrations {
 		out = append(out, diffrender.MigrationPreview{
-			Name: name, To: m.To, From: m.From, Stage: m.Stage, Actions: len(m.Actions),
+			Name: m.Name, To: m.To, From: m.From, Stage: m.Stage, Actions: m.Actions,
 		})
 	}
 	return out

@@ -234,7 +234,9 @@ func TestDiff_ShowsPendingMigrations(t *testing.T) {
 		t.Fatalf("create StageSet: %v", err)
 	}
 	// The controller computes status.pendingMigrations; seed it directly.
-	ss.Status.PendingMigrations = []string{"schema-upgrade"}
+	ss.Status.PendingMigrations = []stagesv1.PendingMigration{
+		{Name: "schema-upgrade", To: "v2", Stage: "first", Actions: []string{"wait"}},
+	}
 	if err := c.Status().Update(context.Background(), ss); err != nil {
 		t.Fatalf("seed pending migrations: %v", err)
 	}

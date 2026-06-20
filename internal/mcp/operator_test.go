@@ -109,7 +109,7 @@ func TestListStageSetsHandler(t *testing.T) {
 
 func TestGetStageSetHandler(t *testing.T) {
 	ss := newStageSet("team-a", "web", false, metav1.ConditionFalse, "RBACDenied", "the tenant SA cannot apply")
-	ss.Status.PendingMigrations = []string{"m1"}
+	ss.Status.PendingMigrations = []stagesv1.PendingMigration{{Name: "m1", To: "2.0.0"}}
 	cfg := Config{KubeClient: fakeClient(t, ss), RunbookBaseURL: testRunbookBase}
 
 	t.Run("full detail with runbook link", func(t *testing.T) {
