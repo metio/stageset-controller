@@ -95,6 +95,13 @@ func ValidateMigration(m *stagesv1.Migration) error {
 		if _, err := semver.NewConstraint(m.From); err != nil {
 			return fmt.Errorf("migration %q has an invalid from constraint %q: %w", m.Name, m.From, err)
 		}
+		// A bare version like "1.0.0" is a valid constraint, but it matches ONLY
+		// that exact version — a common foot-gun for authors who mean "from 1.0.0
+		// onward". Reject it so the intent must be explicit.
+		if from := strings.TrimSpace(m.From); semverIsBare(from) {
+			return fmt.Errorf("migration %q from %q is a bare version, which matches only that exact version; write %q (from this version onward) or %q (exactly that version) to make the intent explicit",
+				m.Name, m.From, ">="+from, "="+from)
+		}
 	}
 	seen := make(map[string]bool, len(m.Actions))
 	for j := range m.Actions {
@@ -111,4 +118,12 @@ func ValidateMigration(m *stagesv1.Migration) error {
 		seen[a.Name] = true
 	}
 	return nil
+}
+
+// semverIsBare reports whether s is a plain X.Y.Z version with no constraint
+// operator (>=, =, ~, ^, a wildcard, or a range). As a `from` such a value
+// matches only the exact version, which is rarely what an author intends.
+func semverIsBare(s string) bool {
+	_, err := semver.StrictNewVersion(s)
+	return err == nil
 }

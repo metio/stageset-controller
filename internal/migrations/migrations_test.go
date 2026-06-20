@@ -91,6 +91,10 @@ func TestValidateLadder(t *testing.T) {
 		{name: "empty to", ladder: []stagesv1.Migration{{Name: "a", To: ""}}, wantErr: true},
 		{name: "non-semver to", ladder: []stagesv1.Migration{{Name: "a", To: "not-a-version"}}, wantErr: true},
 		{name: "invalid from constraint", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: ">>bad"}}, wantErr: true},
+		{name: "bare from rejected", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: "1.0.0"}}, wantErr: true},
+		{name: "explicit >= from allowed", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: ">=1.0.0"}}},
+		{name: "explicit = from allowed", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: "=1.0.0"}}},
+		{name: "wildcard from allowed", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: "1.x"}}},
 		{
 			name:    "duplicate migration name",
 			ladder:  []stagesv1.Migration{{Name: "a", To: "2.0.0"}, {Name: "a", To: "3.0.0"}},
