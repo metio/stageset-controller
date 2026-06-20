@@ -164,6 +164,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		AllowedActionHosts:              []string(*c.AllowedActionHosts),
 		NoCrossNamespaceRefs:            *c.NoCrossNamespaceRefs,
 		RequireVerifiedMigrationSources: *c.RequireVerifiedMigrationSources,
+		RequirePinnedMigrationSources:   *c.RequirePinnedMigrationSources,
 		ObjectLevelKMS:                  *c.ObjectLevelKMS,
 		DefaultInterval:                 *c.DefaultInterval,
 		MaxTeardownWait:                 *c.MaxTeardownWait,

@@ -486,7 +486,7 @@ func TestMigrationDigest(t *testing.T) {
 
 func TestCheckMigrationSourceVerified(t *testing.T) {
 	t.Parallel()
-	tru, fls := true, false
+	yes, no := true, false
 	cases := []struct {
 		name     string
 		verified *bool
@@ -495,16 +495,43 @@ func TestCheckMigrationSourceVerified(t *testing.T) {
 	}{
 		{"unset, not required → ok", nil, false, false},
 		{"unset, required → fail", nil, true, true},
-		{"verified true → ok", &tru, false, false},
-		{"verified true, required → ok", &tru, true, false},
-		{"verified false → always fail", &fls, false, true},
-		{"verified false, required → fail", &fls, true, true},
+		{"verified true → ok", &yes, false, false},
+		{"verified true, required → ok", &yes, true, false},
+		{"verified false → always fail", &no, false, true},
+		{"verified false, required → fail", &no, true, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			r := &StageSetReconciler{RequireVerifiedMigrationSources: c.require}
 			reason, _ := r.checkMigrationSourceVerified(artifact.ResolvedArtifact{Verified: c.verified})
+			if (reason != "") != c.wantFail {
+				t.Fatalf("reason=%q wantFail=%v", reason, c.wantFail)
+			}
+		})
+	}
+}
+
+func TestCheckMigrationSourcePinned(t *testing.T) {
+	t.Parallel()
+	yes, no := true, false
+	cases := []struct {
+		name     string
+		pinned   *bool
+		require  bool
+		wantFail bool
+	}{
+		{"exempt (nil), not required → ok", nil, false, false},
+		{"exempt (nil), required → ok", nil, true, false},
+		{"pinned, required → ok", &yes, true, false},
+		{"mutable, not required → ok (warns)", &no, false, false},
+		{"mutable, required → fail", &no, true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			r := &StageSetReconciler{RequirePinnedMigrationSources: c.require}
+			reason, _ := r.checkMigrationSourcePinned(&stagesv1.StageSet{}, artifact.ResolvedArtifact{Pinned: c.pinned})
 			if (reason != "") != c.wantFail {
 				t.Fatalf("reason=%q wantFail=%v", reason, c.wantFail)
 			}

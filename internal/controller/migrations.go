@@ -197,6 +197,9 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 	if reason, msg := r.checkMigrationSourceVerified(ra); reason != "" {
 		return nil, reason, msg, nil
 	}
+	if reason, msg := r.checkMigrationSourcePinned(ss, ra); reason != "" {
+		return nil, reason, msg, nil
+	}
 	files, ferr := fetcher.Fetch(ctx, ra.URL, ra.Digest, src.Path)
 	if ferr != nil {
 		return nil, "", "", fmt.Errorf("fetch migrations artifact: %w", ferr) // transient
@@ -246,6 +249,25 @@ func (r *StageSetReconciler) checkMigrationSourceVerified(ra artifact.ResolvedAr
 		return ReasonMigrationSourceNotVerified,
 			"migrations source is not signature-verified and --require-verified-migration-sources is set; configure spec.verify (cosign/notation) on the source"
 	}
+	return "", ""
+}
+
+// checkMigrationSourcePinned gates a sourced ladder on revision immutability. A
+// source pinned to a mutable tag/branch (not an OCIRepository digest or
+// GitRepository commit) lets an upstream overwrite auto-roll new destructive
+// content. With --require-pinned-migration-sources it is refused; otherwise it
+// runs but emits a Warning so the auto-rollout risk is visible. A nil Pinned
+// (pinning N/A — e.g. an in-cluster ExternalArtifact) is exempt.
+func (r *StageSetReconciler) checkMigrationSourcePinned(ss *stagesv1.StageSet, ra artifact.ResolvedArtifact) (reason, msg string) {
+	if ra.Pinned == nil || *ra.Pinned {
+		return "", ""
+	}
+	if r.RequirePinnedMigrationSources {
+		return ReasonMigrationSourceNotPinned,
+			"migrations source is pinned to a mutable tag/branch, not an immutable digest/commit, and --require-pinned-migration-sources is set"
+	}
+	r.event(ss, corev1.EventTypeWarning, eventReasonMigrationSourceMutable,
+		"migrations source is pinned to a mutable tag/branch; an upstream overwrite can auto-roll new destructive content — pin to a digest/commit")
 	return "", ""
 }
 
@@ -576,7 +598,8 @@ func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv
 // Event reasons for migration progress (Event-only; the Ready condition uses
 // ReasonStageFailed on a failed migration).
 const (
-	eventReasonMigrationStarted   = "MigrationStarted"
-	eventReasonMigrationCompleted = "MigrationCompleted"
-	eventReasonMigrationFailed    = "MigrationFailed"
+	eventReasonMigrationStarted       = "MigrationStarted"
+	eventReasonMigrationCompleted     = "MigrationCompleted"
+	eventReasonMigrationFailed        = "MigrationFailed"
+	eventReasonMigrationSourceMutable = "MigrationSourceMutable"
 )
