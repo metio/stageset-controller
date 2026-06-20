@@ -152,6 +152,7 @@ A shared ladder bakes in a concrete `stage` string, but consuming StageSets may
 name their stages differently. Selection is version-only, so a mismatched anchor
 selects the migration into `status.pendingMigrations` yet `forStage` never matches
 — today that silently no-ops *and the version still advances*. Fix:
+
 - Make the anchor **late-binding**: a migration's `stage` is optional and defaults
   to "before the first stage"; a stage may declare an **anchor alias**
   (`stage.migrationAnchor: "db-pre"`) that migrations reference semantically,
