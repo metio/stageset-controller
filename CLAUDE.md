@@ -214,6 +214,14 @@ real apiserver.
   `hack/gen-docs-data.sh`, which needs `helm-schema` on PATH to generate each
   chart's `values.schema.json` on the fly — then lints the rendered HTML with
   `htmltest` and the theme CSS with `biome`).
+- **actionlint is a failing gate** — the `github-actions` job runs
+  `reviewdog/action-actionlint` with `fail_on_error: true` + `filter_mode: nofilter`,
+  so findings block the merge across the whole tree, not just changed lines.
+  actionlint shells out to `shellcheck` to lint `run:` blocks, so the dev image
+  (`dev/Containerfile`) installs `shellcheck`; without it `actionlint` silently
+  skips shell linting and the local gate diverges from CI. shellcheck findings are
+  fixed at the source (quote expansions, `find` over `ls`, grouped redirects), not
+  suppressed. Kept identical across jaas / stageset-controller / helm-charts.
 - **DCO gate** — `dco` requires a `Signed-off-by` trailer on every non-bot commit.
 - **Container gate** — `container-image` builds the image and scans it with
   Trivy, hard-failing on any fixable CRITICAL/HIGH (`ignore-unfixed`).
