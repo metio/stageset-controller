@@ -5,6 +5,9 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -18,7 +21,6 @@ import (
 	"sigs.k8s.io/yaml"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
-	"github.com/metio/stageset-controller/internal/actions"
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
 )
@@ -452,28 +454,73 @@ func extractVersionField(obj *unstructured.Unstructured, fieldPath string) (stri
 	return buf.String(), nil
 }
 
+// actionExecutor runs a migration's actions, skipping those in done and calling
+// record after each completes. *actions.Executor implements it; the seam lets
+// tests drive the ledger logic without a cluster.
+type actionExecutor interface {
+	Run(ctx context.Context, namespace string, acts []stagesv1.Action, done map[string]bool, record func(name string) error) error
+}
+
+// migrationDigest is a stable content hash of a migration. The executed-ledger
+// keys on (name, digest) so an edited sourced migration — same name, changed
+// content — is treated as a new, unexecuted migration (the Flyway/Liquibase
+// checksum rule) instead of being silently skipped.
+func migrationDigest(m *stagesv1.Migration) string {
+	b, _ := json.Marshal(m)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// migrationKey is the ledger key for a migration: name@digest.
+func migrationKey(m *stagesv1.Migration) string {
+	return m.Name + "@" + migrationDigest(m)
+}
+
+// actionsDoneFor returns the set of action names already completed for a
+// migration key, read from the flat per-action ledger (entries "name@digest/action").
+func actionsDoneFor(ledger []string, migKey string) map[string]bool {
+	prefix := migKey + "/"
+	done := make(map[string]bool)
+	for _, e := range ledger {
+		if strings.HasPrefix(e, prefix) {
+			done[strings.TrimPrefix(e, prefix)] = true
+		}
+	}
+	return done
+}
+
 // runStageMigrations runs the pending migrations anchored to this stage, before
-// the stage's own pre-actions, skipping any already in the in-flight ledger. It
-// records each completed migration on the status and emits Events. A migration
-// failure stops the run; the ledger persists so a retry skips finished ones.
-func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv1.StageSet, stage string, plan *migrationPlan, executor *actions.Executor) error {
+// the stage's own pre-actions. The migration ledger keys on (name, content
+// digest): a fully-completed migration at the current content is skipped, and a
+// content change re-runs it. Within a migration, each completed action is
+// recorded in the per-action ledger so a retry of a partially-applied migration
+// skips actions that already ran — destructive actions are never re-executed on
+// retry. Both ledgers persist on the status (by failStage on failure, by the
+// final status write on success) and are cleared once status.version advances.
+func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv1.StageSet, stage string, plan *migrationPlan, executor actionExecutor) error {
 	if plan == nil || plan.baseline {
 		return nil
 	}
-	executed := toStringSet(ss.Status.ExecutedMigrations)
+	doneMig := toStringSet(ss.Status.ExecutedMigrations)
 	for _, m := range plan.forStage(stage) {
-		if executed[m.Name] {
+		migKey := migrationKey(m)
+		if doneMig[migKey] {
 			continue
+		}
+		actionsDone := actionsDoneFor(ss.Status.ExecutedMigrationActions, migKey)
+		record := func(name string) error {
+			ss.Status.ExecutedMigrationActions = append(ss.Status.ExecutedMigrationActions, migKey+"/"+name)
+			return nil
 		}
 		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationStarted,
 			fmt.Sprintf("migration %q (to %s) starting", m.Name, m.To))
-		if err := executor.Run(ctx, ss.Namespace, m.Actions, map[string]bool{}, func(string) error { return nil }); err != nil {
+		if err := executor.Run(ctx, ss.Namespace, m.Actions, actionsDone, record); err != nil {
 			r.event(ss, corev1.EventTypeWarning, eventReasonMigrationFailed,
 				fmt.Sprintf("migration %q failed: %v", m.Name, err))
 			return fmt.Errorf("migration %q: %w", m.Name, err)
 		}
-		ss.Status.ExecutedMigrations = append(ss.Status.ExecutedMigrations, m.Name)
-		executed[m.Name] = true
+		ss.Status.ExecutedMigrations = append(ss.Status.ExecutedMigrations, migKey)
+		doneMig[migKey] = true
 		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationCompleted,
 			fmt.Sprintf("migration %q (to %s) completed", m.Name, m.To))
 	}

@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -465,5 +466,133 @@ func TestResolveMigrationLadder_Inline(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Name != "a" {
 		t.Fatalf("inline ladder not returned verbatim: %+v", got)
+	}
+}
+
+func TestMigrationDigest(t *testing.T) {
+	t.Parallel()
+	m := &stagesv1.Migration{Name: "m", To: "2.0.0", Actions: []stagesv1.Action{{Name: "a", Delete: &stagesv1.DeleteAction{}}}}
+	again := *m
+	if migrationDigest(m) != migrationDigest(&again) {
+		t.Fatal("digest is not stable for identical content")
+	}
+	changed := *m
+	changed.Actions = []stagesv1.Action{{Name: "a", Wait: &stagesv1.WaitAction{}}}
+	if migrationDigest(m) == migrationDigest(&changed) {
+		t.Fatal("digest did not change when the action content changed")
+	}
+}
+
+func TestActionsDoneFor(t *testing.T) {
+	t.Parallel()
+	ledger := []string{"m@abc/a", "m@abc/b", "other@xyz/a", "m@def/a"}
+	done := actionsDoneFor(ledger, "m@abc")
+	if !done["a"] || !done["b"] || done["other"] || len(done) != 2 {
+		t.Fatalf("actionsDoneFor = %v, want {a,b}", done)
+	}
+}
+
+// fakeExecutor implements actionExecutor: it skips actions already in done,
+// records each action it runs, and fails on any action name in failOn.
+type fakeExecutor struct {
+	failOn   map[string]bool
+	doneSeen []map[string]bool // the done-set passed to each Run call
+	ran      []string          // action names actually executed (not skipped)
+}
+
+func (f *fakeExecutor) Run(_ context.Context, _ string, acts []stagesv1.Action, done map[string]bool, record func(string) error) error {
+	f.doneSeen = append(f.doneSeen, done)
+	for i := range acts {
+		a := &acts[i]
+		if done[a.Name] {
+			continue
+		}
+		if f.failOn[a.Name] {
+			return errors.New("action " + a.Name + " failed")
+		}
+		f.ran = append(f.ran, a.Name)
+		if err := record(a.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func threeActionPlan() (*stagesv1.Migration, *migrationPlan) {
+	m := &stagesv1.Migration{Name: "m", To: "2.0.0", Stage: "deploy", Actions: []stagesv1.Action{
+		{Name: "a", Delete: &stagesv1.DeleteAction{}},
+		{Name: "b", Delete: &stagesv1.DeleteAction{}},
+		{Name: "c", Delete: &stagesv1.DeleteAction{}},
+	}}
+	plan := &migrationPlan{pending: []*stagesv1.Migration{m}, byStage: map[string][]*stagesv1.Migration{"deploy": {m}}}
+	return m, plan
+}
+
+func TestRunStageMigrations_PerActionIdempotency(t *testing.T) {
+	t.Parallel()
+	r := &StageSetReconciler{}
+	m, plan := threeActionPlan()
+	migKey := migrationKey(m)
+	ss := &stagesv1.StageSet{}
+
+	// Run 1: action "b" fails. "a" completed and is recorded; "b"/"c" are not.
+	fe1 := &fakeExecutor{failOn: map[string]bool{"b": true}}
+	if err := r.runStageMigrations(context.Background(), ss, "deploy", plan, fe1); err == nil {
+		t.Fatal("expected the migration to fail at action b")
+	}
+	if got := actionsDoneFor(ss.Status.ExecutedMigrationActions, migKey); !got["a"] || got["b"] || got["c"] {
+		t.Fatalf("after failure, action ledger = %v, want only {a}", got)
+	}
+	if len(ss.Status.ExecutedMigrations) != 0 {
+		t.Fatalf("a failed migration must not be marked done: %v", ss.Status.ExecutedMigrations)
+	}
+
+	// Run 2 (retry): nothing fails. "a" must be skipped (already done), only
+	// "b" and "c" run, and the migration is marked fully done.
+	fe2 := &fakeExecutor{}
+	if err := r.runStageMigrations(context.Background(), ss, "deploy", plan, fe2); err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	if !fe2.doneSeen[0]["a"] {
+		t.Fatal("retry did not pass action a as already-done")
+	}
+	for _, name := range fe2.ran {
+		if name == "a" {
+			t.Fatal("retry re-ran the already-completed destructive action a")
+		}
+	}
+	if !toStringSet(ss.Status.ExecutedMigrations)[migKey] {
+		t.Fatalf("migration not marked done after retry: %v", ss.Status.ExecutedMigrations)
+	}
+}
+
+func TestRunStageMigrations_FullyDoneSkipped(t *testing.T) {
+	t.Parallel()
+	r := &StageSetReconciler{}
+	m, plan := threeActionPlan()
+	ss := &stagesv1.StageSet{}
+	ss.Status.ExecutedMigrations = []string{migrationKey(m)}
+	fe := &fakeExecutor{}
+	if err := r.runStageMigrations(context.Background(), ss, "deploy", plan, fe); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.ran) != 0 {
+		t.Fatalf("a fully-done migration must not run any actions: %v", fe.ran)
+	}
+}
+
+func TestRunStageMigrations_ContentChangeReRuns(t *testing.T) {
+	t.Parallel()
+	r := &StageSetReconciler{}
+	m, plan := threeActionPlan()
+	ss := &stagesv1.StageSet{}
+	// Ledger holds a DIFFERENT content digest for the same name → not a match.
+	ss.Status.ExecutedMigrations = []string{m.Name + "@stale0000000"}
+	fe := &fakeExecutor{}
+	if err := r.runStageMigrations(context.Background(), ss, "deploy", plan, fe); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.ran) != 3 {
+		t.Fatalf("a changed migration must re-run all actions, ran %v", fe.ran)
 	}
 }

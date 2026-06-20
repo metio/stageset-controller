@@ -679,12 +679,24 @@ type StageSetStatus struct {
 	// +optional
 	PendingMigrations []string `json:"pendingMigrations,omitempty"`
 
-	// ExecutedMigrations is the in-flight migration ledger: the names of
-	// migrations already completed for the current version transition. It
-	// lets a retry of a partially-applied transition skip finished
-	// migrations, and is cleared once status.version reaches the target.
+	// ExecutedMigrations is the in-flight migration ledger: the
+	// "name@contentDigest" keys of migrations fully completed for the current
+	// version transition. Keying on the content digest means an edited
+	// migration (same name, changed content) is treated as a new, unexecuted
+	// migration rather than silently skipped. Lets a retry of a
+	// partially-applied transition skip finished migrations; cleared once
+	// status.version reaches the target.
 	// +optional
 	ExecutedMigrations []string `json:"executedMigrations,omitempty"`
+
+	// ExecutedMigrationActions is the per-action migration ledger:
+	// "name@contentDigest/actionName" keys of individual migration actions
+	// already completed. It lets a retry of a partially-applied migration skip
+	// actions that already ran, so a destructive action is never re-executed
+	// after a mid-migration failure. Cleared with ExecutedMigrations once
+	// status.version reaches the target.
+	// +optional
+	ExecutedMigrationActions []string `json:"executedMigrationActions,omitempty"`
 
 	// LastAppliedSnapshot records, per stage, the artifact coordinates of the
 	// last fully-successful run. rollbackOnFailure re-fetches these
