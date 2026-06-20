@@ -128,6 +128,11 @@ pygmentsUseClasses = true
     name = "Progressive delivery"
     url = "/tutorials/progressive-delivery/"
     weight = 5
+  [[menu.main]]
+    parent = "tutorials"
+    name = "Generating migrations with Jsonnet"
+    url = "/tutorials/jsonnet-migrations/"
+    weight = 6
 
   [[menu.main]]
     identifier = "usage"
