@@ -54,6 +54,13 @@ const (
 	// reverse is how data dies. Terminal until the version moves forward.
 	ReasonDowngradeRequiresMigration = "DowngradeRequiresMigration"
 
+	// ReasonMigrationStageNotFound: a version-selected migration anchors to a
+	// value matching no stage Name or MigrationAnchor in this StageSet. Fails
+	// closed — the version is NOT advanced — rather than silently never running
+	// a destructive migration (the failure mode a shared, late-binding ladder
+	// must not have). Terminal until the anchor or the stages are fixed.
+	ReasonMigrationStageNotFound = "MigrationStageNotFound"
+
 	// ReasonPreviousRevisionUnavailable: rollbackOnFailure could not restore
 	// the last-good revisions because a producer has garbage-collected one.
 	// Rollback is best-effort: it works only while producers retain.
@@ -97,6 +104,7 @@ var AllReasons = []string{
 	ReasonStalled,
 	ReasonInvalidVersion,
 	ReasonDowngradeRequiresMigration,
+	ReasonMigrationStageNotFound,
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,
