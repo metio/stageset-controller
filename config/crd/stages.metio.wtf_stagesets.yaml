@@ -1818,6 +1818,13 @@ spec:
                     - name
                     - stage
                     type: object
+                  requireApproval:
+                    description: |-
+                      RequireApproval holds a version transition that has pending migrations
+                      until an operator approves the target version with the
+                      stages.metio.wtf/approved-version annotation, so destructive migrations
+                      don't run unattended. Off by default.
+                    type: boolean
                   requireMigrationCoverage:
                     description: |-
                       RequireMigrationCoverage fails the reconcile when a version transition

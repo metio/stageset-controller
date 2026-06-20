@@ -88,6 +88,13 @@ const (
 	// MigrationDirty.
 	ReasonMigrationFailed = "MigrationFailed"
 
+	// ReasonMigrationApprovalPending: spec.version.requireApproval is set and a
+	// transition has pending migrations not yet approved via the
+	// stages.metio.wtf/approved-version annotation. The whole rollout is held —
+	// no migrations run, the version is not advanced — until approval. Not an
+	// error; an intentional wait.
+	ReasonMigrationApprovalPending = "MigrationApprovalPending"
+
 	// ReasonMigrationCoverageMissing: spec.version.requireMigrationCoverage is set
 	// and a version transition crosses a major-version boundary with no migration
 	// covering it. Fails closed rather than advancing a major change unmigrated.
@@ -148,6 +155,7 @@ var AllReasons = []string{
 	ReasonMigrationArtifactInvalid,
 	ReasonMigrationSourceNotVerified,
 	ReasonMigrationSourceNotPinned,
+	ReasonMigrationApprovalPending,
 	ReasonMigrationCoverageMissing,
 	ReasonMigrationFailed,
 	ReasonMigrationDirty,

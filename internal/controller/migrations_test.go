@@ -138,6 +138,73 @@ func TestReconcile_Migration_RequireCoverageBlocksMajor(t *testing.T) {
 	}
 }
 
+// requireApproval holds a transition with pending migrations until the target
+// version is approved, then proceeds.
+func TestReconcile_Migration_RequireApprovalHoldsThenProceeds(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
+	legacy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}
+	if err := c.Create(context.Background(), legacy); err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+	versioned := func(version string) *stagesv1.VersionSource {
+		return &stagesv1.VersionSource{Value: version, RequireApproval: true}
+	}
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "approval"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:   metav1.Duration{Duration: time.Minute},
+			Version:    versioned("1.0.0"),
+			Migrations: []stagesv1.Migration{deleteMigration("drop-legacy", "2.0.0", "stage-a", "legacy", ns)},
+			Stages:     []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	reconcileOnce(t, c, ss) // baseline 1.0.0
+
+	cur := getStageSet(t, c, ns, "approval")
+	cur.Spec.Version = versioned("2.0.0")
+	if err := c.Update(context.Background(), cur); err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	reconcileOnce(t, c, cur)
+
+	held := getStageSet(t, c, ns, "approval")
+	if readyReason(held) != ReasonMigrationApprovalPending {
+		t.Fatalf("Ready reason = %q, want %q", readyReason(held), ReasonMigrationApprovalPending)
+	}
+	if !cmExists(t, c, ns, "legacy") {
+		t.Fatal("migration must not run before approval")
+	}
+	if held.Status.Version != "1.0.0" {
+		t.Fatalf("version must not advance before approval, got %q", held.Status.Version)
+	}
+	if len(held.Status.PendingMigrations) == 0 {
+		t.Fatal("the pending migrations should be shown while awaiting approval")
+	}
+
+	// Approve the target version → the rollout proceeds.
+	if held.Annotations == nil {
+		held.Annotations = map[string]string{}
+	}
+	held.Annotations[approvedVersionAnnotation] = "2.0.0"
+	if err := c.Update(context.Background(), held); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	reconcileOnce(t, c, held)
+
+	done := getStageSet(t, c, ns, "approval")
+	if cmExists(t, c, ns, "legacy") {
+		t.Fatal("the migration should have run after approval")
+	}
+	if done.Status.Version != "2.0.0" {
+		t.Fatalf("version should advance after approval, got %q", done.Status.Version)
+	}
+}
+
 func deleteMigration(name, to, stage, targetName, ns string) stagesv1.Migration {
 	return stagesv1.Migration{
 		Name: name, To: to, Stage: stage,

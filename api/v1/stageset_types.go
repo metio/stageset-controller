@@ -505,6 +505,13 @@ type VersionSource struct {
 	// advancing the major change silently. Off by default.
 	// +optional
 	RequireMigrationCoverage bool `json:"requireMigrationCoverage,omitempty"`
+
+	// RequireApproval holds a version transition that has pending migrations
+	// until an operator approves the target version with the
+	// stages.metio.wtf/approved-version annotation, so destructive migrations
+	// don't run unattended. Off by default.
+	// +optional
+	RequireApproval bool `json:"requireApproval,omitempty"`
 }
 
 // ObjectVersionRef reads the version from a field of one rendered object in a
