@@ -427,6 +427,26 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	ss.Status.PendingMigrations = migPlan.pendingDetails(&ss)
 
+	// Approval gate: when spec.version.requireApproval is set and this transition
+	// has pending migrations, hold the whole rollout (app and migrations) until an
+	// operator approves the target version via the approved-version annotation.
+	// pendingMigrations is already on status, so the operator sees exactly what
+	// they are approving.
+	if v := ss.Spec.Version; v != nil && v.RequireApproval && len(migPlan.pending) > 0 &&
+		ss.Annotations[approvedVersionAnnotation] != migPlan.desired {
+		prevReady := readyConditionSnapshot(&ss)
+		msg := fmt.Sprintf("version transition to %s has %d pending migration(s) awaiting approval; set annotation %s=%q to proceed",
+			migPlan.desired, len(migPlan.pending), approvedVersionAnnotation, migPlan.desired)
+		r.setReady(&ss, metav1.ConditionFalse, ReasonMigrationApprovalPending, msg)
+		ss.Status.ObservedGeneration = ss.Generation
+		metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonMigrationApprovalPending).Inc()
+		r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, ReasonMigrationApprovalPending, msg)
+		if uerr := r.patchStatus(ctx, patchHelper, &ss); uerr != nil {
+			return ctrl.Result{}, uerr
+		}
+		return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
+	}
+
 	// SOPS decryptor (nil when spec.decryption is unset). Built once per
 	// reconcile; the key Secret is read under the tenant SA.
 	decCtx, decSpan := observability.Tracer().Start(ctx, "stageset.buildDecryptor")
@@ -1526,6 +1546,7 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				predicate.GenerationChangedPredicate{},
 				fluxpredicates.ReconcileRequestedPredicate{},
 				reconcileStageRequestedPredicate{},
+				migrationApprovalPredicate{},
 			),
 		)).
 		Owns(&stagesv1.StageInventory{}).
