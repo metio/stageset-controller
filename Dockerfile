@@ -28,9 +28,20 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v}
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
     -o stageset-controller ./cmd
 
+# Generate the CRDs from the Go API types into /crds so the image carries them
+# freshly derived from the source — the authoritative copy the Helm chart vendors
+# (and a future build can stop committing them entirely). controller-gen runs on
+# $BUILDPLATFORM, so its output is arch-independent yaml regardless of the target.
+# The version is the go.mod `tool` directive's — one source of truth, bumped by
+# Renovate's gomod manager, no pinned version to keep in sync here.
+RUN go tool controller-gen crd paths=./api/... output:crd:dir=/crds
+
 # distroless/static publishes amd64, arm64, arm/v7, ppc64le, riscv64, and s390x
 # — the same arch set every metio image ships, so this controller is
 # co-schedulable with jaas and the JOI images on any node architecture.
 FROM gcr.io/distroless/static:nonroot@sha256:963fa6c544fe5ce420f1f54fb88b6fb01479f054c8056d0f74cc2c6000df5240
 COPY --from=build /app/stageset-controller /usr/bin/
+# The generated CRDs ride along so downstream tooling (the Helm chart's
+# vendoring step) can extract them straight from the released image.
+COPY --from=build /crds /crds
 ENTRYPOINT ["/usr/bin/stageset-controller"]

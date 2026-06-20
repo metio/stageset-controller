@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: The stageset-controller Authors
 # SPDX-License-Identifier: 0BSD
 
-CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.3
+# controller-gen is a go.mod `tool` directive — its version lives only in go.mod
+# (Renovate's gomod manager bumps it); no pinned version here.
+CONTROLLER_GEN ?= go tool controller-gen
 GOVULNCHECK    ?= go run golang.org/x/vuln/cmd/govulncheck@latest
 GOFUMPT        ?= go run mvdan.cc/gofumpt@latest
 STATICCHECK    ?= go run honnef.co/go/tools/cmd/staticcheck@latest
