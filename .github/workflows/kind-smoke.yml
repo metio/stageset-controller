@@ -543,8 +543,8 @@ jobs:
           kubectl get stageset -A || true
           kubectl -n default get events || true
 
-  all-green:
-    name: Kind smoke — all checks passed
+  system-tests:
+    name: System Tests
     needs: [discover, smoke, s3, s3-seaweedfs, ha, selfsigned, scale-smoke, new-fields]
     if: always()
     runs-on: ubuntu-latest
