@@ -336,6 +336,18 @@ func (a *Action) Verb() string {
 	}
 }
 
+// VerbCount returns how many operation fields the action sets. Exactly one is
+// valid; the admission webhook and the migration validators enforce it.
+func (a *Action) VerbCount() int {
+	n := 0
+	for _, set := range []bool{a.Patch != nil, a.HTTP != nil, a.Wait != nil, a.Job != nil, a.Delete != nil, a.Apply != nil} {
+		if set {
+			n++
+		}
+	}
+	return n
+}
+
 // PatchAction patches an existing in-cluster object under the impersonated
 // ServiceAccount.
 type PatchAction struct {

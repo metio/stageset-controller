@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/migrations"
 	"github.com/metio/stageset-controller/internal/window"
 )
 
@@ -195,7 +196,7 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 		if m.Stage != "" && !anchors[m.Stage] {
 			return fmt.Errorf("migration %q anchors to unknown stage or anchor %q", m.Name, m.Stage)
 		}
-		if err := validateMigrationActions(m); err != nil {
+		if err := migrations.ValidateMigration(m); err != nil {
 			return err
 		}
 	}
@@ -229,7 +230,7 @@ func ValidateStages(ss *stagesv1.StageSet) error {
 		for _, phase := range phases {
 			for j := range phase.actions {
 				a := &phase.actions[j]
-				if n := actionTypeCount(a); n != 1 {
+				if n := a.VerbCount(); n != 1 {
 					return fmt.Errorf("stage %q action %q (%s): exactly one of patch, http, wait, job, delete, apply must be set, found %d", stage.Name, a.Name, phase.name, n)
 				}
 				if a.Name == "" {
@@ -243,27 +244,4 @@ func ValidateStages(ss *stagesv1.StageSet) error {
 		}
 	}
 	return nil
-}
-
-func actionTypeCount(a *stagesv1.Action) int {
-	n := 0
-	if a.Patch != nil {
-		n++
-	}
-	if a.HTTP != nil {
-		n++
-	}
-	if a.Wait != nil {
-		n++
-	}
-	if a.Job != nil {
-		n++
-	}
-	if a.Delete != nil {
-		n++
-	}
-	if a.Apply != nil {
-		n++
-	}
-	return n
 }

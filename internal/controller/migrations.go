@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,11 +17,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/jsonpath"
-	"sigs.k8s.io/yaml"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
+	"github.com/metio/stageset-controller/internal/migrations"
 )
 
 // versionLabel is the Kubernetes-recommended label carrying an application's
@@ -226,11 +225,11 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 		}
 		return nil, "", "", fmt.Errorf("fetch migrations artifact: %w", ferr) // transient
 	}
-	ladder, perr := parseMigrationLadder(files)
+	ladder, perr := migrations.ParseLadder(files)
 	if perr != nil {
 		return nil, ReasonMigrationArtifactInvalid, perr.Error(), nil
 	}
-	if verr := validateLadderContent(ladder); verr != nil {
+	if verr := migrations.ValidateLadder(ladder); verr != nil {
 		return nil, ReasonMigrationArtifactInvalid, verr.Error(), nil
 	}
 	// A remote-authored http action with no host allowlist could reach any
@@ -291,93 +290,6 @@ func (r *StageSetReconciler) checkMigrationSourcePinned(ss *stagesv1.StageSet, r
 	r.event(ss, corev1.EventTypeWarning, eventReasonMigrationSourceMutable,
 		"migrations source is pinned to a mutable tag/branch; an upstream overwrite can auto-roll new destructive content — pin to a digest/commit")
 	return "", ""
-}
-
-// migrationFileExts are the artifact file extensions parsed as migration
-// definitions; other files (READMEs, integrity manifests) are ignored.
-var migrationFileExts = map[string]bool{".yaml": true, ".yml": true, ".json": true}
-
-// parseMigrationLadder parses the fetched artifact files into one ladder. Each
-// .yaml/.yml/.json file is a YAML/JSON document that is either a list of
-// Migration or a single Migration; files are processed in sorted path order so
-// the ladder is deterministic regardless of map iteration. Unknown extensions
-// are ignored. Parsing is strict, so a misspelled field is rejected rather than
-// silently dropped — important for a destructive ladder.
-func parseMigrationLadder(files map[string]string) ([]stagesv1.Migration, error) {
-	paths := make([]string, 0, len(files))
-	for p := range files {
-		if migrationFileExts[strings.ToLower(filepath.Ext(p))] {
-			paths = append(paths, p)
-		}
-	}
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("migrations artifact contains no .yaml, .yml, or .json files")
-	}
-	sort.Strings(paths)
-	var ladder []stagesv1.Migration
-	for _, p := range paths {
-		var list []stagesv1.Migration
-		if err := yaml.UnmarshalStrict([]byte(files[p]), &list); err == nil {
-			ladder = append(ladder, list...)
-			continue
-		}
-		var single stagesv1.Migration
-		if err := yaml.UnmarshalStrict([]byte(files[p]), &single); err != nil {
-			return nil, fmt.Errorf("parsing migrations file %q: %w", p, err)
-		}
-		ladder = append(ladder, single)
-	}
-	if len(ladder) == 0 {
-		return nil, fmt.Errorf("migrations artifact defined no migrations")
-	}
-	return ladder, nil
-}
-
-// validateLadderContent applies the per-migration content checks (well-formed
-// name/to/actions) plus migration-name uniqueness across the whole ladder — the
-// admission-time invariants that can't run at admission for a sourced ladder
-// because its content isn't available until fetch.
-func validateLadderContent(ladder []stagesv1.Migration) error {
-	names := make(map[string]bool, len(ladder))
-	for i := range ladder {
-		m := &ladder[i]
-		if err := validateMigrationActions(m); err != nil {
-			return err
-		}
-		if names[m.Name] {
-			return fmt.Errorf("duplicate migration name %q; names are the idempotency-ledger key and must be unique", m.Name)
-		}
-		names[m.Name] = true
-	}
-	return nil
-}
-
-// validateMigrationActions checks a single migration is well-formed: a non-empty
-// name and to, and each action sets exactly one verb with a unique non-empty
-// name (the action names are the idempotency-ledger key). Shared by the
-// admission webhook (inline migrations) and the sourced-ladder content check.
-func validateMigrationActions(m *stagesv1.Migration) error {
-	if m.Name == "" {
-		return fmt.Errorf("a migration has an empty name")
-	}
-	if m.To == "" {
-		return fmt.Errorf("migration %q has an empty to", m.Name)
-	}
-	seen := make(map[string]bool, len(m.Actions))
-	for j := range m.Actions {
-		a := &m.Actions[j]
-		if n := actionTypeCount(a); n != 1 {
-			return fmt.Errorf("migration %q action %q: exactly one verb must be set, found %d", m.Name, a.Name, n)
-		}
-		if a.Name == "" {
-			return fmt.Errorf("migration %q has an action with an empty name; action names are the idempotency-ledger key and must be set", m.Name)
-		}
-		if seen[a.Name] {
-			return fmt.Errorf("migration %q has duplicate action name %q; action names are the idempotency-ledger key and must be unique", m.Name, a.Name)
-		}
-		seen[a.Name] = true
-	}
-	return nil
 }
 
 // selectMigrations returns the migrations whose target version is crossed by
