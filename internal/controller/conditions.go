@@ -61,6 +61,13 @@ const (
 	// must not have). Terminal until the anchor or the stages are fixed.
 	ReasonMigrationStageNotFound = "MigrationStageNotFound"
 
+	// ReasonMigrationArtifactInvalid: a migration ladder sourced via
+	// spec.migrationsSourceRef could not be parsed or failed content validation
+	// (no migration files, malformed YAML/JSON, a migration with an empty
+	// name/to, a malformed action, or a duplicate migration name). Terminal
+	// until the artifact is fixed and republished.
+	ReasonMigrationArtifactInvalid = "MigrationArtifactInvalid"
+
 	// ReasonPreviousRevisionUnavailable: rollbackOnFailure could not restore
 	// the last-good revisions because a producer has garbage-collected one.
 	// Rollback is best-effort: it works only while producers retain.
@@ -105,6 +112,7 @@ var AllReasons = []string{
 	ReasonInvalidVersion,
 	ReasonDowngradeRequiresMigration,
 	ReasonMigrationStageNotFound,
+	ReasonMigrationArtifactInvalid,
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,

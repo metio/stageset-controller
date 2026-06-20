@@ -192,19 +192,8 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 		if m.Stage != "" && !anchors[m.Stage] {
 			return fmt.Errorf("migration %q anchors to unknown stage or anchor %q", m.Name, m.Stage)
 		}
-		seen := map[string]bool{}
-		for j := range m.Actions {
-			a := &m.Actions[j]
-			if n := actionTypeCount(a); n != 1 {
-				return fmt.Errorf("migration %q action %q: exactly one verb must be set, found %d", m.Name, a.Name, n)
-			}
-			if a.Name == "" {
-				return fmt.Errorf("migration %q has an action with an empty name; action names are the idempotency-ledger key and must be set", m.Name)
-			}
-			if seen[a.Name] {
-				return fmt.Errorf("migration %q has duplicate action name %q; action names are the idempotency-ledger key and must be unique", m.Name, a.Name)
-			}
-			seen[a.Name] = true
+		if err := validateMigrationActions(m); err != nil {
+			return err
 		}
 	}
 	return nil
