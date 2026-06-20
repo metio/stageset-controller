@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -507,6 +508,34 @@ func TestCheckMigrationSourceVerified(t *testing.T) {
 			reason, _ := r.checkMigrationSourceVerified(artifact.ResolvedArtifact{Verified: c.verified})
 			if (reason != "") != c.wantFail {
 				t.Fatalf("reason=%q wantFail=%v", reason, c.wantFail)
+			}
+		})
+	}
+}
+
+func TestFailReason(t *testing.T) {
+	t.Parallel()
+	plain := errors.New("boom")
+	forbidden := apierrors.NewForbidden(schema.GroupResource{Resource: "stagesets"}, "n", errors.New("no"))
+	cases := []struct {
+		name     string
+		op       string
+		cause    error
+		reason   string
+		terminal bool
+	}{
+		{"ordinary stage op", "apply", plain, ReasonStageFailed, false},
+		{"migration retries", opMigration, plain, ReasonMigrationFailed, false},
+		{"dirty halts", opMigrationDirty, plain, ReasonMigrationDirty, true},
+		{"rbac beats migration op", opMigration, forbidden, ReasonRBACDenied, true},
+		{"rbac beats dirty op", opMigrationDirty, forbidden, ReasonRBACDenied, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			reason, terminal := failReason(c.op, c.cause)
+			if reason != c.reason || terminal != c.terminal {
+				t.Fatalf("failReason(%q) = (%q,%v), want (%q,%v)", c.op, reason, terminal, c.reason, c.terminal)
 			}
 		})
 	}

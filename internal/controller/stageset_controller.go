@@ -276,6 +276,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// completion. Stamped on the object now so every status write below
 	// persists it, regardless of which path the run takes. (Suspended objects
 	// are intentionally not stamped — the request was not acted on.)
+	// A manual reconcile request (flux reconcile / annotation bump) clears a
+	// MigrationDirty halt so a fixed migration is re-attempted once.
+	if req := ss.Annotations[fluxmeta.ReconcileRequestAnnotation]; req != "" && req != ss.Status.GetLastHandledReconcileRequest() {
+		ss.Status.MigrationFailureCount = 0
+	}
 	ss.Status.SetLastHandledReconcileRequest(ss.Annotations[fluxmeta.ReconcileRequestAnnotation])
 
 	// Spec invariants the CRD schema cannot express cheaply (the action oneof)
@@ -506,7 +511,14 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// version-conditional work (data conversions, immutable-object
 			// recreation) happens before the stage applies its content.
 			if merr := r.runStageMigrations(ctx, &ss, stage.Name, migPlan, executor); merr != nil {
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "migration", merr, stageStatuses, ra.Revision, executed)
+				ss.Status.MigrationFailureCount++
+				op := opMigration
+				if ss.Status.MigrationFailureCount >= maxMigrationFailures {
+					// Repeated failures: stop auto-retrying destructive work against
+					// an uncertain state. Cleared by a manual reconcile once fixed.
+					op = opMigrationDirty
+				}
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, op, merr, stageStatuses, ra.Revision, executed)
 			}
 
 			// PRE actions: before BUILD; a failure aborts the stage untouched
@@ -758,6 +770,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		ss.Status.ExecutedMigrations = nil
 		ss.Status.ExecutedMigrationActions = nil
 		ss.Status.PendingMigrations = nil
+		ss.Status.MigrationFailureCount = 0
 	}
 	// Record this run as the rollback target: per-stage artifact pointers in
 	// status (no rendered output, no Secret). The status update below persists
@@ -981,18 +994,44 @@ func (r *StageSetReconciler) fetcher() *artifact.Fetcher {
 //
 // The next genuine watch event (a spec edit, an upstream republish, or the
 // interval tick) re-runs the reconcile.
-func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, revision string, executed []string) (ctrl.Result, error) {
-	reason := ReasonStageFailed
-	terminal := false
-	stageMsg := fmt.Sprintf("%s: %v", op, cause)
-	readyMsg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
+const (
+	// maxMigrationFailures is the consecutive-failure count at which a migration
+	// transition escalates from retrying (MigrationFailed) to a halted dirty
+	// state (MigrationDirty), so the controller stops re-attempting destructive
+	// work against an uncertain state.
+	maxMigrationFailures = 5
+	// opMigration / opMigrationDirty are the failStage op strings that select the
+	// migration-specific Ready reasons.
+	opMigration      = "migration"
+	opMigrationDirty = "migration halted (dirty)"
+)
+
+// failReason maps a stage operation and its error to a Ready-condition reason and
+// whether the failure is terminal (no controller-runtime backoff). RBAC /
+// missing-CRD errors are terminal regardless of op; a terminal fetch error and a
+// dirty migration halt are terminal; an ordinary migration failure retries.
+func failReason(op string, cause error) (reason string, terminal bool) {
 	switch {
 	case isPermanentAPIError(cause):
-		reason, terminal = ReasonRBACDenied, true
+		return ReasonRBACDenied, true
+	case op == "fetch artifact" && terminalFetchError(cause):
+		return ReasonStageFailed, true
+	case op == opMigration:
+		return ReasonMigrationFailed, false
+	case op == opMigrationDirty:
+		return ReasonMigrationDirty, true
+	default:
+		return ReasonStageFailed, false
+	}
+}
+
+func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, revision string, executed []string) (ctrl.Result, error) {
+	reason, terminal := failReason(op, cause)
+	stageMsg := fmt.Sprintf("%s: %v", op, cause)
+	readyMsg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
+	if reason == ReasonRBACDenied {
 		stageMsg = fmt.Sprintf("%s: %s", op, rbacDenialMessage(op, cause))
 		readyMsg = fmt.Sprintf("stage %q %s: %s", stage, op, rbacDenialMessage(op, cause))
-	case op == "fetch artifact" && terminalFetchError(cause):
-		terminal = true
 	}
 
 	ss.Status.Stages = append(prior, stagesv1.StageStatus{

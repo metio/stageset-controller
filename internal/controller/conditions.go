@@ -81,6 +81,20 @@ const (
 	// auto-roll new destructive content. Terminal until the source is pinned.
 	ReasonMigrationSourceNotPinned = "MigrationSourceNotPinned"
 
+	// ReasonMigrationFailed: a migration's action failed this reconcile. Distinct
+	// from ReasonStageFailed so operators can tell a stage's own apply from the
+	// migration anchored before it. Retries with backoff (the per-action ledger
+	// skips completed actions); after repeated failures it escalates to
+	// MigrationDirty.
+	ReasonMigrationFailed = "MigrationFailed"
+
+	// ReasonMigrationDirty: a migration has failed repeatedly, so the controller
+	// halts auto-retry rather than re-attempting destructive work against an
+	// uncertain state. Sticky/terminal: cleared by a manual reconcile
+	// (flux reconcile / reconcile.fluxcd.io/requestedAt) once the cause is fixed,
+	// or by the transition completing. Mirrors golang-migrate dirty / Flyway repair.
+	ReasonMigrationDirty = "MigrationDirty"
+
 	// ReasonPreviousRevisionUnavailable: rollbackOnFailure could not restore
 	// the last-good revisions because a producer has garbage-collected one.
 	// Rollback is best-effort: it works only while producers retain.
@@ -128,6 +142,8 @@ var AllReasons = []string{
 	ReasonMigrationArtifactInvalid,
 	ReasonMigrationSourceNotVerified,
 	ReasonMigrationSourceNotPinned,
+	ReasonMigrationFailed,
+	ReasonMigrationDirty,
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,

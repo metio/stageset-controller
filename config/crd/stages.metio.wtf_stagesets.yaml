@@ -1981,6 +1981,14 @@ spec:
                   LastHandledUpdateOverride is the value of the most recently honored
                   stages.metio.wtf/update-now annotation, so an override fires once.
                 type: string
+              migrationFailureCount:
+                description: |-
+                  MigrationFailureCount counts consecutive migration failures in the current
+                  transition. Once it reaches the controller's threshold the migration goes
+                  MigrationDirty (auto-retry halts). Reset to zero on a successful transition
+                  or a manual reconcile request.
+                format: int32
+                type: integer
               observedGeneration:
                 description: ObservedGeneration is the last spec generation reconciled.
                 format: int64

@@ -698,6 +698,13 @@ type StageSetStatus struct {
 	// +optional
 	ExecutedMigrationActions []string `json:"executedMigrationActions,omitempty"`
 
+	// MigrationFailureCount counts consecutive migration failures in the current
+	// transition. Once it reaches the controller's threshold the migration goes
+	// MigrationDirty (auto-retry halts). Reset to zero on a successful transition
+	// or a manual reconcile request.
+	// +optional
+	MigrationFailureCount int32 `json:"migrationFailureCount,omitempty"`
+
 	// LastAppliedSnapshot records, per stage, the artifact coordinates of the
 	// last fully-successful run. rollbackOnFailure re-fetches these
 	// revisions and re-renders them under the current spec — a pointer to the
