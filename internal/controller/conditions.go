@@ -88,6 +88,12 @@ const (
 	// MigrationDirty.
 	ReasonMigrationFailed = "MigrationFailed"
 
+	// ReasonMigrationCoverageMissing: spec.version.requireMigrationCoverage is set
+	// and a version transition crosses a major-version boundary with no migration
+	// covering it. Fails closed rather than advancing a major change unmigrated.
+	// Terminal until a covering migration is added or the version is corrected.
+	ReasonMigrationCoverageMissing = "MigrationCoverageMissing"
+
 	// ReasonMigrationDirty: a migration has failed repeatedly, so the controller
 	// halts auto-retry rather than re-attempting destructive work against an
 	// uncertain state. Sticky/terminal: cleared by a manual reconcile
@@ -142,6 +148,7 @@ var AllReasons = []string{
 	ReasonMigrationArtifactInvalid,
 	ReasonMigrationSourceNotVerified,
 	ReasonMigrationSourceNotPinned,
+	ReasonMigrationCoverageMissing,
 	ReasonMigrationFailed,
 	ReasonMigrationDirty,
 	ReasonPreviousRevisionUnavailable,
