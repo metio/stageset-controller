@@ -129,7 +129,7 @@ func (cfg Config) getStageSetHandler(ctx context.Context, _ *mcpsdk.CallToolRequ
 		ObservedGeneration:   ss.Status.ObservedGeneration,
 		Version:              ss.Status.Version,
 		LastAppliedRevisions: ss.Status.LastAppliedRevisions,
-		PendingMigrations:    ss.Status.PendingMigrations,
+		PendingMigrations:    pendingMigrationNames(&ss),
 	}
 	for _, st := range ss.Status.Stages {
 		detail.Stages = append(detail.Stages, stageView{
@@ -144,6 +144,19 @@ func (cfg Config) getStageSetHandler(ctx context.Context, _ *mcpsdk.CallToolRequ
 
 // readyCondition extracts the Ready condition's status/reason/message. A
 // StageSet with no Ready condition yet reports status "Unknown".
+// pendingMigrationNames extracts the names from the rich pending-migration
+// status for the snapshot's flat list.
+func pendingMigrationNames(ss *stagesv1.StageSet) []string {
+	if len(ss.Status.PendingMigrations) == 0 {
+		return nil
+	}
+	names := make([]string, len(ss.Status.PendingMigrations))
+	for i, m := range ss.Status.PendingMigrations {
+		names[i] = m.Name
+	}
+	return names
+}
+
 func readyCondition(ss *stagesv1.StageSet) (status, reason, message string) {
 	cond := apimeta.FindStatusCondition(ss.Status.Conditions, conditionReady)
 	if cond == nil {

@@ -6,6 +6,7 @@ package diffrender
 import (
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 )
 
@@ -28,7 +29,7 @@ type MigrationPreview struct {
 	To      string
 	From    string
 	Stage   string
-	Actions int
+	Actions []string // action verbs in run order
 }
 
 // WriteActions renders the actions a rollout would run, grouped by stage and
@@ -80,7 +81,7 @@ func WriteMigrations(w io.Writer, migrations []MigrationPreview, color bool) {
 			boundary = m.From + " → " + m.To
 		}
 		fmt.Fprintf(tw, "  %s\t%s\tbefore stage %s\t%s\n",
-			m.Name, boundary, m.Stage, pluralizeActions(m.Actions))
+			m.Name, boundary, m.Stage, actionsSummary(m.Actions))
 	}
 	_ = tw.Flush()
 }
@@ -92,9 +93,16 @@ func headingText(s string, color bool) string {
 	return ansiCyan + s + ansiReset
 }
 
-func pluralizeActions(n int) string {
-	if n == 1 {
-		return "1 action"
+// actionsSummary renders a migration's action verbs as a count plus the verbs,
+// e.g. "2 actions: delete, apply", so the preview shows what destructive work
+// runs, not just how many steps.
+func actionsSummary(verbs []string) string {
+	if len(verbs) == 0 {
+		return "no actions"
 	}
-	return fmt.Sprintf("%d actions", n)
+	noun := "actions"
+	if len(verbs) == 1 {
+		noun = "action"
+	}
+	return fmt.Sprintf("%d %s: %s", len(verbs), noun, strings.Join(verbs, ", "))
 }

@@ -6,6 +6,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -260,39 +261,20 @@ func TestPendingMigrations_EmptyStatus(t *testing.T) {
 	}
 }
 
-func TestPendingMigrations_JoinsToSpec(t *testing.T) {
-	ss := &stagesv1.StageSet{
-		Spec: stagesv1.StageSetSpec{
-			Migrations: []stagesv1.Migration{
-				{
-					Name: "m1", To: "v2", From: "v1", Stage: "prod",
-					Actions: []stagesv1.Action{
-						{Name: "a", Wait: &stagesv1.WaitAction{Expr: "true"}},
-						{Name: "b", Wait: &stagesv1.WaitAction{Expr: "true"}},
-					},
-				},
-			},
-		},
+func TestPendingMigrations_MapsRichStatus(t *testing.T) {
+	// The rich status.pendingMigrations is rendered directly — no spec join — so a
+	// sourced ladder (whose content is not in the spec) previews fully too.
+	ss := &stagesv1.StageSet{}
+	ss.Status.PendingMigrations = []stagesv1.PendingMigration{
+		{Name: "m1", To: "v2", From: "v1", Stage: "prod", Actions: []string{"wait", "delete"}, Digest: "abc123"},
 	}
-	ss.Status.PendingMigrations = []string{"m1"}
 	out := pendingMigrations(ss)
 	if len(out) != 1 {
 		t.Fatalf("want 1 preview, got %d", len(out))
 	}
-	got := out[0]
-	want := diffrender.MigrationPreview{Name: "m1", To: "v2", From: "v1", Stage: "prod", Actions: 2}
-	if got != want {
-		t.Errorf("migration preview = %+v, want %+v", got, want)
-	}
-}
-
-func TestPendingMigrations_UnknownNameZeroValues(t *testing.T) {
-	// A pending name with no matching spec migration yields zero-valued fields.
-	ss := &stagesv1.StageSet{}
-	ss.Status.PendingMigrations = []string{"ghost"}
-	out := pendingMigrations(ss)
-	if len(out) != 1 || out[0].Name != "ghost" || out[0].To != "" || out[0].Actions != 0 {
-		t.Fatalf("unknown migration preview = %+v", out)
+	want := diffrender.MigrationPreview{Name: "m1", To: "v2", From: "v1", Stage: "prod", Actions: []string{"wait", "delete"}}
+	if !reflect.DeepEqual(out[0], want) {
+		t.Errorf("migration preview = %+v, want %+v", out[0], want)
 	}
 }
 

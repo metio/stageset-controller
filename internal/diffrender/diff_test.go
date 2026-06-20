@@ -145,11 +145,11 @@ func TestWriteActions_EmptyIsQuiet(t *testing.T) {
 func TestWriteMigrations(t *testing.T) {
 	var buf bytes.Buffer
 	WriteMigrations(&buf, []MigrationPreview{
-		{Name: "schema-upgrade", To: "v2", From: "v1", Stage: "canary", Actions: 2},
-		{Name: "seed", To: "v2", Stage: "prod", Actions: 1},
+		{Name: "schema-upgrade", To: "v2", From: "v1", Stage: "canary", Actions: []string{"job", "delete"}},
+		{Name: "seed", To: "v2", Stage: "prod", Actions: []string{"apply"}},
 	}, false)
 	out := buf.String()
-	for _, want := range []string{"Migrations to run:", "schema-upgrade", "v1 → v2", "before stage canary", "2 actions", "→ v2", "1 action"} {
+	for _, want := range []string{"Migrations to run:", "schema-upgrade", "v1 → v2", "before stage canary", "2 actions: job, delete", "→ v2", "1 action: apply"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("migrations output missing %q:\n%s", want, out)
 		}

@@ -48,13 +48,28 @@ type migrationPlan struct {
 	byStage map[string][]*stagesv1.Migration
 }
 
-func (p *migrationPlan) pendingNames() []string {
+// pendingDetails builds the rich status preview of the pending migrations:
+// boundary, the resolved anchor stage, action verbs, and content digest, so an
+// operator (and the CLI) sees what will run without reading the spec — essential
+// for a sourced ladder whose content is not in the spec.
+func (p *migrationPlan) pendingDetails(ss *stagesv1.StageSet) []stagesv1.PendingMigration {
 	if len(p.pending) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(p.pending))
+	out := make([]stagesv1.PendingMigration, 0, len(p.pending))
 	for _, m := range p.pending {
-		out = append(out, m.Name)
+		var verbs []string
+		for i := range m.Actions {
+			verbs = append(verbs, m.Actions[i].Verb())
+		}
+		out = append(out, stagesv1.PendingMigration{
+			Name:    m.Name,
+			To:      m.To,
+			From:    m.From,
+			Stage:   anchorStage(ss, m.Stage),
+			Actions: verbs,
+			Digest:  migrationDigest(m),
+		})
 	}
 	return out
 }

@@ -1995,10 +1995,47 @@ spec:
                 type: integer
               pendingMigrations:
                 description: |-
-                  PendingMigrations lists the migrations the next run will execute, so
-                  operators see unusual work before it happens.
+                  PendingMigrations lists the migrations the next run will execute, with
+                  enough detail (boundary, resolved anchor stage, action verbs, content
+                  digest) that operators see exactly what destructive work is about to run
+                  — including for a ladder sourced from spec.migrationsSourceRef, whose
+                  content is not in the spec.
                 items:
-                  type: string
+                  description: |-
+                    PendingMigration is a status preview of a migration the next run will execute:
+                    its boundary, the concrete stage it anchors before, the action verbs it runs,
+                    and its content digest — so operators see what is about to happen even when the
+                    ladder is sourced from an artifact rather than the spec.
+                  properties:
+                    actions:
+                      description: Actions lists the action verbs (e.g. delete, apply,
+                        job) in run order.
+                      items:
+                        type: string
+                      type: array
+                    digest:
+                      description: Digest is the migration's resolved content digest,
+                        the idempotency-ledger key.
+                      type: string
+                    from:
+                      description: From is the optional version constraint it applies
+                        from.
+                      type: string
+                    name:
+                      description: Name of the migration.
+                      type: string
+                    stage:
+                      description: Stage is the concrete stage this migration resolved
+                        to anchor before.
+                      type: string
+                    to:
+                      description: To is the version boundary this migration crosses
+                        up to.
+                      type: string
+                  required:
+                  - name
+                  - to
+                  type: object
                 type: array
               pendingUpdate:
                 description: |-

@@ -425,7 +425,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 	}
-	ss.Status.PendingMigrations = migPlan.pendingNames()
+	ss.Status.PendingMigrations = migPlan.pendingDetails(&ss)
 
 	// SOPS decryptor (nil when spec.decryption is unset). Built once per
 	// reconcile; the key Secret is read under the tenant SA.

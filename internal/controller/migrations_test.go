@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -345,6 +346,37 @@ func TestResolveAnchors(t *testing.T) {
 			t.Fatalf("reason = %q, want %q", reason, ReasonMigrationStageNotFound)
 		}
 	})
+}
+
+func TestPendingDetails(t *testing.T) {
+	t.Parallel()
+	ss := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{
+		{Name: "prepare", MigrationAnchor: "db-pre"},
+		{Name: "rollout"},
+	}}}
+	m := &stagesv1.Migration{Name: "drop", To: "2.0.0", From: "1.x", Stage: "db-pre", Actions: []stagesv1.Action{
+		{Name: "del", Delete: &stagesv1.DeleteAction{}},
+		{Name: "hold", Wait: &stagesv1.WaitAction{}},
+	}}
+	plan := &migrationPlan{pending: []*stagesv1.Migration{m}}
+
+	got := plan.pendingDetails(ss)
+	if len(got) != 1 {
+		t.Fatalf("want 1 detail, got %d", len(got))
+	}
+	d := got[0]
+	if d.Name != "drop" || d.To != "2.0.0" || d.From != "1.x" {
+		t.Fatalf("detail = %+v", d)
+	}
+	if d.Stage != "prepare" { // the db-pre anchor resolves to the concrete stage
+		t.Fatalf("resolved stage = %q, want prepare", d.Stage)
+	}
+	if !reflect.DeepEqual(d.Actions, []string{"delete", "wait"}) {
+		t.Fatalf("action verbs = %v, want [delete wait]", d.Actions)
+	}
+	if d.Digest != migrationDigest(m) {
+		t.Fatalf("digest = %q, want %q", d.Digest, migrationDigest(m))
+	}
 }
 
 func TestParseMigrationLadder(t *testing.T) {
