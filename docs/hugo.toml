@@ -214,6 +214,11 @@ pygmentsUseClasses = true
     name = "Claude Code skill"
     url = "/usage/claude-code/"
     weight = 16
+  [[menu.main]]
+    parent = "usage"
+    name = "MCP server"
+    url = "/usage/mcp-server/"
+    weight = 17
 
   [[menu.main]]
     identifier = "observability"

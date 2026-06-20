@@ -110,3 +110,13 @@ stagesetctl reconcile my-app --wait    # force an out-of-band reconcile
 `https://stageset.projects.metio.wtf/runbooks/<reason>/` (lower-cased). `kubectl
 describe stageset <name>` shows the per-stage phase and message; `status.stages[]`
 carries each stage's phase, applied revision, and executed actions.
+
+## MCP server
+
+With `--mcp-bind-address` set, the controller serves a Model Context Protocol
+endpoint (streamable HTTP) exposing read-only `list_stagesets` / `get_stageset`
+tools (Ready status, reason, runbook URL, version, per-stage phases, applied
+revisions, pending migrations). `--mcp-allow-mutations` additionally exposes
+gated `reconcile_stageset` / `suspend_stageset` / `resume_stageset` write tools,
+all acting as the controller's ServiceAccount. Full reference:
+`https://stageset.projects.metio.wtf/usage/mcp-server/`.
