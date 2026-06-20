@@ -898,10 +898,14 @@ var happyReasonsNoRunbook = map[string]bool{
 	ReasonSuspended: true,
 }
 
-// runbookBaseURL is the documentation site's runbook directory. decorateMessage
+// RunbookBaseURL is the documentation site's runbook directory. decorateMessage
 // appends a per-reason link under it so kubectl describe surfaces a direct route
-// to the remediation page.
-const runbookBaseURL = "https://stageset.projects.metio.wtf/runbooks/"
+// to the remediation page. Exported so other surfaces (the MCP server) build the
+// same links without importing the controller package's heavier internals.
+const RunbookBaseURL = "https://stageset.projects.metio.wtf/runbooks/"
+
+// runbookBaseURL is the unexported alias used internally.
+const runbookBaseURL = RunbookBaseURL
 
 // decorateMessage appends a "(runbook: <base><reason>/)" suffix so kubectl
 // describe surfaces a direct link to the per-reason remediation page on the
