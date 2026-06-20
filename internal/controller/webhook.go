@@ -163,6 +163,9 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 	if ss.Spec.Version == nil {
 		return fmt.Errorf("migrations require spec.version")
 	}
+	if hasSource && isCrossNamespaceRef(ss.Spec.MigrationsSourceRef.SourceRef, ss.Namespace) {
+		return fmt.Errorf("spec.migrationsSourceRef must reference a source in the StageSet's own namespace; cross-namespace migration sources are not allowed")
+	}
 
 	// Anchor keys = stage Names plus declared MigrationAnchors; they must be
 	// unique across the union so a migration's Stage value resolves to exactly

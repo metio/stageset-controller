@@ -202,6 +202,14 @@ func TestValidateMigrations_SourceAndAnchors(t *testing.T) {
 			ss:   spec(stagesv1.StageSetSpec{Version: ver, Stages: []stagesv1.Stage{{Name: "deploy"}}, MigrationsSourceRef: src}),
 		},
 		{
+			name: "cross-namespace source rejected",
+			ss: spec(stagesv1.StageSetSpec{
+				Version: ver, Stages: []stagesv1.Stage{{Name: "deploy"}},
+				MigrationsSourceRef: &stagesv1.MigrationsSource{SourceRef: stagesv1.SourceReference{Name: "ladder", Namespace: "other"}},
+			}),
+			wantErr: true,
+		},
+		{
 			name:    "inline requires version",
 			ss:      spec(stagesv1.StageSetSpec{Stages: []stagesv1.Stage{{Name: "deploy"}}, Migrations: mig("deploy")}),
 			wantErr: true,
