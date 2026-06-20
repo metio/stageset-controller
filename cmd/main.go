@@ -159,14 +159,15 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	}
 
 	if err = (&controller.StageSetReconciler{
-		Client:               mgr.GetClient(),
-		ShardCap:             *c.ShardCap,
-		AllowedActionHosts:   []string(*c.AllowedActionHosts),
-		NoCrossNamespaceRefs: *c.NoCrossNamespaceRefs,
-		ObjectLevelKMS:       *c.ObjectLevelKMS,
-		DefaultInterval:      *c.DefaultInterval,
-		MaxTeardownWait:      *c.MaxTeardownWait,
-		RollbackStore:        rollbackStore,
+		Client:                          mgr.GetClient(),
+		ShardCap:                        *c.ShardCap,
+		AllowedActionHosts:              []string(*c.AllowedActionHosts),
+		NoCrossNamespaceRefs:            *c.NoCrossNamespaceRefs,
+		RequireVerifiedMigrationSources: *c.RequireVerifiedMigrationSources,
+		ObjectLevelKMS:                  *c.ObjectLevelKMS,
+		DefaultInterval:                 *c.DefaultInterval,
+		MaxTeardownWait:                 *c.MaxTeardownWait,
+		RollbackStore:                   rollbackStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("unable to create controller", "error", err, "controller", "StageSet")
 		return 1

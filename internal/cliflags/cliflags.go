@@ -59,12 +59,13 @@ type Flags struct {
 
 	WatchNamespaces *string
 
-	ShardCap             *int
-	NoCrossNamespaceRefs *bool
-	ObjectLevelKMS       *bool
-	AllowedActionHosts   *StringSlice
-	DefaultInterval      *time.Duration
-	MaxTeardownWait      *time.Duration
+	ShardCap                        *int
+	NoCrossNamespaceRefs            *bool
+	ObjectLevelKMS                  *bool
+	RequireVerifiedMigrationSources *bool
+	AllowedActionHosts              *StringSlice
+	DefaultInterval                 *time.Duration
+	MaxTeardownWait                 *time.Duration
 
 	RBPath *string
 
@@ -115,44 +116,45 @@ func GroupOf(name string) string { return groupByName[name] }
 // documentation group, and returns a struct of the registered value pointers.
 func Register(fs *flag.FlagSet) *Flags {
 	f := &Flags{
-		MetricsAddr:          new(string),
-		ProbeAddr:            new(string),
-		EnableLeaderElection: new(bool),
-		WatchNamespaces:      new(string),
-		ShardCap:             new(int),
-		NoCrossNamespaceRefs: new(bool),
-		ObjectLevelKMS:       new(bool),
-		AllowedActionHosts:   &StringSlice{},
-		DefaultInterval:      new(time.Duration),
-		MaxTeardownWait:      new(time.Duration),
-		RBPath:               new(string),
-		RBS3Endpoint:         new(string),
-		RBS3Bucket:           new(string),
-		RBS3Prefix:           new(string),
-		RBS3Region:           new(string),
-		RBS3UseSSL:           new(bool),
-		RBS3AccessKey:        new(string),
-		RBS3SecretKey:        new(string),
-		RBS3SessionToken:     new(string),
-		RBS3Anonymous:        new(bool),
-		RBS3SSE:              new(string),
-		RBS3SSEKMSKey:        new(string),
-		TracingEndpoint:      new(string),
-		TracingInsecure:      new(bool),
-		TracingSampleRatio:   new(float64),
-		EnableWebhook:        new(bool),
-		WebhookCertMode:      new(string),
-		WebhookCertDir:       new(string),
-		WebhookPort:          new(int),
-		WebhookCertValidity:  new(time.Duration),
-		WebhookServiceName:   new(string),
-		WebhookServiceNS:     new(string),
-		WebhookVWCName:       new(string),
-		GateAddr:             new(string),
-		MCPAddr:              new(string),
-		MCPAllowMutations:    new(bool),
-		LogLevel:             new(string),
-		LogFormat:            new(string),
+		MetricsAddr:                     new(string),
+		ProbeAddr:                       new(string),
+		EnableLeaderElection:            new(bool),
+		WatchNamespaces:                 new(string),
+		ShardCap:                        new(int),
+		NoCrossNamespaceRefs:            new(bool),
+		ObjectLevelKMS:                  new(bool),
+		RequireVerifiedMigrationSources: new(bool),
+		AllowedActionHosts:              &StringSlice{},
+		DefaultInterval:                 new(time.Duration),
+		MaxTeardownWait:                 new(time.Duration),
+		RBPath:                          new(string),
+		RBS3Endpoint:                    new(string),
+		RBS3Bucket:                      new(string),
+		RBS3Prefix:                      new(string),
+		RBS3Region:                      new(string),
+		RBS3UseSSL:                      new(bool),
+		RBS3AccessKey:                   new(string),
+		RBS3SecretKey:                   new(string),
+		RBS3SessionToken:                new(string),
+		RBS3Anonymous:                   new(bool),
+		RBS3SSE:                         new(string),
+		RBS3SSEKMSKey:                   new(string),
+		TracingEndpoint:                 new(string),
+		TracingInsecure:                 new(bool),
+		TracingSampleRatio:              new(float64),
+		EnableWebhook:                   new(bool),
+		WebhookCertMode:                 new(string),
+		WebhookCertDir:                  new(string),
+		WebhookPort:                     new(int),
+		WebhookCertValidity:             new(time.Duration),
+		WebhookServiceName:              new(string),
+		WebhookServiceNS:                new(string),
+		WebhookVWCName:                  new(string),
+		GateAddr:                        new(string),
+		MCPAddr:                         new(string),
+		MCPAllowMutations:               new(bool),
+		LogLevel:                        new(string),
+		LogFormat:                       new(string),
 	}
 
 	group := func(name string, g string) string {
@@ -181,6 +183,7 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.Var(f.AllowedActionHosts, group("allowed-action-hosts", recon), "Host glob allowed for http actions; repeatable. Loopback and link-local ranges are always denied unless explicitly listed.")
 	fs.BoolVar(f.NoCrossNamespaceRefs, group("no-cross-namespace-refs", recon), false, "Deny cross-namespace sourceRef and dependsOn references.")
 	fs.BoolVar(f.ObjectLevelKMS, group("object-level-kms", recon), false, "Decrypt SOPS cloud KMS keys with each StageSet's serviceAccountName federated to a cloud identity, instead of the controller's ambient credentials. The tenant ServiceAccount must be federated (IRSA / Workload Identity) to a cloud identity granted KMS decrypt. Off by default (ambient credentials).")
+	fs.BoolVar(f.RequireVerifiedMigrationSources, group("require-verified-migration-sources", recon), false, "Require a spec.migrationsSourceRef source to be signature-verified (status.conditions[SourceVerified]=True from the source's spec.verify cosign/notation config) before its destructive migration ladder runs. A source whose verification FAILED is always refused; this flag additionally refuses sources that configure no verification at all. Off by default; strongly recommended in production.")
 	fs.StringVar(f.TracingEndpoint, group("tracing-endpoint", tracing), "", "OTLP gRPC collector host:port (e.g. otel-collector.observability.svc:4317). Empty disables tracing entirely.")
 	fs.BoolVar(f.TracingInsecure, group("tracing-insecure", tracing), false, "Skip TLS when dialing the OTLP collector. Use only for in-cluster collectors that don't terminate TLS themselves.")
 	fs.Float64Var(f.TracingSampleRatio, group("tracing-sample-ratio", tracing), 1.0, "TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.")

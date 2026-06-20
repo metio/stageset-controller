@@ -133,6 +133,11 @@ type StageSetReconciler struct {
 	ActionIPValidator func(net.IP) error
 	// NoCrossNamespaceRefs is the global --no-cross-namespace-refs flag.
 	NoCrossNamespaceRefs bool
+	// RequireVerifiedMigrationSources is the global
+	// --require-verified-migration-sources flag: when true, a sourced migration
+	// ladder runs only if its source carries SourceVerified=True. A source whose
+	// verification FAILED is refused regardless of this flag.
+	RequireVerifiedMigrationSources bool
 	// ObjectLevelKMS is the global --object-level-kms flag: when true, SOPS
 	// cloud KMS decryption uses the StageSet's serviceAccountName federated to
 	// a cloud identity (object-level identity) instead of the controller's

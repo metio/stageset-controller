@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/artifact"
 )
 
 // --- selectMigrations (pure) ------------------------------------------------
@@ -480,6 +481,34 @@ func TestMigrationDigest(t *testing.T) {
 	changed.Actions = []stagesv1.Action{{Name: "a", Wait: &stagesv1.WaitAction{}}}
 	if migrationDigest(m) == migrationDigest(&changed) {
 		t.Fatal("digest did not change when the action content changed")
+	}
+}
+
+func TestCheckMigrationSourceVerified(t *testing.T) {
+	t.Parallel()
+	tru, fls := true, false
+	cases := []struct {
+		name     string
+		verified *bool
+		require  bool
+		wantFail bool
+	}{
+		{"unset, not required → ok", nil, false, false},
+		{"unset, required → fail", nil, true, true},
+		{"verified true → ok", &tru, false, false},
+		{"verified true, required → ok", &tru, true, false},
+		{"verified false → always fail", &fls, false, true},
+		{"verified false, required → fail", &fls, true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			r := &StageSetReconciler{RequireVerifiedMigrationSources: c.require}
+			reason, _ := r.checkMigrationSourceVerified(artifact.ResolvedArtifact{Verified: c.verified})
+			if (reason != "") != c.wantFail {
+				t.Fatalf("reason=%q wantFail=%v", reason, c.wantFail)
+			}
+		})
 	}
 }
 
