@@ -746,6 +746,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if migPlan.versionSet {
 		ss.Status.Version = migPlan.desired
 		ss.Status.ExecutedMigrations = nil
+		ss.Status.ExecutedMigrationActions = nil
 		ss.Status.PendingMigrations = nil
 	}
 	// Record this run as the rollback target: per-stage artifact pointers in

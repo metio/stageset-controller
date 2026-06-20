@@ -795,6 +795,11 @@ func (in *StageSetStatus) DeepCopyInto(out *StageSetStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.ExecutedMigrationActions != nil {
+		in, out := &in.ExecutedMigrationActions, &out.ExecutedMigrationActions
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.LastAppliedSnapshot != nil {
 		in, out := &in.LastAppliedSnapshot, &out.LastAppliedSnapshot
 		*out = make([]StageArtifactRef, len(*in))
