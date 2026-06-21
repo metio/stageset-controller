@@ -200,7 +200,16 @@ func reconcileHandled(ss *stagesv1.StageSet, opts reconcileOptions, token string
 	if opts.stage != "" {
 		for _, st := range ss.Status.Stages {
 			if st.Name == opts.stage {
-				return st.LastHandledReconcileAt == token
+				if st.LastHandledReconcileAt != token {
+					return false
+				}
+				// --update-now isn't satisfied until the held rollout actually
+				// applies (PendingUpdate cleared), the same guard the
+				// StageSet-level path below applies.
+				if opts.updateNow && ss.Status.PendingUpdate != nil {
+					return false
+				}
+				return true
 			}
 		}
 		return false

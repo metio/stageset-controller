@@ -775,6 +775,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if derr := recorder.DeleteStageShards(ctx, ss.Namespace, ss.Name, removed.Name); derr != nil {
 				return ctrl.Result{}, derr
 			}
+			// Drop the removed stage's readiness gauge so a metric-based rollout
+			// gate doesn't keep reading its last value for a stage that no longer
+			// exists. publishStageReady only refreshes current status.Stages.
+			metrics.DeleteStageReadyForStage(ss.Namespace, ss.Name, removed.Name)
 		}
 	}
 

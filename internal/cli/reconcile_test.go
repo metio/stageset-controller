@@ -216,4 +216,11 @@ func TestReconcileHandled(t *testing.T) {
 	if reconcileHandled(withPending, reconcileOptions{updateNow: true}, "tok") {
 		t.Error("update-now: a still-pending update means not handled")
 	}
+
+	// Stage-scoped + update-now must also wait for the held update to apply.
+	stagePending := mk("", stagesv1.StageStatus{Name: "first", LastHandledReconcileAt: "tok"})
+	stagePending.Status.PendingUpdate = &stagesv1.PendingUpdate{}
+	if reconcileHandled(stagePending, reconcileOptions{stage: "first", updateNow: true}, "tok") {
+		t.Error("single-stage update-now: a still-pending update means not handled")
+	}
 }

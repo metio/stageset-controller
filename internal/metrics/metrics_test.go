@@ -45,3 +45,20 @@ func TestDeleteStageReady(t *testing.T) {
 		t.Fatalf("unrelated StageSet gauge = %v, want 1", v)
 	}
 }
+
+func TestDeleteStageReadyForStage(t *testing.T) {
+	StageReady.Reset()
+
+	SetStageReady("ns", "app", "infra", true)
+	SetStageReady("ns", "app", "web", true)
+
+	// A stage dropped from the spec must lose its series; its siblings survive.
+	DeleteStageReadyForStage("ns", "app", "web")
+
+	if n := testutil.CollectAndCount(StageReady); n != 1 {
+		t.Fatalf("series after per-stage delete = %d, want 1 (only infra)", n)
+	}
+	if v := testutil.ToFloat64(StageReady.WithLabelValues("ns", "app", "infra")); v != 1 {
+		t.Fatalf("sibling stage gauge = %v, want 1", v)
+	}
+}
