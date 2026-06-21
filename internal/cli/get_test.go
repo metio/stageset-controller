@@ -176,3 +176,20 @@ func TestGet_NotFound_ExitsError(t *testing.T) {
 		t.Errorf("stderr missing 'not found':\n%s", stderr)
 	}
 }
+
+// `get NAME -A` is a contradiction (a name is namespaced) — it must error
+// loudly, not silently ignore --all-namespaces and look only in the current ns.
+func TestGet_NameWithAllNamespacesErrors(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "getnameall")
+	makeStageSet(t, c, ns, "alpha")
+
+	_, stderr, code := runCLI(t, cfg, "get", "alpha", "-n", ns, "--all-namespaces")
+	if code != exitError {
+		t.Fatalf("get NAME --all-namespaces exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "across all namespaces") {
+		t.Errorf("stderr should explain the name/-A conflict:\n%s", stderr)
+	}
+}
