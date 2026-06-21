@@ -88,7 +88,8 @@ func terminalFetchError(err error) bool {
 		errors.Is(err, artifact.ErrDigestMismatch) ||
 		errors.Is(err, artifact.ErrArtifactBodyTooLarge) ||
 		errors.Is(err, artifact.ErrTarballTooLarge) ||
-		errors.Is(err, artifact.ErrDecompressedTooLarge)
+		errors.Is(err, artifact.ErrDecompressedTooLarge) ||
+		errors.Is(err, artifact.ErrDuplicateEntry)
 }
 
 // transientDecryptSignatures are the substrings cloud-KMS SDKs surface for a

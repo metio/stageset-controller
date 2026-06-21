@@ -64,6 +64,17 @@ func serveBytes(t *testing.T, body []byte, status int) *httptest.Server {
 	return srv
 }
 
+func TestFetch_RejectsDuplicateNormalizedEntries(t *testing.T) {
+	t.Parallel()
+	// "a/b.yaml" and "a/./b.yaml" both normalize to "a/b.yaml"; without a guard
+	// the second silently shadows the first and changes what gets applied.
+	tarball := makeTarGz(t, map[string]string{"a/b.yaml": "kind: A", "a/./b.yaml": "kind: B"})
+	srv := serveBytes(t, tarball, 0)
+	if _, err := testFetcher().Fetch(context.Background(), srv.URL, sha256Digest(tarball), ""); !errors.Is(err, ErrDuplicateEntry) {
+		t.Fatalf("duplicate normalized entries: err = %v, want ErrDuplicateEntry", err)
+	}
+}
+
 func TestFetch_MultiMemberGzipExtractsAllFiles(t *testing.T) {
 	t.Parallel()
 	// One tar gzipped across TWO members (a producer that flushes mid-stream, or

@@ -46,8 +46,15 @@ func ToYAML(obj *unstructured.Unstructured) ([]byte, error) {
 }
 
 // RenderManifests masks and YAML-encodes a list of objects into one multi-doc
-// stream, document-separated by "---". The masker is applied first so Secret
-// values never reach the writer.
+// stream, document-separated by "---". The masker is applied first so a Secret
+// object's data values are redacted before encoding.
+//
+// The masker keys on Kind=Secret, so it redacts only Secret objects' own data.
+// A secret value spliced into a NON-Secret object — e.g. a post-build
+// substituteFrom whose Secret value lands in a ConfigMap entry, annotation, or
+// container env literal — is not detected here and will render in cleartext.
+// Treat substituteFrom-of-Secret-into-non-Secret as a disclosure risk in any
+// rendered/diffed output.
 func RenderManifests(objs []*unstructured.Unstructured, masker *SecretMasker) (string, error) {
 	var b []byte
 	for i, obj := range objs {
