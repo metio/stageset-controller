@@ -66,9 +66,9 @@ func TestReconcile_Conflict_StaleForceTokenDoesNotRecreateFailObject(t *testing.
 	// Switch policy: fail-cm is now Fail, force-cm stays Recreate. The live
 	// fail-cm still carries pass 1's (now stale) force annotation.
 	mixed := &stagesv1.ConflictPolicy{
-		Default: conflictFail,
+		Default: "Fail",
 		Rules: []stagesv1.ConflictRule{
-			{Target: stagesv1.ConflictTarget{Name: forceName}, Action: conflictRecreate},
+			{Target: stagesv1.ConflictTarget{Name: forceName}, Action: "Recreate"},
 		},
 	}
 	fresh := getStageSet(t, c, ns, "stale-force")

@@ -378,6 +378,38 @@ func TestDiff_MissingStageLabelShowsConfigure(t *testing.T) {
 // TestDiff_CleanServerSide confirms the default server-side path exits 0 with a
 // clean summary when the live object already matches the render (entries mode,
 // applied via the same Applier so owner labels match).
+// A force stage with an immutable-field conflict must render the change (exit 1),
+// not hard-error (exit 3): diff has to resolve the stage's conflictPolicy/force
+// exactly as a reconcile would, or it dead-ends precisely where preview matters.
+func TestDiff_ForceStageShowsRecreateInsteadOfErroring(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "diffforce")
+	ss := makeStageSet(t, c, ns, "app")
+	ss.Spec.Stages[0].Force = true
+	if err := c.Update(context.Background(), ss); err != nil {
+		t.Fatalf("set stage force: %v", err)
+	}
+
+	// A live immutable ConfigMap at v1.
+	live := renderObj(ns, "settings", map[string]any{"greeting": "v1"})
+	if err := unstructured.SetNestedField(live.Object, true, "immutable"); err != nil {
+		t.Fatal(err)
+	}
+	applyAsReconcile(t, cfg, ss, "app", live)
+
+	// The source changes the immutable field — a conflict the reconcile would
+	// force-recreate. Without conflict-aware diff this exits exitError.
+	dir := writeSourceTree(t, map[string]string{
+		"cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n  namespace: " + ns + "\nimmutable: true\ndata:\n  greeting: v2\n",
+	})
+
+	stdout, stderr, code := runCLI(t, cfg, "diff", "app", "-n", ns, "--source-dir", dir, "--color", "never")
+	if code != exitDiff {
+		t.Fatalf("force-stage immutable conflict: diff exit = %d, want %d (must show the change, not error); stderr=%s\n%s", code, exitDiff, stderr, stdout)
+	}
+}
+
 func TestDiff_CleanServerSide(t *testing.T) {
 	cfg := envtestConfig(t)
 	c := testClient(t, cfg)

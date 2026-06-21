@@ -595,7 +595,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// `kubectl get -l stages.metio.wtf/stage=<stage>` answers "what does
 			// this stage own" with no project-specific tooling.
 			apply.StampStageLabel(objects, stagesv1.StageLabel, stage.Name)
-			conflicts, cerr := resolveConflictHandling(objects, stage, newForceToken())
+			conflicts, cerr := apply.ResolveConflictHandling(objects, stage, apply.NewForceToken())
 			if cerr != nil {
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
 			}
