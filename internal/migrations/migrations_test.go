@@ -4,6 +4,7 @@
 package migrations
 
 import (
+	"fmt"
 	"testing"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
@@ -74,6 +75,53 @@ func TestParseLadder(t *testing.T) {
 			t.Fatal("expected strict-parse error for unknown field")
 		}
 	})
+}
+
+// TestValidateLadder_DoSCaps pins the denial-of-service caps a sourced ladder
+// must respect: a remote artifact can't enqueue unbounded migrations, unbounded
+// actions, or an action with unbounded (or negative) retries.
+func TestValidateLadder_DoSCaps(t *testing.T) {
+	t.Parallel()
+	del := func(name string) stagesv1.Action {
+		return stagesv1.Action{Name: name, Delete: &stagesv1.DeleteAction{}}
+	}
+	ladderOf := func(n int) []stagesv1.Migration {
+		l := make([]stagesv1.Migration, n)
+		for i := range l {
+			l[i] = stagesv1.Migration{Name: fmt.Sprintf("m%d", i), To: "2.0.0"}
+		}
+		return l
+	}
+	migWithRetries := func(r int32) []stagesv1.Migration {
+		a := del("x")
+		a.Retries = &r
+		return []stagesv1.Migration{{Name: "m", To: "2.0.0", Actions: []stagesv1.Action{a}}}
+	}
+
+	if err := ValidateLadder(ladderOf(MaxMigrationsPerLadder)); err != nil {
+		t.Fatalf("a ladder at the migration cap must be valid: %v", err)
+	}
+	if err := ValidateLadder(ladderOf(MaxMigrationsPerLadder + 1)); err == nil {
+		t.Fatal("a ladder over the migration cap must be rejected")
+	}
+
+	actions := make([]stagesv1.Action, MaxActionsPerMigration+1)
+	for i := range actions {
+		actions[i] = del(fmt.Sprintf("a%d", i))
+	}
+	if err := ValidateLadder([]stagesv1.Migration{{Name: "m", To: "2.0.0", Actions: actions}}); err == nil {
+		t.Fatal("a migration over the action cap must be rejected")
+	}
+
+	if err := ValidateLadder(migWithRetries(MaxActionRetries)); err != nil {
+		t.Fatalf("retries at the cap must be valid: %v", err)
+	}
+	if err := ValidateLadder(migWithRetries(MaxActionRetries + 1)); err == nil {
+		t.Fatal("retries over the cap must be rejected")
+	}
+	if err := ValidateLadder(migWithRetries(-1)); err == nil {
+		t.Fatal("negative retries must be rejected")
+	}
 }
 
 func TestValidateLadder(t *testing.T) {
