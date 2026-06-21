@@ -49,6 +49,49 @@ The chart pins the image tag to its own `appVersion` by default. The chart is
 also listed on [ArtifactHub](https://artifacthub.io/packages/helm/stageset-controller/stageset-controller),
 where you can browse its versions, values, and changelog.
 
+### Install with Flux (GitOps)
+
+To manage the controller from a Flux GitOps repository instead of `helm` on the
+command line, point an `OCIRepository` at the chart and install it with a
+`HelmRelease`:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: stageset-controller
+  namespace: stageset-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/metio/helm-charts/stageset-controller
+  ref:
+    # Latest released chart; pin to a tag for production (Renovate can bump it).
+    semver: ">=0.0.0"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: stageset-controller
+  namespace: stageset-system
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: stageset-controller
+```
+
+The chart's defaults are a sensible single-replica install, so this needs no
+`values:` block; add one (the same keys as the `--values` file) to enable HA, the
+rollback-store PVC, NetworkPolicy, and the rest — see the
+[values reference](/installation/helm-values/). Both resources live in
+`stageset-system`, so create that namespace first
+(`kubectl create namespace stageset-system`, or include a `Namespace` manifest
+alongside them). The source- and helm-controllers reconcile an `OCIRepository`
+and `HelmRelease` directly, so no wrapping `Kustomization` is required — apply the
+two with `kubectl apply -f`, or commit them to whatever source your Flux setup
+already syncs. `HelmRelease` gives you upgrades, rollbacks, and drift correction;
+pull the chart version forward by bumping the `OCIRepository` `ref`.
+
 ### What the chart installs
 
 - The **controller `Deployment`**, its `ServiceAccount`, and the cluster RBAC it
