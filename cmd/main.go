@@ -96,6 +96,11 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		return 2
 	}
 
+	if *c.MCPAllowMutations && !*c.EnableMCP {
+		fmt.Fprintln(stderr, "stageset-controller: --mcp-allow-mutations requires --enable-mcp")
+		return 2
+	}
+
 	logger := observability.NewLogger(stderr, *c.LogLevel, *c.LogFormat)
 	slog.SetDefault(logger)
 	// Route controller-runtime's own logs (leader election, cache, manager,
@@ -238,7 +243,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		}
 	}
 
-	if *c.MCPAddr != "" {
+	if *c.EnableMCP {
 		mcpLog := logger.With("logger", "mcp")
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			handler := mcp.NewHTTPHandler(mcp.Config{

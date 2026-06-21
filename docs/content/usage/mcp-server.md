@@ -13,11 +13,11 @@ can never exceed the controller's own RBAC.
 
 ## Enable the server
 
-Set `--mcp-bind-address` on the controller to serve the read tools (empty, the
-default, disables it):
+Pass `--enable-mcp` to the controller to serve the read tools (off by default).
+It binds `--mcp-bind-address`, which defaults to `:8084`:
 
 ```shell
-stageset-controller --mcp-bind-address :8084
+stageset-controller --enable-mcp
 ```
 
 Reach it from your machine with a port-forward:
@@ -35,11 +35,11 @@ The read tools:
 
 ## Gated mutations
 
-The server is read-only by default. Add `--mcp-allow-mutations` to also expose
-write tools:
+The server is read-only by default. Add `--mcp-allow-mutations` (which requires
+`--enable-mcp`) to also expose write tools:
 
 ```shell
-stageset-controller --mcp-bind-address :8084 --mcp-allow-mutations
+stageset-controller --enable-mcp --mcp-allow-mutations
 ```
 
 | Tool | Effect |
