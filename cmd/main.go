@@ -252,6 +252,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 				AllowMutations: *c.MCPAllowMutations,
 				Version:        version,
 				Logger:         mcpLog,
+				RollbackStore:  rollbackStore,
 			})
 			srv := &http.Server{Addr: *c.MCPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 			// #nosec G118 -- the manager ctx is already done when this goroutine

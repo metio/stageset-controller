@@ -32,6 +32,7 @@ The read tools:
 |---|---|
 | `list_stagesets` | List StageSet resources with their Ready status, reason, suspend state, rolled-out version, and observed generation. Omit the namespace to list across every namespace the controller can read. |
 | `get_stageset` | One StageSet's full status: the Ready condition (status, reason, message), the per-reason [runbook](../../runbooks/) URL, suspend state, version, per-stage phases and applied revisions, and any pending migrations. |
+| `diff_revisions` | A per-object unified diff of one stage's rendered manifests between two artifact revisions held in the [rollback store](../rollback/). Pass the `stage` and the earlier `from` digest; `to` defaults to that stage's currently-applied digest. Secret values are masked. Needs the rollback store enabled and both revisions still retained in it. |
 
 ## Gated mutations
 

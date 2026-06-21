@@ -80,6 +80,15 @@ func registerStageSetTools(server *mcpsdk.Server, cfg Config) {
 		Name:        "get_stageset",
 		Description: "Get one StageSet's full status: the Ready condition (status, reason, message), the per-reason runbook URL, suspend state, rolled-out version, per-stage phases and applied revisions, and any pending migrations.",
 	}, cfg.getStageSetHandler)
+
+	// diff_revisions reads stored rendered snapshots, so it needs the rollback
+	// store in addition to the Kubernetes client. It stays read-only.
+	if cfg.RollbackStore != nil {
+		mcpsdk.AddTool(server, &mcpsdk.Tool{
+			Name:        "diff_revisions",
+			Description: "Diff a StageSet stage's rendered output between two artifact revisions held in the rollback store. Pass the stage and the earlier 'from' digest; 'to' defaults to the stage's currently-applied digest. Returns a per-object unified diff with Secret values masked.",
+		}, cfg.diffRevisionsHandler)
+	}
 }
 
 func (cfg Config) listStageSetsHandler(ctx context.Context, _ *mcpsdk.CallToolRequest, in listStageSetsInput) (*mcpsdk.CallToolResult, listStageSetsOutput, error) {

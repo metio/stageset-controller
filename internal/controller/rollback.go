@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -20,6 +19,7 @@ import (
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
 	"github.com/metio/stageset-controller/internal/decryptor"
+	"github.com/metio/stageset-controller/internal/rollbackstore"
 )
 
 // substitutionDigest fingerprints a stage's resolved postBuild substitution map
@@ -56,9 +56,11 @@ type RollbackStore interface {
 }
 
 // rollbackKey addresses a stage's rendered output by artifact digest, so the
-// same content de-duplicates and the key is stable across reconciles.
+// same content de-duplicates and the key is stable across reconciles. The format
+// is the store's addressing contract (rollbackstore.Key), shared with the MCP
+// diff_revisions reader.
 func rollbackKey(ss *stagesv1.StageSet, stage, digest string) string {
-	return fmt.Sprintf("%s/%s/%s/%s", ss.Namespace, ss.Name, stage, strings.ReplaceAll(digest, ":", "-"))
+	return rollbackstore.Key(ss.Namespace, ss.Name, stage, digest)
 }
 
 func encodeObjects(objects []*unstructured.Unstructured) ([]byte, error) {
