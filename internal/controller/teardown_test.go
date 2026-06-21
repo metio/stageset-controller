@@ -9,13 +9,67 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/metrics"
 )
+
+func TestTeardownFailure_ForceDropMetricCountsOnceAcrossFailedUpdate(t *testing.T) {
+	now := time.Now()
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:         "team-a",
+			Name:              "ss-forcedrop-once",
+			Finalizers:        []string{FinalizerName},
+			DeletionTimestamp: &metav1.Time{Time: now.Add(-2 * time.Hour)},
+		},
+	}
+	var updateCalls int
+	c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(ss).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Update: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				if _, ok := obj.(*stagesv1.StageSet); ok {
+					updateCalls++
+					if updateCalls == 1 {
+						return apierrors.NewConflict(schema.GroupResource{Resource: "stagesets"}, ss.Name, errors.New("conflict"))
+					}
+				}
+				return cl.Update(ctx, obj, opts...)
+			},
+		}).Build()
+	rec := &capturingRecorder{}
+	r := &StageSetReconciler{Client: c, Recorder: rec, MaxTeardownWait: time.Hour, Now: func() time.Time { return now }}
+	cause := errors.New("dial target: no route to host")
+	labels := []string{ss.Namespace, ss.Name}
+	before := testutil.ToFloat64(metrics.TeardownForceDropTotal.WithLabelValues(labels...))
+
+	// Round 1: the finalizer-removal Update fails → error returned, nothing emitted.
+	if _, err := r.teardownFailure(context.Background(), ss, "delete", cause); err == nil {
+		t.Fatal("expected the failed finalizer Update to surface as an error")
+	}
+	if mid := testutil.ToFloat64(metrics.TeardownForceDropTotal.WithLabelValues(labels...)); mid != before {
+		t.Errorf("force-drop metric moved on a failed-Update reconcile: before=%v mid=%v", before, mid)
+	}
+	if rec.has("TeardownForced") {
+		t.Error("TeardownForced event emitted despite the failed Update")
+	}
+	// Round 2: retry succeeds → emit exactly once.
+	if _, err := r.teardownFailure(context.Background(), ss, "delete", cause); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if after := testutil.ToFloat64(metrics.TeardownForceDropTotal.WithLabelValues(labels...)); after-before != 1 {
+		t.Errorf("force-drop metric delta = %v, want exactly 1 across the failed+successful Update", after-before)
+	}
+}
 
 func TestTeardownTimedOut(t *testing.T) {
 	t.Parallel()

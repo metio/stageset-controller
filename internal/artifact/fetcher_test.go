@@ -64,6 +64,51 @@ func serveBytes(t *testing.T, body []byte, status int) *httptest.Server {
 	return srv
 }
 
+func TestFetch_MultiMemberGzipExtractsAllFiles(t *testing.T) {
+	t.Parallel()
+	// One tar gzipped across TWO members (a producer that flushes mid-stream, or
+	// member concatenation of a single logical tar). With multistream on the
+	// members decompress transparently as one stream, so every file must be
+	// extracted — not just the first member's. Goes through Fetch's *os.File path.
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	for name, content := range map[string]string{"a/one.yaml": "kind: A", "a/two.yaml": "kind: B"} {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(content)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := tarBuf.Bytes()
+	mid := len(raw) / 2
+
+	// Two independent gzip members appended to one buffer.
+	var out bytes.Buffer
+	for _, chunk := range [][]byte{raw[:mid], raw[mid:]} {
+		gz := gzip.NewWriter(&out)
+		if _, err := gz.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := out.Bytes()
+	srv := serveBytes(t, body, 0)
+
+	files, err := testFetcher().Fetch(context.Background(), srv.URL, sha256Digest(body), "")
+	if err != nil {
+		t.Fatalf("multi-member single-tar Fetch: %v", err)
+	}
+	if files["a/one.yaml"] != "kind: A" || files["a/two.yaml"] != "kind: B" {
+		t.Fatalf("multi-member gzip dropped files: %#v", files)
+	}
+}
+
 func TestFetch_HappyPath(t *testing.T) {
 	t.Parallel()
 	tarball := makeTarGz(t, map[string]string{"a/main.yaml": "kind: A", "a/sub/b.yaml": "kind: B"})

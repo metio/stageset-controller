@@ -153,6 +153,12 @@ func (f *Fetcher) downloadToTemp(ctx context.Context, url string) (*os.File, str
 }
 
 func (f *Fetcher) extract(r io.Reader, pathPrefix string) (map[string]string, error) {
+	// Multistream stays ON (the default): a single tar gzipped across several
+	// members (a producer that flushes mid-stream) decompresses transparently as
+	// one stream, so every file is extracted. Two *separate* concatenated tars
+	// are unreachable past archive/tar's first end-of-archive marker regardless
+	// of gzip framing, and no producer emits that shape; the digest pins the
+	// bytes, so there's nothing to gain by rejecting trailing members.
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("open gzip stream: %w", err)
@@ -189,8 +195,17 @@ func (f *Fetcher) extract(r io.Reader, pathPrefix string) (map[string]string, er
 		if !ok {
 			continue
 		}
+		if hdr.Size < 0 {
+			return nil, fmt.Errorf("tar entry %q: negative size", hdr.Name)
+		}
 		if hdr.Size > perEntry {
 			return nil, fmt.Errorf("%w: %q header size %d > %d", ErrTarEntryTooLarge, hdr.Name, hdr.Size, perEntry)
+		}
+		// Aggregate precheck before the read so a header near math.MaxInt64 can't
+		// wrap the int64 accumulator; maxExtracted-total is non-negative (every
+		// prior iteration kept total <= maxExtracted) and hdr.Size is non-negative.
+		if hdr.Size > maxExtracted-total {
+			return nil, fmt.Errorf("%w: %d bytes", ErrTarballTooLarge, maxExtracted)
 		}
 		// Bound the read at perEntry+1 to catch headers that lie about size.
 		body, err := io.ReadAll(io.LimitReader(tr, perEntry+1))
