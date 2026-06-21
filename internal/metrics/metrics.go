@@ -101,8 +101,14 @@ func SetStageReady(namespace, stageset, stage string, ready bool) {
 }
 
 // DeleteStageReady removes every stage-readiness series for a StageSet, so a
-// deleted StageSet (or a stage dropped from its spec) does not leave a stale
-// gauge behind.
+// deleted StageSet does not leave a stale gauge behind.
 func DeleteStageReady(namespace, stageset string) {
 	StageReady.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": stageset})
+}
+
+// DeleteStageReadyForStage removes the readiness series for a single stage. It
+// is called when a stage is dropped from a live StageSet's spec, so a
+// metric-based rollout gate doesn't keep reading a phantom stage's last value.
+func DeleteStageReadyForStage(namespace, stageset, stage string) {
+	StageReady.DeleteLabelValues(namespace, stageset, stage)
 }
