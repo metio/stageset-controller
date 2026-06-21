@@ -169,7 +169,17 @@ type cappedReader struct {
 
 func (c *cappedReader) Read(p []byte) (int, error) {
 	if c.remaining <= 0 {
-		return 0, errDecompressedCapped
+		// Budget spent. A stream sized exactly at the cap is fine — surface its
+		// EOF; only a further byte means the cap is genuinely exceeded.
+		var probe [1]byte
+		n, err := c.r.Read(probe[:])
+		if n > 0 {
+			return 0, errDecompressedCapped
+		}
+		if err == nil {
+			err = io.EOF
+		}
+		return 0, err
 	}
 	if int64(len(p)) > c.remaining {
 		p = p[:c.remaining]
