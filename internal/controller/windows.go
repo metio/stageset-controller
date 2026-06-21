@@ -69,6 +69,13 @@ func (r *StageSetReconciler) gateUpdateWindows(ctx context.Context, helper *flux
 		return ctrl.Result{}, false, nil
 	}
 
+	// Whether we were already deferring before this reconcile. The event +
+	// counter fire only on the transition into the deferred state, not on every
+	// requeue while the window stays closed — a multi-day window requeues hourly,
+	// which would otherwise spam identical events and turn the deferral counter
+	// into a re-check counter.
+	wasDeferring := ss.Status.PendingUpdate != nil
+
 	pu := &stagesv1.PendingUpdate{}
 	if newRevision {
 		pu.Revisions = revisions
@@ -87,8 +94,10 @@ func (r *StageSetReconciler) gateUpdateWindows(ctx context.Context, helper *flux
 	} else {
 		r.setReady(ss, metav1.ConditionFalse, ReasonUpdateDeferred, msg)
 	}
-	r.event(ss, corev1.EventTypeNormal, ReasonUpdateDeferred, msg)
-	metrics.UpdateDeferredTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
+	if !wasDeferring {
+		r.event(ss, corev1.EventTypeNormal, ReasonUpdateDeferred, msg)
+		metrics.UpdateDeferredTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
+	}
 	if uerr := r.patchStatus(ctx, helper, ss); uerr != nil {
 		return ctrl.Result{}, true, uerr
 	}

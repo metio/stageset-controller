@@ -37,6 +37,7 @@ var (
 	ErrTarballTooLarge      = errors.New("extracted tarball exceeded the extracted-result cap")
 	ErrTarEntryTooLarge     = errors.New("tar entry exceeded the per-entry cap")
 	ErrDecompressedTooLarge = errors.New("decompressed gzip stream exceeded the cap")
+	ErrDuplicateEntry       = errors.New("artifact contains two entries that normalize to the same path")
 	ErrForbiddenAddress     = errors.New("artifact host resolves to a forbidden address")
 )
 
@@ -194,6 +195,13 @@ func (f *Fetcher) extract(r io.Reader, pathPrefix string) (map[string]string, er
 		name, ok := normaliseEntry(hdr.Name, prefix)
 		if !ok {
 			continue
+		}
+		// normaliseEntry runs path.Clean, so "a/b", "a/./b" and "a//b" all
+		// collapse to one name. Refuse a second entry that maps onto an existing
+		// one rather than letting it silently shadow (last-write-wins) and change
+		// what gets applied to the cluster.
+		if _, dup := files[name]; dup {
+			return nil, fmt.Errorf("%w: %q", ErrDuplicateEntry, name)
 		}
 		if hdr.Size < 0 {
 			return nil, fmt.Errorf("tar entry %q: negative size", hdr.Name)

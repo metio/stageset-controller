@@ -9,12 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/artifact"
+	"github.com/metio/stageset-controller/internal/metrics"
 	"github.com/metio/stageset-controller/internal/window"
 )
 
@@ -66,6 +68,32 @@ func TestReconcile_UpdateWindow_DeniesRollout(t *testing.T) {
 	}
 	if got.Status.PendingUpdate == nil || len(got.Status.PendingUpdate.Revisions) == 0 {
 		t.Fatal("status.pendingUpdate should record the held revision")
+	}
+}
+
+// A closed window that stays closed across requeues must announce + count the
+// deferral once, not on every re-check (a multi-day window requeues hourly).
+func TestReconcile_UpdateWindow_DeferCountedOncePerDeferral(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "gated-dedup")})
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dedup"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:      metav1.Duration{Duration: time.Minute},
+			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeDeny, From: tm("2020-01-01T00:00:00Z"), To: tm("2030-01-01T00:00:00Z")}},
+			Stages:        []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	labels := []string{ns, "dedup"}
+	before := testutil.ToFloat64(metrics.UpdateDeferredTotal.WithLabelValues(labels...))
+	reconcileAt(t, c, ss, tm("2025-06-01T00:00:00Z").Time)
+	reconcileAt(t, c, ss, tm("2025-06-01T01:00:00Z").Time) // still inside the deny window
+	if delta := testutil.ToFloat64(metrics.UpdateDeferredTotal.WithLabelValues(labels...)) - before; delta != 1 {
+		t.Errorf("UpdateDeferredTotal delta = %v across two in-window reconciles, want 1", delta)
 	}
 }
 
