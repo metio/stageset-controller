@@ -90,6 +90,23 @@ func TestDecision_RecurringCronWindow(t *testing.T) {
 	}
 }
 
+func TestDecision_RecurringOverlappingWindows(t *testing.T) {
+	t.Parallel()
+	// Hourly starts, each 2h long → consecutive windows overlap. At 02:30 both
+	// the 01:00 (ends 03:00) and 02:00 (ends 04:00) windows cover now; the
+	// boundary must be the LATEST covering window's end (04:00), not the earliest
+	// (03:00) — otherwise status reports an early close and the controller wakes
+	// needlessly at 03:00.
+	w := stagesv1.UpdateWindow{Type: TypeAllow, Schedule: "0 * * * *", Duration: dur(2 * time.Hour)}
+	allowed, next, err := Decision([]stagesv1.UpdateWindow{w}, at("2026-06-13T02:30:00Z"))
+	if err != nil || !allowed {
+		t.Fatalf("02:30 should be inside an overlapping window: allowed=%v err=%v", allowed, err)
+	}
+	if !next.Equal(at("2026-06-13T04:00:00Z")) {
+		t.Fatalf("boundary should be the latest covering window end 04:00, got %v", next)
+	}
+}
+
 func TestDecision_RecurringHonorsTimeZone(t *testing.T) {
 	t.Parallel()
 	// 02:00 in Berlin = 00:00 UTC (CEST, +2 in summer).

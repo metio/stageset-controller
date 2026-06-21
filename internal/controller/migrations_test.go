@@ -719,3 +719,23 @@ func TestRunStageMigrations_ContentChangeReRuns(t *testing.T) {
 		t.Fatalf("a changed migration must re-run all actions, ran %v", fe.ran)
 	}
 }
+
+// TestPruneSupersededLedger pins that a re-authored migration (same name, new
+// digest) evicts its stale name@oldDigest entries — and their action entries —
+// from the status ledger, while keeping the current entry and unrelated
+// migrations untouched. Without it the ledger grows unbounded across a
+// transition that never advances status.version.
+func TestPruneSupersededLedger(t *testing.T) {
+	ss := &stagesv1.StageSet{}
+	ss.Status.ExecutedMigrations = []string{"add-col@old", "add-col@new", "drop-tbl@z"}
+	ss.Status.ExecutedMigrationActions = []string{"add-col@old/sql", "add-col@new/sql", "drop-tbl@z/sql"}
+
+	pruneSupersededLedger(ss, "add-col", "add-col@new")
+
+	if want := []string{"add-col@new", "drop-tbl@z"}; !reflect.DeepEqual(ss.Status.ExecutedMigrations, want) {
+		t.Errorf("ExecutedMigrations = %v, want %v", ss.Status.ExecutedMigrations, want)
+	}
+	if want := []string{"add-col@new/sql", "drop-tbl@z/sql"}; !reflect.DeepEqual(ss.Status.ExecutedMigrationActions, want) {
+		t.Errorf("ExecutedMigrationActions = %v, want %v", ss.Status.ExecutedMigrationActions, want)
+	}
+}

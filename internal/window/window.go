@@ -117,11 +117,24 @@ func evalRecurring(w *stagesv1.UpdateWindow, now time.Time) (bool, time.Time, er
 		return false, time.Time{}, fmt.Errorf("recurring update window duration must be positive")
 	}
 	nowL := now.In(loc)
-	// The only window start that can cover now began in (now-dur, now]. cron's
-	// Next is strictly-after, so Next(now-dur) is the first such start.
+	// Any window start that covers now began in (now-dur, now]. cron's Next is
+	// strictly-after, so Next(now-dur) is the FIRST such start.
 	candidate := sched.Next(nowL.Add(-dur))
-	if !candidate.After(nowL) {
-		return true, candidate.Add(dur), nil // active; boundary = window end
+	if candidate.After(nowL) {
+		return false, candidate, nil // inactive; boundary = next start
 	}
-	return false, candidate, nil // inactive; boundary = next start
+	// Active. When windows overlap (duration > schedule interval) several starts
+	// cover now; the window stays open until the LATEST covering start's end, not
+	// the earliest. Walk forward to the latest start still <= now so the reported
+	// boundary is the furthest covering window end (for non-overlapping windows
+	// there is only one covering start and the loop doesn't advance).
+	latest := candidate
+	for {
+		next := sched.Next(latest)
+		if next.After(nowL) {
+			break
+		}
+		latest = next
+	}
+	return true, latest.Add(dur), nil // active; boundary = furthest covering window end
 }

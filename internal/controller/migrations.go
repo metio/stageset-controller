@@ -464,6 +464,45 @@ func migrationKey(m *stagesv1.Migration) string {
 	return m.Name + "@" + migrationDigest(m)
 }
 
+// pruneSupersededLedger drops ledger entries for migration `name` whose content
+// digest differs from keepMigKey — a re-authored migration supersedes its prior
+// content, so the stale name@oldDigest entries (and their /action entries) are
+// removed instead of accumulating in status. Migration names are unique within a
+// ladder, so pruning by name is safe; the just-recorded keepMigKey is retained.
+func pruneSupersededLedger(ss *stagesv1.StageSet, name, keepMigKey string) {
+	ss.Status.ExecutedMigrations = dropSupersededLedger(ss.Status.ExecutedMigrations, name, keepMigKey, false)
+	ss.Status.ExecutedMigrationActions = dropSupersededLedger(ss.Status.ExecutedMigrationActions, name, keepMigKey, true)
+}
+
+// dropSupersededLedger filters a ledger slice, removing entries for migration
+// `name` whose migKey != keep. When action is true each entry is
+// "<migKey>/<action>" and the migKey is the part before the first "/".
+func dropSupersededLedger(entries []string, name, keep string, action bool) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		migKey := e
+		if action {
+			if i := strings.IndexByte(e, '/'); i >= 0 {
+				migKey = e[:i]
+			}
+		}
+		if migEntryName(migKey) == name && migKey != keep {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// migEntryName returns the migration name from a "name@digest" migKey. Migration
+// names are DNS-1123 (no "@"), so the name is the part before the first "@".
+func migEntryName(migKey string) string {
+	if i := strings.IndexByte(migKey, '@'); i >= 0 {
+		return migKey[:i]
+	}
+	return migKey
+}
+
 // actionsDoneFor returns the set of action names already completed for a
 // migration key, read from the flat per-action ledger (entries "name@digest/action").
 func actionsDoneFor(ledger []string, migKey string) map[string]bool {
@@ -509,6 +548,10 @@ func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv
 			return fmt.Errorf("migration %q: %w", m.Name, err)
 		}
 		ss.Status.ExecutedMigrations = append(ss.Status.ExecutedMigrations, migKey)
+		// A re-authored migration (same name, new content → new digest) supersedes
+		// its prior content; drop the stale name@oldDigest entries so the ledger
+		// doesn't grow across a transition that never advances status.version.
+		pruneSupersededLedger(ss, m.Name, migKey)
 		doneMig[migKey] = true
 		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationCompleted,
 			fmt.Sprintf("migration %q (to %s) completed%s", m.Name, m.To, src))
