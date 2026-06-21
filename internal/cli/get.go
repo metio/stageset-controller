@@ -55,6 +55,9 @@ func runGet(ctx context.Context, o *options, opts getOptions) error {
 	if opts.output != "" && opts.output != "yaml" && opts.output != "json" {
 		return fmt.Errorf("invalid --output %q: want yaml or json", opts.output)
 	}
+	if opts.name != "" && opts.allNamespaces {
+		return fmt.Errorf("a StageSet cannot be retrieved by name across all namespaces; drop --all-namespaces or the name")
+	}
 	c, _, err := o.newClient()
 	if err != nil {
 		return err
