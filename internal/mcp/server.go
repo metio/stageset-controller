@@ -41,6 +41,11 @@ type Config struct {
 	// Logger receives the SDK's server-activity logs; it is the controller's
 	// shared logger so MCP diagnostics match every other surface.
 	Logger *slog.Logger
+
+	// RollbackStore reads stored per-stage rendered snapshots for the read-only
+	// diff_revisions tool. The embedded server passes the controller's rollback
+	// store (when one is configured); nil leaves diff_revisions unregistered.
+	RollbackStore RollbackReader
 }
 
 // NewServer builds the MCP server with the StageSet tool catalog registered.

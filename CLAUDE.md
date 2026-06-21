@@ -155,8 +155,11 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
   - `mcp/` — an opt-in Model Context Protocol server (`--enable-mcp`, off by
     default; binds `--mcp-bind-address`, default `:8084`) exposing read-only
     StageSet introspection tools (`list_stagesets`,
-    `get_stageset`) over streamable HTTP, plus gated write tools
-    (`reconcile_stageset` / `suspend_stageset` / `resume_stageset`) behind
+    `get_stageset`, and — when a rollback store is configured — `diff_revisions`,
+    a per-object unified diff of a stage's rendered manifests between two
+    rollback-store revisions, reading snapshots via the shared `rollbackstore.Key`
+    addressing and masking Secret values) over streamable HTTP, plus gated write
+    tools (`reconcile_stageset` / `suspend_stageset` / `resume_stageset`) behind
     `--mcp-allow-mutations`. Reads/patches as the controller SA via
     `mgr.GetClient()`; wired in `cmd/main.go` as a best-effort manager runnable
     like the gate (a bind failure degrades the endpoint, not reconciliation).
