@@ -220,3 +220,65 @@ curl_reachable() {
     --restart=Never --rm -i --command -- \
     curl -fsS --max-time "$t" -o /dev/null "$url" >/dev/null 2>&1
 }
+
+# gate_denied <url> <from-ns> — fail unless reaching <url> from a throwaway pod
+# in <from-ns> is BLOCKED. The negative counterpart to a reachable probe: under
+# an enforcing CNI the chart's gate-port allowlist (networkPolicy.gate.from)
+# admits only the named source namespaces, so a request from any other namespace
+# must be dropped. A SUCCESSFUL request means the allowlist is NOT enforcing. The
+# short connect timeout makes a dropped dial fail fast instead of hanging on the
+# default timeout; the curl image is pinned and long-form per repo convention.
+# Note "success" is ANY HTTP response (the gate app answers 404 for an unknown
+# path when reachable) — curl without -f returns 0 on a 404, so the deny is
+# proven only when curl itself fails to connect.
+gate_denied() {
+  local url=$1 ns=$2
+  if kubectl -n "$ns" run --rm -i --restart=Never \
+      --image="$CURL_IMAGE" "smoke-deny-$$" \
+      -- curl -sS --connect-timeout 8 --max-time 15 "$url" -o /dev/null; then
+    die "gate port was reachable from $ns — the gate-port allowlist is NOT enforcing"
+  fi
+  log "gate port correctly BLOCKED from $ns (gate-port allowlist enforced)"
+}
+
+# deploy_meshed_curl <ns> <name> [serviceAccount] — deploy a long-running curl
+# Deployment in <ns> under the given ServiceAccount (default "default") and wait
+# until it is ready. The service-mesh scenarios curl through the pod's sidecar
+# via `kubectl exec` rather than `kubectl run`, because an injected sidecar never
+# lets a one-shot pod complete (the proxy keeps running). <ns> must already be
+# mesh-injected so the pod gets a sidecar and a workload identity. The SA is what
+# the mesh authz keys on — both Istio (source.principals SPIFFE id) and Linkerd
+# (MeshTLSAuthentication identity) authorize by the pod's ServiceAccount.
+deploy_meshed_curl() {
+  local ns=$1 name=$2 sa=${3:-default}
+  kubectl -n "$ns" apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${name}
+  namespace: ${ns}
+  labels: { app: ${name} }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: ${name} } }
+  template:
+    metadata: { labels: { app: ${name} } }
+    spec:
+      serviceAccountName: ${sa}
+      containers:
+        - name: curl
+          image: ${CURL_IMAGE}
+          command: ["sleep", "infinity"]
+EOF
+  kubectl -n "$ns" rollout status deploy/"$name" --timeout=180s
+}
+
+# meshed_http_status <ns> <deploy> <url> — echo the HTTP status code curl gets
+# hitting <url> from inside the meshed <deploy> (so the request traverses the
+# sidecar and the target's inbound mesh authz). "000" means the connection
+# failed outright (e.g. a Linkerd reset), which counts as a rejection.
+meshed_http_status() {
+  local ns=$1 deploy=$2 url=$3
+  kubectl -n "$ns" exec "deploy/$deploy" -c curl -- \
+    curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$url" 2>/dev/null || echo "000"
+}
