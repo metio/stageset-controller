@@ -224,12 +224,17 @@ func reconcileHandled(ss *stagesv1.StageSet, opts reconcileOptions, token string
 }
 
 func hasSpecStage(ss *stagesv1.StageSet, name string) bool {
+	return specStage(ss, name) != nil
+}
+
+// specStage returns the named declared stage, or nil when the StageSet has none.
+func specStage(ss *stagesv1.StageSet, name string) *stagesv1.Stage {
 	for i := range ss.Spec.Stages {
 		if ss.Spec.Stages[i].Name == name {
-			return true
+			return &ss.Spec.Stages[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // sourceGVK returns the GVK to read a stage's source. A direct ExternalArtifact

@@ -95,7 +95,14 @@ func runApply(ctx context.Context, o *options, opts applyOptions) error {
 		// later reconcile sees no drift.
 		apply.StampStageLabel(render.Objects, stagesv1.StageLabel, stage.Name)
 
-		changeSet, aerr := applier.Apply(ctx, ss.Name, ss.Namespace, render.Objects, apply.ConflictHandling{})
+		// Resolve the stage's conflictPolicy/force exactly as a reconcile does, so
+		// `stagesetctl apply` recreates / keeps objects the same way the controller
+		// would instead of erroring on an immutable-field conflict.
+		ch, cerr := apply.ResolveConflictHandling(render.Objects, stage, apply.NewForceToken())
+		if cerr != nil {
+			return runtimeErr(fmt.Errorf("stage %q conflict policy: %w", stage.Name, cerr))
+		}
+		changeSet, aerr := applier.Apply(ctx, ss.Name, ss.Namespace, render.Objects, ch)
 		if aerr != nil {
 			return runtimeErr(fmt.Errorf("apply stage %q: %w", stage.Name, aerr))
 		}

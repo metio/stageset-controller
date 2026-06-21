@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: The stageset-controller Authors
 // SPDX-License-Identifier: 0BSD
 
-package controller
+package apply
 
 import (
 	"crypto/rand"
@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
-	"github.com/metio/stageset-controller/internal/apply"
 )
 
 // Conflict-handling marker annotations. ssa matches these on the applied
@@ -24,7 +23,7 @@ const (
 )
 
 // newForceToken mints a fresh per-apply force token. It is a package-level seam
-// so tests can substitute a deterministic value; see resolveConflictHandling for
+// so tests can substitute a deterministic value; see ResolveConflictHandling for
 // why the value must be unique per apply.
 var newForceToken = func() string {
 	var b [8]byte
@@ -36,6 +35,11 @@ var newForceToken = func() string {
 	return hex.EncodeToString(b[:])
 }
 
+// NewForceToken mints a fresh per-apply force token. Callers (the reconciler and
+// the stagesetctl CLI) pass it to ResolveConflictHandling; it must be unique per
+// apply (see ResolveConflictHandling).
+func NewForceToken() string { return newForceToken() }
+
 // Conflict-policy action values, matching the CRD enum.
 const (
 	conflictFail         = "Fail"
@@ -43,7 +47,7 @@ const (
 	conflictKeepExisting = "KeepExisting"
 )
 
-// resolveConflictHandling decides, per object, how an immutable-field conflict
+// ResolveConflictHandling decides, per object, how an immutable-field conflict
 // is handled and returns the ssa selectors that realize it. Precedence per
 // object: a `stages.metio.wtf/force: enabled` annotation (explicit user opt-in)
 // wins; then the first matching conflictPolicy rule; then the effective default
@@ -62,7 +66,7 @@ const (
 // selector and force-recreate an object whose current policy is Fail (PVC/PV
 // data loss). A fresh token per apply means a stale annotation carries an older
 // value that can never match the current selector.
-func resolveConflictHandling(objects []*unstructured.Unstructured, stage *stagesv1.Stage, forceToken string) (apply.ConflictHandling, error) {
+func ResolveConflictHandling(objects []*unstructured.Unstructured, stage *stagesv1.Stage, forceToken string) (ConflictHandling, error) {
 	effectiveDefault := conflictFail
 	if stage.Force {
 		effectiveDefault = conflictRecreate
@@ -72,13 +76,13 @@ func resolveConflictHandling(objects []*unstructured.Unstructured, stage *stages
 		effectiveDefault = policy.Default
 	}
 
-	var ch apply.ConflictHandling
+	var ch ConflictHandling
 	for _, obj := range objects {
 		action, allowDataLoss, fromRule := conflictActionFor(obj, policy, effectiveDefault)
 		switch action {
 		case conflictRecreate:
 			if fromRule && !allowDataLoss && isStatefulData(obj) {
-				return apply.ConflictHandling{}, fmt.Errorf(
+				return ConflictHandling{}, fmt.Errorf(
 					"conflictPolicy refuses to recreate %s %q: that destroys data; set the rule's allowDataLoss: true to permit it",
 					obj.GetKind(), obj.GetName(),
 				)

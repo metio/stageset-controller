@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: The stageset-controller Authors
 // SPDX-License-Identifier: 0BSD
 
-package controller
+package apply
 
 import (
 	"testing"
@@ -39,7 +39,7 @@ func TestResolveConflictHandling_StampsSuppliedToken(t *testing.T) {
 
 	a := uobj("v1", "ConfigMap", "a")
 	b := uobj("v1", "ConfigMap", "b")
-	ch1, err := resolveConflictHandling([]*unstructured.Unstructured{a, b}, stage, "tok-1")
+	ch1, err := ResolveConflictHandling([]*unstructured.Unstructured{a, b}, stage, "tok-1")
 	if err != nil {
 		t.Fatalf("pass 1: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestResolveConflictHandling_StampsSuppliedToken(t *testing.T) {
 	}
 
 	c := uobj("v1", "ConfigMap", "a")
-	ch2, err := resolveConflictHandling([]*unstructured.Unstructured{c}, stage, "tok-2")
+	ch2, err := ResolveConflictHandling([]*unstructured.Unstructured{c}, stage, "tok-2")
 	if err != nil {
 		t.Fatalf("pass 2: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestResolveConflictHandling_NoForceStampOnFailOrKeep(t *testing.T) {
 		},
 	}}
 
-	if _, err := resolveConflictHandling([]*unstructured.Unstructured{failObj, keepObj}, stage, "tok-test"); err != nil {
+	if _, err := ResolveConflictHandling([]*unstructured.Unstructured{failObj, keepObj}, stage, "tok-test"); err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if _, ok := failObj.GetAnnotations()[forceAnnotation]; ok {
@@ -95,7 +95,7 @@ func TestForceSelector_StaleTokenDoesNotMatch(t *testing.T) {
 
 	// Pass 1 stamps a stale token onto what becomes the live object.
 	live := uobj("v1", "PersistentVolumeClaim", "data")
-	if _, err := resolveConflictHandling([]*unstructured.Unstructured{live}, &stagesv1.Stage{Force: true}, "stale-0000"); err != nil {
+	if _, err := ResolveConflictHandling([]*unstructured.Unstructured{live}, &stagesv1.Stage{Force: true}, "stale-0000"); err != nil {
 		t.Fatalf("pass 1: %v", err)
 	}
 	if live.GetAnnotations()[forceAnnotation] != "stale-0000" {
@@ -105,7 +105,7 @@ func TestForceSelector_StaleTokenDoesNotMatch(t *testing.T) {
 	// Pass 2 uses a fresh token; its selector is what ssa would match against the
 	// live object's stale annotation.
 	desired := uobj("v1", "PersistentVolumeClaim", "data")
-	ch2, err := resolveConflictHandling([]*unstructured.Unstructured{desired}, &stagesv1.Stage{Force: true}, "fresh-1111")
+	ch2, err := ResolveConflictHandling([]*unstructured.Unstructured{desired}, &stagesv1.Stage{Force: true}, "fresh-1111")
 	if err != nil {
 		t.Fatalf("pass 2: %v", err)
 	}

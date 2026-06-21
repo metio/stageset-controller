@@ -252,7 +252,20 @@ func pendingMigrations(ss *stagesv1.StageSet) []diffrender.MigrationPreview {
 // server-side dry-run apply (default) or a client-side render-vs-live compare.
 func stageChanges(ctx context.Context, applier *apply.Applier, c client.Client, ss *stagesv1.StageSet, stage string, objects []*unstructured.Unstructured, serverSide bool) ([]diffrender.Change, error) {
 	if serverSide {
-		entries, err := applier.Diff(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{})
+		// Resolve the stage's conflictPolicy/force exactly as a reconcile would,
+		// so the dry-run is faithful: without it a force/Recreate stage would
+		// hard-error on an immutable-field conflict the reconcile would force
+		// past, and a KeepExisting object would show as a change. ResolveConflictHandling
+		// stamps the same marker annotations the reconcile stamps.
+		ch := apply.ConflictHandling{}
+		if st := specStage(ss, stage); st != nil {
+			resolved, rerr := apply.ResolveConflictHandling(objects, st, apply.NewForceToken())
+			if rerr != nil {
+				return nil, rerr
+			}
+			ch = resolved
+		}
+		entries, err := applier.Diff(ctx, ss.Name, ss.Namespace, objects, ch)
 		if err != nil {
 			return nil, err
 		}
