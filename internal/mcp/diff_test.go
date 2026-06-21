@@ -52,6 +52,7 @@ func TestDiffRevisionsHandler(t *testing.T) {
 	// 'to' defaults to it.
 	ssWithApplied := func() *stagesv1.StageSet {
 		ss := newStageSet(ns, name, false, metav1.ConditionTrue, "Succeeded", "ok")
+		ss.Spec.Stages = []stagesv1.Stage{{Name: stage}}
 		ss.Status.LastAppliedSnapshot = []stagesv1.StageArtifactRef{{Stage: stage, URL: "u", Digest: to, Revision: "r"}}
 		return ss
 	}
@@ -114,11 +115,21 @@ func TestDiffRevisionsHandler(t *testing.T) {
 
 	t.Run("omitted to with no applied snapshot is a tool error", func(t *testing.T) {
 		store := &fakeRollback{data: map[string][]byte{}}
-		cfg := Config{KubeClient: fakeClient(t, newStageSet(ns, name, false, metav1.ConditionTrue, "Succeeded", "ok")), RollbackStore: store}
+		ss := newStageSet(ns, name, false, metav1.ConditionTrue, "Succeeded", "ok")
+		ss.Spec.Stages = []stagesv1.Stage{{Name: stage}}
+		cfg := Config{KubeClient: fakeClient(t, ss), RollbackStore: store}
 
 		res, _, _ := cfg.diffRevisionsHandler(context.Background(), nil, diffRevisionsInput{Namespace: ns, Name: name, Stage: stage, From: from})
 		if res == nil || !res.IsError {
 			t.Fatalf("expected a tool error when 'to' can't be defaulted, got %+v", res)
+		}
+	})
+
+	t.Run("an undeclared stage is a tool error", func(t *testing.T) {
+		cfg := Config{KubeClient: fakeClient(t, ssWithApplied()), RollbackStore: &fakeRollback{data: map[string][]byte{}}}
+		res, _, _ := cfg.diffRevisionsHandler(context.Background(), nil, diffRevisionsInput{Namespace: ns, Name: name, Stage: "ghost", From: from})
+		if res == nil || !res.IsError {
+			t.Fatalf("expected a tool error for a stage the StageSet does not declare, got %+v", res)
 		}
 	})
 

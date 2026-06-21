@@ -4,10 +4,34 @@
 package artifact
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net"
 	"testing"
 )
+
+// A decompressed stream sized exactly at the cap is valid — only a byte past it
+// is a bomb. The reader used to reject the exactly-at-cap case.
+func TestCappedReader_ExactCapSucceeds(t *testing.T) {
+	data := bytes.Repeat([]byte("x"), 100)
+	cr := &cappedReader{r: bytes.NewReader(data), remaining: 100}
+	got, err := io.ReadAll(cr)
+	if err != nil {
+		t.Fatalf("stream exactly at the cap was rejected: %v", err)
+	}
+	if len(got) != 100 {
+		t.Fatalf("read %d bytes, want 100", len(got))
+	}
+}
+
+func TestCappedReader_OverCapFails(t *testing.T) {
+	data := bytes.Repeat([]byte("x"), 101)
+	cr := &cappedReader{r: bytes.NewReader(data), remaining: 100}
+	if _, err := io.ReadAll(cr); !errors.Is(err, errDecompressedCapped) {
+		t.Fatalf("over-cap stream err = %v, want errDecompressedCapped", err)
+	}
+}
 
 func TestValidateHTTPURL(t *testing.T) {
 	t.Parallel()

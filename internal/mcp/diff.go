@@ -74,6 +74,14 @@ func (cfg Config) diffRevisionsHandler(ctx context.Context, _ *mcpsdk.CallToolRe
 	if err := cfg.KubeClient.Get(ctx, client.ObjectKey{Namespace: in.Namespace, Name: in.Name}, &ss); err != nil {
 		return errorResult(fmt.Sprintf("cannot get StageSet %s/%s: %v", in.Namespace, in.Name, err)), diffRevisionsOutput{}, nil
 	}
+	// Bind the requested stage to a real declared stage: it scopes the rollback
+	// store lookup, and an arbitrary caller-supplied stage would otherwise read a
+	// snapshot for a stage the StageSet never declared. It also keeps the stage a
+	// DNS-1123 name, so the rollback-store key (flattened to a filename) can't be
+	// made non-injective with a "_"-bearing component.
+	if !stageDeclared(&ss, in.Stage) {
+		return errorResult(fmt.Sprintf("stage %q is not declared on StageSet %s/%s", in.Stage, in.Namespace, in.Name)), diffRevisionsOutput{}, nil
+	}
 
 	to := in.To
 	if to == "" {
@@ -111,6 +119,16 @@ func (cfg Config) diffRevisionsHandler(ctx context.Context, _ *mcpsdk.CallToolRe
 		Delete:    sum.Delete,
 		Unchanged: sum.Unchanged,
 	}, nil
+}
+
+// stageDeclared reports whether stage is one of the StageSet's declared stages.
+func stageDeclared(ss *stagesv1.StageSet, stage string) bool {
+	for i := range ss.Spec.Stages {
+		if ss.Spec.Stages[i].Name == stage {
+			return true
+		}
+	}
+	return false
 }
 
 // appliedDigest returns the artifact digest the named stage currently has
