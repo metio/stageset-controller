@@ -171,8 +171,9 @@ func FuzzStripNoise(f *testing.F) {
 }
 
 // FuzzColorize pins color as a purely additive, opt-in transform: it is a no-op
-// when color is off, and stripping the ANSI escapes from the colored form
-// recovers the uncolored form exactly.
+// when color is off, and removing every SGR escape from the colored form yields
+// the same text as removing them from the input — colorize only inserts color,
+// it never changes the underlying bytes.
 func FuzzColorize(f *testing.F) {
 	for _, seed := range []string{
 		"",
@@ -183,6 +184,8 @@ func FuzzColorize(f *testing.F) {
 		"+++not a header\n",
 		"no trailing newline",
 		"\n\n\n",
+		"\x1b[m", // body already carries a (parameterless) SGR escape
+		"+\x1b[31malready colored\x1b[0m\n",
 	} {
 		f.Add(seed)
 	}
@@ -190,9 +193,16 @@ func FuzzColorize(f *testing.F) {
 		if got := colorize(body, false); got != body {
 			t.Fatalf("colorize(_, false) changed input: %q -> %q", body, got)
 		}
+		// Additive color: colorize inserts only SGR escapes and never alters the
+		// underlying text, so the colored and uncolored forms are identical once
+		// every SGR escape is removed from each. Comparing the stripped colored
+		// form against the raw body would be wrong for a body that already
+		// contains SGR escapes — colorize copies those through verbatim and
+		// stripANSI removes them from the colored form too, so the only sound
+		// statement strips both sides.
 		colored := colorize(body, true)
-		if stripped := stripANSI(colored); stripped != body {
-			t.Fatalf("color not additive: strip(colorize(s,true))=%q want %q", stripped, body)
+		if got, want := stripANSI(colored), stripANSI(body); got != want {
+			t.Fatalf("color not additive: strip(colorize(s,true))=%q strip(s)=%q", got, want)
 		}
 	})
 }

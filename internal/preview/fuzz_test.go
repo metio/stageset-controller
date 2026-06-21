@@ -89,16 +89,30 @@ func FuzzReadDirFiles(f *testing.F) {
 	f.Add("a.yaml", "x")
 	f.Add("sub/b.yaml", "y")
 	f.Add("deep/nested/c.txt", "")
+	f.Add("..0", "z") // a filename that merely contains "..", not a traversal
+	f.Add("a..b/c..d", "w")
 
 	f.Fuzz(func(t *testing.T, rel, content string) {
 		clean := sanitizeRel(rel)
 		if clean == "" {
 			return
 		}
+		// A segment over NAME_MAX (255) can't be written to the filesystem.
+		// That's an OS limit, not a readDirFiles property — which only ever reads
+		// files that already exist on disk — so skip such inputs rather than fail
+		// the harness on its own setup.
+		for _, seg := range strings.Split(clean, "/") {
+			if len(seg) > 255 {
+				return
+			}
+		}
 		dir := t.TempDir()
 		target := filepath.Join(dir, filepath.FromSlash(clean))
 		if !strings.HasPrefix(target, dir+string(os.PathSeparator)) {
 			return // sanitization should prevent this, but never write outside the root
+		}
+		if len(target) > 4000 {
+			return // over PATH_MAX once the temp-dir prefix is included
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			t.Fatal(err)
@@ -119,8 +133,16 @@ func FuzzReadDirFiles(f *testing.F) {
 			t.Fatalf("content mismatch for %q: want %q got %q", clean, content, got)
 		}
 		for k := range files {
-			if strings.HasPrefix(k, "/") || strings.Contains(k, "..") {
-				t.Fatalf("key %q escapes the root", k)
+			if strings.HasPrefix(k, "/") {
+				t.Fatalf("key %q is absolute", k)
+			}
+			// A ".." path *segment* would escape the root; a filename that merely
+			// contains ".." (e.g. "..0", "a..b") is a legitimate entry and must
+			// not trip this check.
+			for _, seg := range strings.Split(k, "/") {
+				if seg == ".." {
+					t.Fatalf("key %q escapes the root", k)
+				}
 			}
 		}
 	})
