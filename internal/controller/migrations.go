@@ -44,6 +44,15 @@ type migrationPlan struct {
 	// Populated by resolveAnchors; a migration that resolves to no stage is a
 	// terminal MigrationStageNotFound, never silently dropped.
 	byStage map[string][]*stagesv1.Migration
+
+	// sourceRevision and sourceDigest record the provenance of a ladder loaded
+	// from spec.migrationsSourceRef — the resolved artifact's revision and digest
+	// — so the execution events carry a self-contained audit trail of which
+	// remote artifact a destructive migration came from. Empty for an inline
+	// spec.migrations ladder (its content lives in the spec, and each executed
+	// migration's content digest is recorded in status.executedMigrations).
+	sourceRevision string
+	sourceDigest   string
 }
 
 // pendingDetails builds the rich status preview of the pending migrations:
@@ -156,12 +165,16 @@ func (r *StageSetReconciler) planVersionMigrations(ctx context.Context, ss *stag
 		return plan, "", "", nil // no transition
 	}
 
-	ladder, lreason, lmsg, lerr := r.resolveMigrationLadder(ctx, ss, fetcher)
+	ladder, migSrc, lreason, lmsg, lerr := r.resolveMigrationLadder(ctx, ss, fetcher)
 	if lerr != nil {
 		return nil, "", "", lerr // transient (source not ready / fetch)
 	}
 	if lreason != "" {
 		return nil, lreason, lmsg, nil
+	}
+	if migSrc != nil {
+		plan.sourceRevision = migSrc.Revision
+		plan.sourceDigest = migSrc.Digest
 	}
 	pending, perr := migrations.Select(ladder, currentV, desiredV)
 	if perr != nil {
@@ -193,10 +206,10 @@ func coverageGap(require bool, currentV, desiredV *semver.Version, pending int) 
 // (MigrationArtifactInvalid, RBACDenied, ResolveFailed); a non-nil error is a
 // transient fetch/resolve failure the caller requeues on (fail closed — the
 // version is not advanced while the ladder can't be loaded).
-func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *stagesv1.StageSet, fetcher *artifact.Fetcher) (ladder []stagesv1.Migration, reason, msg string, err error) {
+func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *stagesv1.StageSet, fetcher *artifact.Fetcher) (ladder []stagesv1.Migration, resolved *artifact.ResolvedArtifact, reason, msg string, err error) {
 	src := ss.Spec.MigrationsSourceRef
 	if src == nil {
-		return ss.Spec.Migrations, "", "", nil
+		return ss.Spec.Migrations, nil, "", "", nil
 	}
 	// A migration source is always resolved same-namespace, independent of the
 	// global --no-cross-namespace-refs: remote-authored destructive instructions
@@ -208,22 +221,22 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 	if rerr != nil {
 		switch {
 		case isPermanentAPIError(rerr):
-			return nil, ReasonRBACDenied, rbacDenialMessage("resolving the migrations source CR", rerr), nil
+			return nil, nil, ReasonRBACDenied, rbacDenialMessage("resolving the migrations source CR", rerr), nil
 		case errors.Is(rerr, artifact.ErrSourceNotReady),
 			errors.Is(rerr, artifact.ErrArtifactNotFound),
 			errors.Is(rerr, artifact.ErrArtifactMissing):
-			return nil, "", "", fmt.Errorf("migrations source not ready: %w", rerr) // transient
+			return nil, nil, "", "", fmt.Errorf("migrations source not ready: %w", rerr) // transient
 		case errors.Is(rerr, artifact.ErrCrossNamespaceForbidden), errors.Is(rerr, artifact.ErrAmbiguousProducer):
-			return nil, ReasonResolveFailed, fmt.Sprintf("migrations source: %v", rerr), nil
+			return nil, nil, ReasonResolveFailed, fmt.Sprintf("migrations source: %v", rerr), nil
 		default:
-			return nil, "", "", rerr // transient API error
+			return nil, nil, "", "", rerr // transient API error
 		}
 	}
 	if reason, msg := r.checkMigrationSourceVerified(ra); reason != "" {
-		return nil, reason, msg, nil
+		return nil, nil, reason, msg, nil
 	}
 	if reason, msg := r.checkMigrationSourcePinned(ss, ra); reason != "" {
-		return nil, reason, msg, nil
+		return nil, nil, reason, msg, nil
 	}
 	files, ferr := fetcher.Fetch(ctx, ra.URL, ra.Digest, src.Path)
 	if ferr != nil {
@@ -232,26 +245,26 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 		// MigrationArtifactInvalid rather than backing off forever. Genuinely
 		// transient fetch failures (network, 5xx) still requeue.
 		if terminalFetchError(ferr) {
-			return nil, ReasonMigrationArtifactInvalid, fmt.Sprintf("fetch migrations artifact: %v", ferr), nil
+			return nil, nil, ReasonMigrationArtifactInvalid, fmt.Sprintf("fetch migrations artifact: %v", ferr), nil
 		}
-		return nil, "", "", fmt.Errorf("fetch migrations artifact: %w", ferr) // transient
+		return nil, nil, "", "", fmt.Errorf("fetch migrations artifact: %w", ferr) // transient
 	}
 	ladder, perr := migrations.ParseLadder(files)
 	if perr != nil {
-		return nil, ReasonMigrationArtifactInvalid, perr.Error(), nil
+		return nil, nil, ReasonMigrationArtifactInvalid, perr.Error(), nil
 	}
 	if verr := migrations.ValidateLadder(ladder); verr != nil {
-		return nil, ReasonMigrationArtifactInvalid, verr.Error(), nil
+		return nil, nil, ReasonMigrationArtifactInvalid, verr.Error(), nil
 	}
 	// A remote-authored http action with no host allowlist could reach any
 	// in-cluster endpoint (the IP denylist deliberately permits private ranges
 	// for in-cluster sources). Refuse a sourced ladder that uses http unless
 	// --allowed-action-hosts scopes where those actions may connect.
 	if len(r.AllowedActionHosts) == 0 && ladderHasHTTP(ladder) {
-		return nil, ReasonInvalidSpec,
+		return nil, nil, ReasonInvalidSpec,
 			"the migration ladder sourced from spec.migrationsSourceRef uses an http action, but --allowed-action-hosts is not configured; remote-authored http actions require a host allowlist", nil
 	}
-	return ladder, "", "", nil
+	return ladder, &ra, "", "", nil
 }
 
 // ladderHasHTTP reports whether any migration in the ladder uses an http action.
@@ -487,8 +500,9 @@ func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv
 			ss.Status.ExecutedMigrationActions = append(ss.Status.ExecutedMigrationActions, migKey+"/"+name)
 			return nil
 		}
+		src := migrationSourceSuffix(plan)
 		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationStarted,
-			fmt.Sprintf("migration %q (to %s) starting", m.Name, m.To))
+			fmt.Sprintf("migration %q (to %s) starting%s", m.Name, m.To, src))
 		if err := executor.Run(ctx, ss.Namespace, m.Actions, actionsDone, record); err != nil {
 			r.event(ss, corev1.EventTypeWarning, eventReasonMigrationFailed,
 				fmt.Sprintf("migration %q failed: %v", m.Name, err))
@@ -497,9 +511,21 @@ func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv
 		ss.Status.ExecutedMigrations = append(ss.Status.ExecutedMigrations, migKey)
 		doneMig[migKey] = true
 		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationCompleted,
-			fmt.Sprintf("migration %q (to %s) completed", m.Name, m.To))
+			fmt.Sprintf("migration %q (to %s) completed%s", m.Name, m.To, src))
 	}
 	return nil
+}
+
+// migrationSourceSuffix renders the provenance of a sourced ladder for the
+// execution events — the resolved artifact's revision and digest — so the audit
+// record of a destructive migration names the exact remote artifact it came
+// from. Empty for an inline spec.migrations ladder, whose per-migration content
+// digests are already recorded in status.executedMigrations.
+func migrationSourceSuffix(plan *migrationPlan) string {
+	if plan == nil || plan.sourceDigest == "" {
+		return ""
+	}
+	return fmt.Sprintf(" from source revision %s (artifact %s)", plan.sourceRevision, plan.sourceDigest)
 }
 
 // Event reasons for migration progress (Event-only; the Ready condition uses

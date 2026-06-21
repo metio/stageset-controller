@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -471,12 +472,28 @@ func TestResolveMigrationLadder_Inline(t *testing.T) {
 	ss := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{
 		Migrations: []stagesv1.Migration{{Name: "a", To: "2.0.0", Stage: "deploy"}},
 	}}
-	got, reason, _, err := r.resolveMigrationLadder(context.Background(), ss, nil)
+	got, src, reason, _, err := r.resolveMigrationLadder(context.Background(), ss, nil)
 	if err != nil || reason != "" {
 		t.Fatalf("inline ladder: reason=%q err=%v", reason, err)
 	}
 	if len(got) != 1 || got[0].Name != "a" {
 		t.Fatalf("inline ladder not returned verbatim: %+v", got)
+	}
+	if src != nil {
+		t.Fatalf("inline ladder must have no source provenance, got %+v", src)
+	}
+}
+
+func TestMigrationSourceSuffix(t *testing.T) {
+	if s := migrationSourceSuffix(nil); s != "" {
+		t.Fatalf("nil plan must have no source suffix, got %q", s)
+	}
+	if s := migrationSourceSuffix(&migrationPlan{}); s != "" {
+		t.Fatalf("inline plan (no source digest) must have no source suffix, got %q", s)
+	}
+	got := migrationSourceSuffix(&migrationPlan{sourceRevision: "main@sha1:abc", sourceDigest: "sha256:deadbeef"})
+	if !strings.Contains(got, "main@sha1:abc") || !strings.Contains(got, "sha256:deadbeef") {
+		t.Fatalf("sourced plan suffix must name the revision and digest, got %q", got)
 	}
 }
 

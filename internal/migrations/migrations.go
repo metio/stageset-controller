@@ -58,10 +58,24 @@ func ParseLadder(files map[string]string) ([]stagesv1.Migration, error) {
 	return ladder, nil
 }
 
+// DoS caps on a migration ladder. A sourced ladder is remote-authored content
+// the controller executes, so an unbounded ladder (or an action with unbounded
+// retries) is a denial-of-service vector: these bound the work a single artifact
+// can enqueue. The limits are generous — real ladders are far smaller — so they
+// only ever trip on a runaway or hostile artifact.
+const (
+	MaxMigrationsPerLadder = 200
+	MaxActionsPerMigration = 100
+	MaxActionRetries       = 10
+)
+
 // ValidateLadder applies the per-migration content checks plus migration-name
 // uniqueness across the whole ladder — the admission-time invariants that, for a
 // sourced ladder, can only run at fetch time because the content isn't in the spec.
 func ValidateLadder(ladder []stagesv1.Migration) error {
+	if len(ladder) > MaxMigrationsPerLadder {
+		return fmt.Errorf("migration ladder has %d migrations, exceeding the limit of %d", len(ladder), MaxMigrationsPerLadder)
+	}
 	names := make(map[string]bool, len(ladder))
 	for i := range ladder {
 		m := &ladder[i]
@@ -103,6 +117,9 @@ func ValidateMigration(m *stagesv1.Migration) error {
 				m.Name, m.From, ">="+from, "="+from)
 		}
 	}
+	if len(m.Actions) > MaxActionsPerMigration {
+		return fmt.Errorf("migration %q has %d actions, exceeding the limit of %d", m.Name, len(m.Actions), MaxActionsPerMigration)
+	}
 	seen := make(map[string]bool, len(m.Actions))
 	for j := range m.Actions {
 		a := &m.Actions[j]
@@ -116,6 +133,9 @@ func ValidateMigration(m *stagesv1.Migration) error {
 			return fmt.Errorf("migration %q has duplicate action name %q; action names are the idempotency-ledger key and must be unique", m.Name, a.Name)
 		}
 		seen[a.Name] = true
+		if a.Retries != nil && (*a.Retries < 0 || *a.Retries > MaxActionRetries) {
+			return fmt.Errorf("migration %q action %q has retries %d; it must be between 0 and %d", m.Name, a.Name, *a.Retries, MaxActionRetries)
+		}
 	}
 	return nil
 }
