@@ -1273,13 +1273,20 @@ func (r *StageSetReconciler) teardownFailure(ctx context.Context, ss *stagesv1.S
 	}
 	msg := fmt.Sprintf("TeardownForced after %s of failing teardown (%s) — finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: %v",
 		elapsed.Round(time.Second), op, cause)
-	log.FromContext(ctx).Error(cause, "force-dropping finalizer after --max-teardown-wait",
+	metrics.DeleteStageReady(ss.Namespace, ss.Name)
+	controllerutil.RemoveFinalizer(ss, FinalizerName)
+	if err := r.Update(ctx, ss); err != nil {
+		// The finalizer is still on. Emit nothing here: the retry re-decides and
+		// emits once the Update lands, so the TeardownForced event + the
+		// stageset_teardown_force_drop_total metric fire once per actual drop,
+		// not once per failed-Update retry (which would inflate the alert metric).
+		return ctrl.Result{}, err
+	}
+	log.FromContext(ctx).Error(cause, "force-dropped finalizer after --max-teardown-wait",
 		"elapsed", elapsed.String(), "op", op)
 	metrics.TeardownForceDropTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
 	r.event(ss, corev1.EventTypeWarning, "TeardownForced", msg)
-	metrics.DeleteStageReady(ss.Namespace, ss.Name)
-	controllerutil.RemoveFinalizer(ss, FinalizerName)
-	return ctrl.Result{}, r.Update(ctx, ss)
+	return ctrl.Result{}, nil
 }
 
 // teardownTimedOut reports whether the StageSet has been in the deletion path

@@ -49,6 +49,35 @@ func TestValidateStages(t *testing.T) {
 	}
 }
 
+func TestValidateStages_StageNameUniqueness(t *testing.T) {
+	t.Parallel()
+	// No spec.version / migrations — the exact path validateMigrations skips, so
+	// uniqueness must be enforced by ValidateStages itself.
+	dup := &stagesv1.StageSet{
+		Spec: stagesv1.StageSetSpec{
+			Stages: []stagesv1.Stage{
+				{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-1"}},
+				{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-2"}},
+			},
+		},
+	}
+	if err := ValidateStages(dup); err == nil {
+		t.Fatal("duplicate stage names must be rejected even without migrations")
+	}
+
+	ok := &stagesv1.StageSet{
+		Spec: stagesv1.StageSetSpec{
+			Stages: []stagesv1.Stage{
+				{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-1"}},
+				{Name: "db", SourceRef: stagesv1.SourceReference{Name: "ea-2"}},
+			},
+		},
+	}
+	if err := ValidateStages(ok); err != nil {
+		t.Fatalf("distinct stage names must validate: %v", err)
+	}
+}
+
 func TestValidateStages_NoActions(t *testing.T) {
 	t.Parallel()
 	if err := ValidateStages(stageSetWith(nil)); err != nil {

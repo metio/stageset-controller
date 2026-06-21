@@ -209,6 +209,21 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 // a bypassed/disabled webhook still fails loudly rather than reaching an action
 // executor with an undefined verb).
 func ValidateStages(ss *stagesv1.StageSet) error {
+	// Stage names must be unique within the StageSet: each stamps a
+	// stages.metio.wtf/stage label and owns an inventory shard keyed by name, so
+	// two stages sharing a name collide — the second clobbers the first's status
+	// and the first's objects are never recorded under their own stage (orphaned,
+	// never pruned). The CRD enforces only MinItems, and validateMigrations'
+	// uniqueness check is skipped for a migration-free StageSet, so enforce it
+	// here, where both admission and the reconciler fallback run.
+	seen := make(map[string]bool, len(ss.Spec.Stages))
+	for i := range ss.Spec.Stages {
+		name := ss.Spec.Stages[i].Name
+		if seen[name] {
+			return fmt.Errorf("stage name %q is not unique; stage names must be unique within the StageSet", name)
+		}
+		seen[name] = true
+	}
 	for i := range ss.Spec.Stages {
 		stage := &ss.Spec.Stages[i]
 		if stage.Actions == nil {
