@@ -152,8 +152,9 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
     (`--rollback-store-s3-sse=s3`, KMS optional) and the file backend warns to use an
     encrypted volume.
   - `metrics/` + `webhook/` — Prometheus metrics and the stage-gate webhook.
-  - `mcp/` — an opt-in Model Context Protocol server (`--mcp-bind-address`, off by
-    default) exposing read-only StageSet introspection tools (`list_stagesets`,
+  - `mcp/` — an opt-in Model Context Protocol server (`--enable-mcp`, off by
+    default; binds `--mcp-bind-address`, default `:8084`) exposing read-only
+    StageSet introspection tools (`list_stagesets`,
     `get_stageset`) over streamable HTTP, plus gated write tools
     (`reconcile_stageset` / `suspend_stageset` / `resume_stageset`) behind
     `--mcp-allow-mutations`. Reads/patches as the controller SA via
