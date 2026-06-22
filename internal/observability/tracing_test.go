@@ -55,15 +55,19 @@ func TestInitTracer_NonEmptyEndpointBuildsProvider(t *testing.T) {
 	_ = sd(context.Background())
 }
 
-// The secure (non-insecure) path takes the TLS credentials branch and
-// defaults the sample ratio/service name. otlptrace dials lazily, so
-// construction still succeeds against a dead address.
-func TestInitTracer_SecureEndpointDefaultsRatioAndName(t *testing.T) {
+// The secure (non-insecure) path takes the TLS credentials branch and defaults
+// the service name from empty. otlptrace dials lazily, so construction still
+// succeeds against a dead address.
+func TestInitTracer_SecureEndpointDefaultsName(t *testing.T) {
 	t.Cleanup(func() { otel.SetTracerProvider(noop.NewTracerProvider()) })
 	sd, err := InitTracer(context.Background(), TracingConfig{
-		Endpoint:    "127.0.0.1:4317",
-		Insecure:    false,
-		SampleRatio: 0, // <= 0 must default to 1.0
+		Endpoint: "127.0.0.1:4317",
+		Insecure: false,
+		// SampleRatio 0 maps to always-off (NeverSample), NOT 1.0 — InitTracer
+		// passes the ratio through unchanged; the default-to-1.0 lives in the
+		// flag default (cliflags), not here. This case just exercises the secure
+		// build path with the service name defaulted from empty.
+		SampleRatio: 0,
 	})
 	if err != nil {
 		t.Fatalf("InitTracer with a secure endpoint: %v", err)
