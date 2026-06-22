@@ -690,7 +690,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// no longer fetchable surfaces as a terminal PreviousRevisionUnavailable.
 		if ss.Spec.RollbackOnFailure {
 			rbCtx, rbSpan := observability.Tracer().Start(ctx, "stageset.rollback")
-			rbReason, rbMsg, rbErr := r.attemptRollback(rbCtx, &ss, applier, fetcher)
+			rbReason, rbMsg, rbErr := r.attemptRollback(rbCtx, &ss, applier, fetcher, recorder)
 			if rbErr != nil {
 				// Transient rollback failure (store outage, apiserver blip).
 				// The stage failure status is already written; back off and

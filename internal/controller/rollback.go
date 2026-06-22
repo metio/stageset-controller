@@ -19,7 +19,9 @@ import (
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
 	"github.com/metio/stageset-controller/internal/decryptor"
+	"github.com/metio/stageset-controller/internal/inventory"
 	"github.com/metio/stageset-controller/internal/rollbackstore"
+	"github.com/metio/stageset-controller/internal/stageinv"
 )
 
 // substitutionDigest fingerprints a stage's resolved postBuild substitution map
@@ -130,7 +132,7 @@ func snapshotStages(ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact,
 // apiserver blip on re-apply) so the caller backs off and retries rather than
 // reporting a terminal PreviousRevisionUnavailable for something that can heal.
 // A genuinely terminal rollback failure comes back as (reason, msg, nil).
-func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.StageSet, applier *apply.Applier, fetcher *artifact.Fetcher) (reason, msg string, err error) {
+func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.StageSet, applier *apply.Applier, fetcher *artifact.Fetcher, recorder *stageinv.Recorder) (reason, msg string, err error) {
 	snap := ss.Status.LastAppliedSnapshot
 	if len(snap) == 0 {
 		return "", "", nil // no snapshot (e.g. the first run failed): nothing to roll back to
@@ -148,8 +150,10 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 		return ReasonPreviousRevisionUnavailable, fmt.Sprintf("cannot roll back: configuring decryption failed (%v)", derr), nil
 	}
 	stages := make(map[string]*stagesv1.Stage, len(ss.Spec.Stages))
+	positions := make(map[string]int, len(ss.Spec.Stages))
 	for i := range ss.Spec.Stages {
 		stages[ss.Spec.Stages[i].Name] = &ss.Spec.Stages[i]
+		positions[ss.Spec.Stages[i].Name] = i
 	}
 	for _, ref := range snap {
 		stage, ok := stages[ref.Stage]
@@ -173,6 +177,20 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 		if _, aerr := applier.Apply(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{}); aerr != nil {
 			return ReasonPreviousRevisionUnavailable,
 				fmt.Sprintf("cannot roll back stage %q: re-applying the previous revision failed (%v)", ref.Stage, aerr), nil
+		}
+		// Rewrite the stage's inventory to the restored object set. The forward
+		// loop records the NEW revision's refs as a write-ahead before VERIFY, so
+		// after a verify failure the inventory names objects that were just rolled
+		// away — leaving the next reconcile's prune to diff against a set that no
+		// longer matches the cluster, orphaning objects the old render dropped.
+		// Recording the rolled-back refs keeps the inventory honest about what is
+		// now live. A failure here is transient (retry the whole rollback).
+		refs := make([]inventory.ObjectRef, 0, len(objects))
+		for _, o := range objects {
+			refs = append(refs, stageinv.RefOf(o))
+		}
+		if werr := recorder.Write(ctx, ss, ref.Stage, positions[ref.Stage], refs); werr != nil {
+			return "", "", fmt.Errorf("rollback: record restored inventory for stage %q: %w", ref.Stage, werr)
 		}
 	}
 	return "", "", nil

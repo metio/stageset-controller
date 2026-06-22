@@ -17,6 +17,7 @@ import (
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/apply"
 	"github.com/metio/stageset-controller/internal/artifact"
+	"github.com/metio/stageset-controller/internal/stageinv"
 )
 
 type fakeRollbackStore struct{ data map[string][]byte }
@@ -105,13 +106,24 @@ func TestAttemptRollback_StoreSurvivesProducerGC(t *testing.T) {
 
 	r := &StageSetReconciler{Client: c, RESTMapper: c.RESTMapper(), RollbackStore: store}
 	applier := apply.New(c, c.RESTMapper(), stagesv1.GroupVersion.Group)
+	recorder := &stageinv.Recorder{Client: c}
 	// A fetcher that would fail (the producer is "gone"); it must not be reached.
 	deadFetcher := &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP}
 
-	if reason, msg, err := r.attemptRollback(context.Background(), ss, applier, deadFetcher); err != nil || reason != "" {
+	if reason, msg, err := r.attemptRollback(context.Background(), ss, applier, deadFetcher, recorder); err != nil || reason != "" {
 		t.Fatalf("store should make rollback succeed despite producer GC, got reason=%q msg=%q err=%v", reason, msg, err)
 	}
 	if !cmExists(t, c, ns, "restored") {
 		t.Fatal("rollback should have applied the object stored in the rollback store")
+	}
+	// The inventory must now reflect the restored object, so the next reconcile's
+	// prune diffs against what rollback actually left live.
+	records, rerr := recorder.StageRecords(context.Background(), ss.Name, ns)
+	if rerr != nil {
+		t.Fatalf("StageRecords: %v", rerr)
+	}
+	rec, ok := records["stage-a"]
+	if !ok || len(rec.Refs) != 1 || rec.Refs[0].Name != "restored" {
+		t.Fatalf("stage-a inventory should record the restored object, got %+v", rec)
 	}
 }
