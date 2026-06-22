@@ -88,8 +88,14 @@ func TestGate_BadPath(t *testing.T) {
 func TestGate_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 	h := &Handler{Client: gateClient(t)}
-	if code := gateCode(t, h, http.MethodPost, "/gate/a/b/c"); code != http.StatusMethodNotAllowed {
-		t.Fatalf("POST = %d, want 405", code)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/gate/a/b/c", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST = %d, want 405", rec.Code)
+	}
+	// RFC 7231 §6.5.5: a 405 must advertise the supported methods.
+	if got := rec.Header().Get("Allow"); got != http.MethodGet {
+		t.Errorf("Allow header = %q, want %q", got, http.MethodGet)
 	}
 }
 

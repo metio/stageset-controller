@@ -77,6 +77,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}()
 	if req.Method != http.MethodGet {
+		// RFC 7231 §6.5.5 requires a 405 to advertise the supported methods.
+		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
