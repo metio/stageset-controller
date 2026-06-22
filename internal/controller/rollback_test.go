@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
@@ -81,6 +83,16 @@ func TestReconcile_RollbackOnFailure_RestoresPreviousRevision(t *testing.T) {
 	}
 	if v := cmDataKey(t, c, ns, "shared"); v != "v1" {
 		t.Fatalf("rollback should have restored shared to v1, got %q", v)
+	}
+	// The re-fetch rollback path must stamp the per-stage discovery label, so the
+	// restored object stays selectable by stages.metio.wtf/stage (it isn't store-
+	// backed here — no rollback store is configured).
+	restored := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "shared"}, restored); err != nil {
+		t.Fatalf("get restored ConfigMap: %v", err)
+	}
+	if got := restored.Labels[stagesv1.StageLabel]; got != "stage-a" {
+		t.Errorf("restored ConfigMap %s=%q, want stage-a", stagesv1.StageLabel, got)
 	}
 }
 

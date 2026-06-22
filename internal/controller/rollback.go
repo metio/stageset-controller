@@ -163,6 +163,13 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 		if rbReason != "" {
 			return rbReason, rbMsg, nil
 		}
+		// Stamp the per-stage discovery label, mirroring the forward apply. The
+		// store-backed objects already carry it (stamped before they were stored)
+		// so this is idempotent there, but the re-fetch path rebuilds objects via
+		// build.Build without it — without this stamp a re-fetch rollback leaves
+		// the rolled-back objects unselectable by stages.metio.wtf/stage until the
+		// next normal reconcile re-stamps them.
+		apply.StampStageLabel(objects, stagesv1.StageLabel, ref.Stage)
 		if _, aerr := applier.Apply(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{}); aerr != nil {
 			return ReasonPreviousRevisionUnavailable,
 				fmt.Sprintf("cannot roll back stage %q: re-applying the previous revision failed (%v)", ref.Stage, aerr), nil
