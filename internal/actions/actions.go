@@ -551,7 +551,11 @@ func (e *Executor) allowedURL(raw string) error {
 	if strings.EqualFold(host, "localhost") {
 		return fmt.Errorf("%w: %s", ErrForbiddenHost, host)
 	}
-	if ip := net.ParseIP(host); ip != nil && forbiddenIP(ip) {
+	// Parse inet_aton alt-IPv4 forms (0x7f000001, 2130706433, 127.1) too, not
+	// just net.ParseIP — a literal that passes the string check but resolves to a
+	// forbidden address is otherwise only caught at dial time. Shares the
+	// artifact guard's parser so the two SSRF layers agree.
+	if ip := artifact.ParseIPAny(host); ip != nil && forbiddenIP(ip) {
 		return fmt.Errorf("%w: %s", ErrForbiddenHost, host)
 	}
 	return nil

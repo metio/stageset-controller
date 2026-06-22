@@ -143,24 +143,22 @@ func TestHTTPAction_DialPinsResolvedIP(t *testing.T) {
 	}
 }
 
-// TestHTTPAction_InetAtonRejectedAtDial proves an inet_aton-form literal that
-// the libc resolver honors (2130706433 == 127.0.0.1) is rejected at dial: the
-// resolver returns the loopback IP and the dial-time pin denies it.
-func TestHTTPAction_InetAtonRejectedAtDial(t *testing.T) {
+// TestHTTPAction_InetAtonRejectedAtStringGuard proves an inet_aton-form literal
+// the libc resolver honors (2130706433 == 127.0.0.1) is rejected by the
+// string-level URL guard, before any DNS/dial — allowedURL parses the alt form
+// to its loopback address. (A hostname that only resolves to a forbidden IP is
+// still caught later by the dial-time pin.)
+func TestHTTPAction_InetAtonRejectedAtStringGuard(t *testing.T) {
 	t.Parallel()
 	e := &Executor{
 		lookupIP: func(_ context.Context, host string) ([]net.IP, error) {
-			// The single-int form 2130706433 decodes to 127.0.0.1.
-			if host == "2130706433" {
-				return []net.IP{net.ParseIP("127.0.0.1")}, nil
-			}
-			return nil, errors.New("unexpected host " + host)
+			return nil, errors.New("dial must not be reached for an inet_aton loopback literal: " + host)
 		},
 	}
 	err := e.Run(context.Background(), "ns",
 		[]stagesv1.Action{{Name: "ping", HTTP: &stagesv1.HTTPAction{URL: "http://2130706433/"}}}, nil, nil)
-	if !errors.Is(err, ErrForbiddenAddress) {
-		t.Fatalf("want ErrForbiddenAddress, got %v", err)
+	if !errors.Is(err, ErrForbiddenHost) {
+		t.Fatalf("want ErrForbiddenHost, got %v", err)
 	}
 }
 

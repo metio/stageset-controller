@@ -65,6 +65,13 @@ func parseIPAny(host string) net.IP {
 	return parseInetAtonIPv4(host)
 }
 
+// ParseIPAny parses a host as a literal IP, including the inet_aton alternate
+// forms (single-int, hex/octal, short-dotted) that net.ParseIP rejects but libc
+// resolvers honor. Exported so the sibling SSRF guard in internal/actions shares
+// one implementation instead of a weaker copy. Returns nil when host is not an
+// IP literal in any recognized form.
+func ParseIPAny(host string) net.IP { return parseIPAny(host) }
+
 // parseInetAtonIPv4 decodes the historical inet_aton alternate IPv4 renderings.
 // Each dotted part (1–4 of them) is parsed in C numeric base (0x… hex, 0…
 // octal, else decimal); the final part absorbs all remaining low-order bytes, so
