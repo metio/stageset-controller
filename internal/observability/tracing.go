@@ -106,6 +106,9 @@ func InitTracer(ctx context.Context, cfg TracingConfig) (Shutdown, error) {
 	}
 	res, err := resource.New(ctx, resource.WithAttributes(attrs...))
 	if err != nil {
+		// The exporter already opened its gRPC client; shut it down before
+		// returning so the connection and its goroutines don't leak.
+		_ = exp.Shutdown(ctx)
 		return nil, fmt.Errorf("otel resource: %w", err)
 	}
 
