@@ -69,6 +69,12 @@ func (cfg Config) diffRevisionsHandler(ctx context.Context, _ *mcpsdk.CallToolRe
 	if in.From == "" {
 		return errorResult("from (an earlier artifact digest) is required"), diffRevisionsOutput{}, nil
 	}
+	// The digest becomes part of the rollback-store key (and, on the S3 backend,
+	// the object name), so a caller-supplied digest must be a plain algo:hex
+	// value — never a path-bearing string that could escape the key prefix.
+	if err := rollbackstore.ValidDigest(in.From); err != nil {
+		return errorResult(fmt.Sprintf("invalid from digest: %v", err)), diffRevisionsOutput{}, nil
+	}
 
 	var ss stagesv1.StageSet
 	if err := cfg.KubeClient.Get(ctx, client.ObjectKey{Namespace: in.Namespace, Name: in.Name}, &ss); err != nil {
@@ -89,6 +95,10 @@ func (cfg Config) diffRevisionsHandler(ctx context.Context, _ *mcpsdk.CallToolRe
 		if to == "" {
 			return errorResult(fmt.Sprintf("stage %q has no applied snapshot to default 'to' from; pass an explicit to digest", in.Stage)), diffRevisionsOutput{}, nil
 		}
+	} else if err := rollbackstore.ValidDigest(to); err != nil {
+		// Only a caller-supplied 'to' needs checking; the defaulted value comes
+		// from the StageSet's own verified status.
+		return errorResult(fmt.Sprintf("invalid to digest: %v", err)), diffRevisionsOutput{}, nil
 	}
 
 	fromObjs, err := cfg.readSnapshot(ctx, in.Namespace, in.Name, in.Stage, in.From)
