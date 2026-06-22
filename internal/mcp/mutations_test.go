@@ -84,6 +84,26 @@ func TestReconcileStageSetHandler(t *testing.T) {
 	}
 }
 
+// TestReconcileStageSetHandler_SuspendedRefuses pins that reconcile on a
+// suspended StageSet reports the refusal and does NOT stamp the annotation — the
+// controller short-circuits suspended objects before reading it, so stamping
+// would falsely report success.
+func TestReconcileStageSetHandler_SuspendedRefuses(t *testing.T) {
+	c := fakeClient(t, newStageSet("team-a", "web", true, metav1.ConditionFalse, "Suspended", "paused"))
+	cfg := Config{KubeClient: c, AllowMutations: true}
+
+	_, out, err := cfg.reconcileStageSetHandler(context.Background(), nil, mutateInput{Namespace: "team-a", Name: "web"})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !strings.Contains(out.Result, "suspended") {
+		t.Fatalf("result = %q, want a suspended refusal", out.Result)
+	}
+	if token := getStageSet(t, c, "team-a", "web").Annotations[fluxmeta.ReconcileRequestAnnotation]; token != "" {
+		t.Fatalf("annotation must NOT be stamped on a suspended StageSet, got %q", token)
+	}
+}
+
 func TestMutateStageSet_Errors(t *testing.T) {
 	cfg := Config{KubeClient: fakeClient(t), AllowMutations: true}
 

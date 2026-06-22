@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,10 +96,21 @@ func TestEnvtest_ToolsAgainstRealAPIServer(t *testing.T) {
 		t.Fatalf("get returned %+v", getOut)
 	}
 
+	// Reconcile on the (not-suspended) StageSet stamps the annotation.
+	if _, _, err := cfg.reconcileStageSetHandler(ctx, nil, mutateInput{Namespace: "default", Name: "envtest-demo"}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	var after stagesv1.StageSet
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "default", Name: "envtest-demo"}, &after); err != nil {
+		t.Fatalf("re-get: %v", err)
+	}
+	if after.Annotations["reconcile.fluxcd.io/requestedAt"] == "" {
+		t.Fatal("reconcile annotation did not persist")
+	}
+
 	if _, _, err := cfg.suspendStageSetHandler(ctx, nil, mutateInput{Namespace: "default", Name: "envtest-demo"}); err != nil {
 		t.Fatalf("suspend: %v", err)
 	}
-	var after stagesv1.StageSet
 	if err := c.Get(ctx, client.ObjectKey{Namespace: "default", Name: "envtest-demo"}, &after); err != nil {
 		t.Fatalf("re-get: %v", err)
 	}
@@ -106,13 +118,14 @@ func TestEnvtest_ToolsAgainstRealAPIServer(t *testing.T) {
 		t.Fatal("suspend did not persist on the real apiserver")
 	}
 
-	if _, _, err := cfg.reconcileStageSetHandler(ctx, nil, mutateInput{Namespace: "default", Name: "envtest-demo"}); err != nil {
-		t.Fatalf("reconcile: %v", err)
+	// Reconcile on a suspended StageSet must refuse rather than falsely report
+	// success: the controller short-circuits suspended objects before reading
+	// the annotation.
+	_, recOut, err := cfg.reconcileStageSetHandler(ctx, nil, mutateInput{Namespace: "default", Name: "envtest-demo"})
+	if err != nil {
+		t.Fatalf("reconcile (suspended): %v", err)
 	}
-	if err := c.Get(ctx, client.ObjectKey{Namespace: "default", Name: "envtest-demo"}, &after); err != nil {
-		t.Fatalf("re-get: %v", err)
-	}
-	if after.Annotations["reconcile.fluxcd.io/requestedAt"] == "" {
-		t.Fatal("reconcile annotation did not persist")
+	if !strings.Contains(recOut.Result, "suspended") {
+		t.Fatalf("reconcile on a suspended StageSet should report the refusal, got %q", recOut.Result)
 	}
 }
