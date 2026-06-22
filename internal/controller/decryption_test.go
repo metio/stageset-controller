@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,7 +120,13 @@ func TestReconcile_Decryption_MissingKeySecretFails(t *testing.T) {
 		t.Fatal("expected a reconcile error for the missing key secret")
 	}
 
-	if r := readyReason(getStageSet(t, c, ns, "no-key")); r != ReasonStageFailed {
+	got := getStageSet(t, c, ns, "no-key")
+	if r := readyReason(got); r != ReasonStageFailed {
 		t.Fatalf("Ready reason = %q, want %q", r, ReasonStageFailed)
+	}
+	// The tenant-readable status must carry the scrubbed message, not a raw SOPS
+	// diagnostic (which can leak MAC values, key fingerprints, recipient IDs).
+	if msg := readyMessageOf(got); !strings.Contains(msg, "decryption failed") {
+		t.Errorf("Ready message = %q, want it scrubbed to contain %q", msg, "decryption failed")
 	}
 }

@@ -1057,9 +1057,17 @@ func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.He
 	reason, terminal := failReason(op, cause)
 	stageMsg := fmt.Sprintf("%s: %v", op, cause)
 	readyMsg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
-	if reason == ReasonRBACDenied {
+	switch {
+	case reason == ReasonRBACDenied:
 		stageMsg = fmt.Sprintf("%s: %s", op, rbacDenialMessage(op, cause))
 		readyMsg = fmt.Sprintf("stage %q %s: %s", stage, op, rbacDenialMessage(op, cause))
+	case op == "decrypt" || op == "configure decryption":
+		// SOPS diagnostics can carry MAC values, key fingerprints, and recipient
+		// identifiers. Keep them out of the tenant-readable status condition; the
+		// detailed cause is still logged server-side below (and failReason saw it
+		// for classification).
+		stageMsg = op + ": decryption failed"
+		readyMsg = fmt.Sprintf("stage %q %s: decryption failed", stage, op)
 	}
 
 	ss.Status.Stages = append(prior, stagesv1.StageStatus{
