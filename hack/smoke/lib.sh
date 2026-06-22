@@ -115,7 +115,7 @@ spec: {}
 EOF
   kubectl -n "$ns" patch externalartifact "$name" --subresource=status --type=merge -p "{
     \"status\": {
-      \"artifact\": { \"url\": \"${url}\", \"revision\": \"${rev}\", \"digest\": \"${digest}\" },
+      \"artifact\": { \"url\": \"${url}\", \"revision\": \"${rev}\", \"digest\": \"${digest}\", \"path\": \"artifact.tar.gz\", \"lastUpdateTime\": \"2026-01-01T00:00:00Z\" },
       \"conditions\": [{
         \"type\": \"Ready\", \"status\": \"True\", \"reason\": \"Succeeded\",
         \"message\": \"artifact ready\", \"lastTransitionTime\": \"2026-01-01T00:00:00Z\"
@@ -152,7 +152,7 @@ spec: ${spec}
 EOF
   kubectl -n "$ns" patch "$plural" "$name" --subresource=status --type=merge -p "{
     \"status\": {
-      \"artifact\": { \"url\": \"${url}\", \"revision\": \"${rev}\", \"digest\": \"${digest}\" },
+      \"artifact\": { \"url\": \"${url}\", \"revision\": \"${rev}\", \"digest\": \"${digest}\", \"path\": \"artifact.tar.gz\", \"lastUpdateTime\": \"2026-01-01T00:00:00Z\" },
       \"conditions\": [{
         \"type\": \"Ready\", \"status\": \"True\", \"reason\": \"Succeeded\",
         \"message\": \"artifact ready\", \"lastTransitionTime\": \"2026-01-01T00:00:00Z\"

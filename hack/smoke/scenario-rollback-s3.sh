@@ -102,7 +102,7 @@ log "Repoint the ExternalArtifact at a broken (non-fetchable) revision"
 BROKEN_URL="$(artifact_url "$NS" "${NAME}-server" missing.tar.gz)"
 kubectl -n "$NS" patch externalartifact "${NAME}-good" --subresource=status --type=merge -p "{
   \"status\": {
-    \"artifact\": { \"url\": \"${BROKEN_URL}\", \"revision\": \"broken@v2\", \"digest\": \"sha256:$(printf '0%.0s' $(seq 1 64))\" }
+    \"artifact\": { \"url\": \"${BROKEN_URL}\", \"revision\": \"broken@v2\", \"digest\": \"sha256:$(printf '0%.0s' $(seq 1 64))\", \"path\": \"missing.tar.gz\", \"lastUpdateTime\": \"2026-01-01T00:00:00Z\" }
   }
 }"
 
