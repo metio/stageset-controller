@@ -129,11 +129,17 @@ EOF
 # status.artifact, exactly like an ExternalArtifact, so the resolver consumes it
 # directly as a stage source.
 plant_flux_source() {
-  local kind=$1 ns=$2 name=$3 url=$4 digest=$5 rev=${6:-smoke@$5} plural
+  local kind=$1 ns=$2 name=$3 url=$4 digest=$5 rev=${6:-smoke@$5} plural spec
+  # The real Flux source CRDs validate spec on create (url/interval, etc.), so
+  # each kind gets a minimal valid — but never fetched — spec; the controller
+  # consumes the stamped status.artifact below, not the spec.
   case "$kind" in
-    GitRepository) plural=gitrepositories ;;
-    OCIRepository) plural=ocirepositories ;;
-    Bucket) plural=buckets ;;
+    GitRepository) plural=gitrepositories
+      spec='{"url":"https://example.com/stub.git","interval":"1h","ref":{"branch":"main"}}' ;;
+    OCIRepository) plural=ocirepositories
+      spec='{"url":"oci://example.com/stub","interval":"1h"}' ;;
+    Bucket) plural=buckets
+      spec='{"provider":"generic","bucketName":"stub","endpoint":"example.com","interval":"1h"}' ;;
     *) die "plant_flux_source: unknown kind $kind" ;;
   esac
   kubectl apply -f - <<EOF
@@ -142,7 +148,7 @@ kind: ${kind}
 metadata:
   name: ${name}
   namespace: ${ns}
-spec: {}
+spec: ${spec}
 EOF
   kubectl -n "$ns" patch "$plural" "$name" --subresource=status --type=merge -p "{
     \"status\": {

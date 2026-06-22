@@ -33,6 +33,8 @@ jobs:
       chart_version: ${{ steps.find.outputs.version }}
       k8s_versions: ${{ steps.versions.outputs.k8s }}
       k8s_latest: ${{ steps.versions.outputs.k8s_latest }}
+      flux_versions: ${{ steps.versions.outputs.flux }}
+      flux_latest: ${{ steps.versions.outputs.flux_latest }}
       kind_latest: ${{ steps.kind.outputs.kind_latest }}
       relevant: ${{ steps.scope.outputs.relevant }}
     steps:
@@ -71,7 +73,9 @@ jobs:
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - id: versions
-        name: Discover the newest kindest/node minors
+        name: Discover the newest Kubernetes + Flux versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           # Newest 4 kindest/node minors, latest patch each. A new k8s release is
@@ -83,11 +87,26 @@ jobs:
             | awk '{l[$1]=$2} END{for(m in l)print l[m]}' | sort -V | tail -4 \
             | jq -R . | jq -cs . 2>/dev/null || echo '[]')
           [ "$(jq 'length' <<<"$k8s" 2>/dev/null || echo 0)" -gt 0 ] || k8s='["v1.33.1"]'
+          # Newest 3 Flux minors at or above the ExternalArtifact floor (v2.7.0 /
+          # source-controller v1.7.0); below that the source CRDs lack
+          # ExternalArtifact. The major>2 clause keeps a future v3.x in range.
+          # Each version's real source CRDs are installed at smoke time, so this
+          # actually exercises the controller against the evolving schema.
+          flux=$(gh release list --repo fluxcd/flux2 --limit 60 --json tagName,isPrerelease \
+                   --jq '.[] | select(.isPrerelease==false) | .tagName' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | awk -F. '{m=$1;sub(/^v/,"",m); if(m>2||(m==2&&$2>=7))print}' \
+            | awk -F. '{print $1"."$2" "$0}' | sort -k1,1V -k2,2V \
+            | awk '{l[$1]=$2} END{for(m in l)print l[m]}' | sort -V | tail -3 \
+            | jq -R . | jq -cs . 2>/dev/null || echo '[]')
+          [ "$(jq 'length' <<<"$flux" 2>/dev/null || echo 0)" -gt 0 ] || flux='["v2.7.0"]'
           {
             echo "k8s=$k8s"
             echo "k8s_latest=$(jq -r '.[-1]' <<<"$k8s")"
+            echo "flux=$flux"
+            echo "flux_latest=$(jq -r '.[-1]' <<<"$flux")"
           } >> "$GITHUB_OUTPUT"
-          echo "k8s=$k8s"
+          echo "k8s=$k8s  flux=$flux"
       - id: kind
         name: Discover the newest kind release
         env:
@@ -106,16 +125,19 @@ jobs:
           echo "kind_latest=$kv"
 
   smoke:
-    name: k8s ${{ matrix.k8s_version }}
+    name: k8s ${{ matrix.k8s_version }} / Flux ${{ matrix.flux_version }}
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Swept across the newest Kubernetes versions the discover job found — no
-        # hardcoded versions, so a new k8s release is tested with no manual edit.
+        # Swept across the newest Kubernetes AND Flux versions the discover job
+        # found — no hardcoded versions, so a new k8s or Flux release is tested
+        # with no manual edit. The Flux axis installs that version's real source
+        # CRDs, exercising the controller against the evolving schema.
         k8s_version: ${{ fromJSON(needs.discover.outputs.k8s_versions) }}
+        flux_version: ${{ fromJSON(needs.discover.outputs.flux_versions) }}
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -139,11 +161,8 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-smoke
 
-      - name: Install the ExternalArtifact stub CRD
-        run: hack/smoke/setup-externalartifact-crd.sh
-
-      - name: Install the classic Flux source stub CRDs
-        run: hack/smoke/setup-flux-source-crds.sh
+      - name: Install Flux ${{ matrix.flux_version }} source CRDs (real schema)
+        run: hack/smoke/setup-flux-source-crds.sh ${{ matrix.flux_version }}
 
       - name: Install the released chart with the dev image
         run: |
@@ -228,9 +247,9 @@ jobs:
           wait: 180s
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-s3
-      - name: Cluster prereqs (ExternalArtifact CRD + S3Mock)
+      - name: Cluster prereqs (Flux source CRDs + S3Mock)
         run: |
-          hack/smoke/setup-externalartifact-crd.sh
+          hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
           hack/smoke/setup-s3mock.sh
       - name: Install the released chart (S3Mock rollback store) with the dev image
         run: |
@@ -289,9 +308,9 @@ jobs:
           wait: 180s
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-seaweedfs
-      - name: Cluster prereqs (ExternalArtifact CRD + SeaweedFS)
+      - name: Cluster prereqs (Flux source CRDs + SeaweedFS)
         run: |
-          hack/smoke/setup-externalartifact-crd.sh
+          hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
           hack/smoke/setup-seaweedfs.sh
       - name: Install the released chart (SeaweedFS rollback store, real creds + SSE) with the dev image
         run: |
@@ -357,8 +376,8 @@ jobs:
           wait: 180s
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-ha
-      - name: Cluster prereqs (ExternalArtifact CRD)
-        run: hack/smoke/setup-externalartifact-crd.sh
+      - name: Cluster prereqs (Flux source CRDs)
+        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart (2 replicas) with the dev image
         run: |
           # replicas.min/max=2 runs two controller pods; leader election gates
@@ -408,8 +427,8 @@ jobs:
           wait: 180s
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-selfsigned
-      - name: Cluster prereqs (ExternalArtifact CRD)
-        run: hack/smoke/setup-externalartifact-crd.sh
+      - name: Cluster prereqs (Flux source CRDs)
+        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart (self-signed webhook) with the dev image
         run: |
           # The one job that keeps the webhook ON: in self-signed cert mode the
@@ -464,8 +483,8 @@ jobs:
           wait: 180s
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-scale
-      - name: Cluster prereqs (ExternalArtifact CRD)
-        run: hack/smoke/setup-externalartifact-crd.sh
+      - name: Cluster prereqs (Flux source CRDs)
+        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart with the dev image
         run: |
           # Same install as the matrix job: webhook off (the scenario exercises the
@@ -514,10 +533,8 @@ jobs:
           wait: 180s
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-new-fields
-      - name: Cluster prereqs (ExternalArtifact CRD + classic Flux source CRDs)
-        run: |
-          hack/smoke/setup-externalartifact-crd.sh
-          hack/smoke/setup-flux-source-crds.sh
+      - name: Cluster prereqs (Flux source CRDs)
+        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart with the dev image
         run: |
           # Same install as the matrix job: webhook off (the scenario does not
