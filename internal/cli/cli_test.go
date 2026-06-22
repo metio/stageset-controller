@@ -79,12 +79,12 @@ func TestRun_UnknownFlag_ExitsUsage(t *testing.T) {
 	}
 }
 
-func TestRun_InvalidOutput_ExitsError(t *testing.T) {
-	// A bad --output value is a runtime validation failure (exit 3), distinct
-	// from a flag-parse error (exit 2): the flag parsed fine, the value is wrong.
+func TestRun_InvalidOutput_ExitsUsage(t *testing.T) {
+	// A bad --output value is flag/usage misuse (exit 2), like a flag-parse
+	// error: the caller invoked the tool wrong, the tool didn't fail at runtime.
 	_, stderr, code := runArgs("get", "-o", "toml")
-	if code != exitError {
-		t.Fatalf("invalid output exit = %d, want %d", code, exitError)
+	if code != exitUsage {
+		t.Fatalf("invalid output exit = %d, want %d", code, exitUsage)
 	}
 	if !strings.Contains(stderr, "invalid --output") {
 		t.Errorf("stderr missing validation message:\n%s", stderr)

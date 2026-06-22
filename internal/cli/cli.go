@@ -80,6 +80,16 @@ func runtimeErr(err error) error {
 	return &exitErr{code: exitError, err: err}
 }
 
+// usageErr wraps a flag/usage misuse as an exit-2 error, matching cobra's own
+// flag-parse classification (exitUsage) so a caller can distinguish "tool
+// misused" from "tool ran but failed".
+func usageErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &exitErr{code: exitUsage, err: err}
+}
+
 // options carries the shared dependencies every subcommand needs. Tests
 // construct it with a RESTConfigOverride to point at envtest, bypassing
 // kubeconfig discovery entirely.

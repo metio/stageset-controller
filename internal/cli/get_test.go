@@ -186,8 +186,10 @@ func TestGet_NameWithAllNamespacesErrors(t *testing.T) {
 	makeStageSet(t, c, ns, "alpha")
 
 	_, stderr, code := runCLI(t, cfg, "get", "alpha", "-n", ns, "--all-namespaces")
-	if code != exitError {
-		t.Fatalf("get NAME --all-namespaces exit = %d, want %d", code, exitError)
+	// A name + --all-namespaces is flag misuse, so it exits with the usage code
+	// (2), not the runtime-failure code (3).
+	if code != exitUsage {
+		t.Fatalf("get NAME --all-namespaces exit = %d, want %d", code, exitUsage)
 	}
 	if !strings.Contains(stderr, "across all namespaces") {
 		t.Errorf("stderr should explain the name/-A conflict:\n%s", stderr)

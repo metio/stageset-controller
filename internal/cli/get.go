@@ -43,6 +43,14 @@ func newGetCommand(o *options) *cobra.Command {
 			if len(args) == 1 {
 				opts.name = args[0]
 			}
+			// Flag/usage misuse is exit 2 (matching cobra's flag-parse path), not
+			// the exit-3 runtime class — keep these out of runtimeErr.
+			if opts.output != "" && opts.output != "yaml" && opts.output != "json" {
+				return usageErr(fmt.Errorf("invalid --output %q: want yaml or json", opts.output))
+			}
+			if opts.name != "" && opts.allNamespaces {
+				return usageErr(fmt.Errorf("a StageSet cannot be retrieved by name across all namespaces; drop --all-namespaces or the name"))
+			}
 			return runtimeErr(runGet(cmd.Context(), o, opts))
 		},
 	}
@@ -52,12 +60,6 @@ func newGetCommand(o *options) *cobra.Command {
 }
 
 func runGet(ctx context.Context, o *options, opts getOptions) error {
-	if opts.output != "" && opts.output != "yaml" && opts.output != "json" {
-		return fmt.Errorf("invalid --output %q: want yaml or json", opts.output)
-	}
-	if opts.name != "" && opts.allNamespaces {
-		return fmt.Errorf("a StageSet cannot be retrieved by name across all namespaces; drop --all-namespaces or the name")
-	}
 	c, _, err := o.newClient()
 	if err != nil {
 		return err
