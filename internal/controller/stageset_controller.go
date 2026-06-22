@@ -1402,6 +1402,17 @@ func (r *StageSetReconciler) dependenciesReady(ctx context.Context, ss *stagesv1
 		if !isReady(&d) || d.Status.ObservedGeneration != d.Generation {
 			return false, fmt.Sprintf("dependency %s/%s is not ready", ns, dep.Name), nil
 		}
+		// A dependency that is Deployed-and-Ready but holding a NEW revision behind
+		// an update window still reports Ready=True with ObservedGeneration current
+		// (its already-deployed state is healthy). Rolling a dependent out now would
+		// build it against the dependency's old, about-to-be-replaced revision, so
+		// treat a pending not-yet-applied revision as not-ready for dependents.
+		// PendingUpdate.Revisions is populated only when a new revision is held — a
+		// pure windowScope=All freeze with no new revision leaves it empty and does
+		// not block dependents.
+		if d.Status.PendingUpdate != nil && len(d.Status.PendingUpdate.Revisions) > 0 {
+			return false, fmt.Sprintf("dependency %s/%s has a new revision held by an update window", ns, dep.Name), nil
+		}
 	}
 	return true, "", nil
 }
