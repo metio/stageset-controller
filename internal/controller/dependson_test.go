@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,10 +15,76 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/artifact"
 )
+
+// TestDependenciesReady_HeldNewRevisionGatesDependents pins that a dependency
+// which is Deployed-and-Ready but holding a NEW revision behind an update window
+// gates its dependents — otherwise the dependent rolls out against the
+// dependency's old, about-to-be-replaced state. A pure freeze (no new revision
+// pending) must still let dependents proceed.
+func TestDependenciesReady_HeldNewRevisionGatesDependents(t *testing.T) {
+	const ns = "team"
+	readyDep := func(name string, pending *stagesv1.PendingUpdate) *stagesv1.StageSet {
+		return &stagesv1.StageSet{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Generation: 1},
+			Status: stagesv1.StageSetStatus{
+				ObservedGeneration: 1,
+				PendingUpdate:      pending,
+				Conditions: []metav1.Condition{{
+					Type:               ConditionReady,
+					Status:             metav1.ConditionTrue,
+					Reason:             ReasonReady,
+					ObservedGeneration: 1,
+					LastTransitionTime: metav1.Now(),
+				}},
+			},
+		}
+	}
+	dependent := func(dep string) *stagesv1.StageSet {
+		return &stagesv1.StageSet{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dependent", Generation: 1},
+			Spec:       stagesv1.StageSetSpec{DependsOn: []meta.NamespacedObjectReference{{Name: dep}}},
+		}
+	}
+	newReconciler := func(dep *stagesv1.StageSet) *StageSetReconciler {
+		c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(dep).Build()
+		return &StageSetReconciler{Client: c}
+	}
+
+	t.Run("deployed dependency with no pending revision is ready", func(t *testing.T) {
+		r := newReconciler(readyDep("dep", nil))
+		ok, msg, err := r.dependenciesReady(context.Background(), dependent("dep"))
+		if err != nil || !ok {
+			t.Fatalf("dependenciesReady = (%v, %q, %v), want ready", ok, msg, err)
+		}
+	})
+
+	t.Run("dependency holding a new revision gates the dependent", func(t *testing.T) {
+		r := newReconciler(readyDep("dep", &stagesv1.PendingUpdate{Revisions: map[string]string{"ea": "sha256:new"}}))
+		ok, msg, err := r.dependenciesReady(context.Background(), dependent("dep"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ok {
+			t.Fatal("dependent must be gated while its dependency holds a new revision behind a window")
+		}
+		if !strings.Contains(msg, "held by an update window") {
+			t.Errorf("gate message = %q, want it to mention the held update window", msg)
+		}
+	})
+
+	t.Run("a pure freeze with no pending revision does not gate", func(t *testing.T) {
+		r := newReconciler(readyDep("dep", &stagesv1.PendingUpdate{}))
+		ok, _, err := r.dependenciesReady(context.Background(), dependent("dep"))
+		if err != nil || !ok {
+			t.Fatalf("a pure freeze (no new revision) must not gate dependents; got ok=%v err=%v", ok, err)
+		}
+	})
+}
 
 func stageSetDependsOn(t *testing.T, c client.Client, ns, name, eaName string, deps ...string) *stagesv1.StageSet {
 	t.Helper()
