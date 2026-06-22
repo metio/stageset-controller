@@ -62,3 +62,49 @@ func TestDeleteStageReadyForStage(t *testing.T) {
 		t.Fatalf("sibling stage gauge = %v, want 1", v)
 	}
 }
+
+// TestDeleteStageSetMetrics proves a deleted StageSet leaves no orphaned
+// operational series, while the teardown force-drop counter (the deletion-time
+// alert signal) survives, and a sibling StageSet's series are untouched.
+func TestDeleteStageSetMetrics(t *testing.T) {
+	ReconcileTotal.Reset()
+	StageAppliedTotal.Reset()
+	DriftCorrectedTotal.Reset()
+	UpdateDeferredTotal.Reset()
+	InventorySkippedEntriesTotal.Reset()
+	TeardownForceDropTotal.Reset()
+
+	const ns, name, other = "ns", "doomed", "survivor"
+	ReconcileTotal.WithLabelValues(ns, name, "Succeeded").Inc()
+	ReconcileTotal.WithLabelValues(ns, name, "Failed").Inc() // second series, same ns/name
+	StageAppliedTotal.WithLabelValues(ns, name, "infra").Inc()
+	DriftCorrectedTotal.WithLabelValues(ns, name, "web").Inc()
+	UpdateDeferredTotal.WithLabelValues(ns, name).Inc()
+	InventorySkippedEntriesTotal.WithLabelValues(ns, name, "infra").Inc()
+	TeardownForceDropTotal.WithLabelValues(ns, name).Inc()
+	ReconcileTotal.WithLabelValues(ns, other, "Succeeded").Inc() // survivor
+
+	before := testutil.CollectAndCount(ReconcileTotal) + testutil.CollectAndCount(StageAppliedTotal) +
+		testutil.CollectAndCount(DriftCorrectedTotal) + testutil.CollectAndCount(UpdateDeferredTotal) +
+		testutil.CollectAndCount(InventorySkippedEntriesTotal)
+
+	DeleteStageSetMetrics(ns, name)
+
+	after := testutil.CollectAndCount(ReconcileTotal) + testutil.CollectAndCount(StageAppliedTotal) +
+		testutil.CollectAndCount(DriftCorrectedTotal) + testutil.CollectAndCount(UpdateDeferredTotal) +
+		testutil.CollectAndCount(InventorySkippedEntriesTotal)
+
+	// Doomed StageSet contributed 6 operational series (two reconcile + applied +
+	// drift + deferred + inventory); all must vanish.
+	if before-after != 6 {
+		t.Errorf("DeleteStageSetMetrics removed %d operational series, want 6", before-after)
+	}
+	// The survivor's reconcile series must remain.
+	if v := testutil.ToFloat64(ReconcileTotal.WithLabelValues(ns, other, "Succeeded")); v != 1 {
+		t.Errorf("survivor series = %v, want 1 (over-deleted)", v)
+	}
+	// The force-drop counter is a deletion-time alert signal; it must survive.
+	if v := testutil.ToFloat64(TeardownForceDropTotal.WithLabelValues(ns, name)); v != 1 {
+		t.Errorf("teardown force-drop series = %v, want 1 (must survive)", v)
+	}
+}
