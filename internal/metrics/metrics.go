@@ -112,3 +112,24 @@ func DeleteStageReady(namespace, stageset string) {
 func DeleteStageReadyForStage(namespace, stageset, stage string) {
 	StageReady.DeleteLabelValues(namespace, stageset, stage)
 }
+
+// DeleteStageSetMetrics evicts every per-StageSet operational time series so a
+// deleted StageSet leaves no orphaned series pinned in the registry. Without
+// this, a cluster that churns StageSets (CI namespaces, GitOps create/delete
+// cycles) grows the controller's resident set and /metrics scrape size without
+// bound. The gauge is handled separately by DeleteStageReady; this covers the
+// counters and histograms keyed by the StageSet identity.
+//
+// TeardownForceDropTotal is deliberately NOT evicted: it is emitted at deletion
+// as the alert signal that a finalizer was force-dropped with orphaned objects
+// left behind, so it must outlive the StageSet — its cardinality is bounded by
+// the (rare) force-drop incident count, not by StageSet churn.
+func DeleteStageSetMetrics(namespace, name string) {
+	nameMatch := prometheus.Labels{"namespace": namespace, "name": name}
+	ReconcileTotal.DeletePartialMatch(nameMatch)
+	StageAppliedTotal.DeletePartialMatch(nameMatch)
+	DriftCorrectedTotal.DeletePartialMatch(nameMatch)
+	UpdateDeferredTotal.DeletePartialMatch(nameMatch)
+	// InventorySkippedEntriesTotal labels the StageSet as "stageset", not "name".
+	InventorySkippedEntriesTotal.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": name})
+}

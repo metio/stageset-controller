@@ -1260,6 +1260,7 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 		}
 	}
 	metrics.DeleteStageReady(ss.Namespace, ss.Name)
+	metrics.DeleteStageSetMetrics(ss.Namespace, ss.Name)
 	controllerutil.RemoveFinalizer(ss, FinalizerName)
 	return ctrl.Result{}, r.Update(ctx, ss)
 }
@@ -1278,6 +1279,7 @@ func (r *StageSetReconciler) teardownFailure(ctx context.Context, ss *stagesv1.S
 	msg := fmt.Sprintf("TeardownForced after %s of failing teardown (%s) — finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: %v",
 		elapsed.Round(time.Second), op, cause)
 	metrics.DeleteStageReady(ss.Namespace, ss.Name)
+	metrics.DeleteStageSetMetrics(ss.Namespace, ss.Name)
 	controllerutil.RemoveFinalizer(ss, FinalizerName)
 	if err := r.Update(ctx, ss); err != nil {
 		// The finalizer is still on. Emit nothing here: the retry re-decides and
