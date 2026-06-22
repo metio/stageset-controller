@@ -506,6 +506,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	desiredRecords := make([]inventory.StageRecord, 0, len(ss.Spec.Stages))
 	applied := make(map[string]string, len(ss.Spec.Stages))
 	stageStatuses := make([]stagesv1.StageStatus, 0, len(ss.Spec.Stages))
+	// When a stage's promotion gate holds, these record which stage and its
+	// phase so the post-loop hold handler can set the right Ready reason.
+	var promoteHoldStage string
+	var promoteHoldState *stagesv1.PromotionState
 	// The stage loop runs in a closure so a stage failure can be intercepted
 	// for rollbackOnFailure before it is finalized; failStage's returns become
 	// the closure's result.
@@ -670,6 +674,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 			}
 
+			// PROMOTE-GATE: the stage is applied, verified, and its post-actions
+			// ran. Decide whether the rollout may advance past it (soak / manual).
+			// Holding parks the rollout here — the stage stays applied (drift is
+			// still corrected on the next reconcile) and later stages are never
+			// touched — so this is a hold, not a failure.
+			promoted, promoState, promoteRequeue, handledPromotion := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now())
 			applied[ra.Key()] = ra.Revision
 			stageStatuses = append(stageStatuses, stagesv1.StageStatus{
 				Name:                   stage.Name,
@@ -679,11 +689,43 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				ExecutedActions:        executed,
 				LedgerRevision:         ra.Revision,
 				LastHandledReconcileAt: lastHandledFor(stage.Name),
+				PromotionState:         promoState,
+				LastHandledPromotion:   handledPromotion,
 			})
 			metrics.StageAppliedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Inc()
+			metrics.SetStagePromotionPending(ss.Namespace, ss.Name, stage.Name, !promoted)
+			if !promoted {
+				promoteHoldStage = stage.Name
+				promoteHoldState = promoState
+				return ctrl.Result{RequeueAfter: promoteRequeue}, errHoldForPromotion
+			}
 		}
 		return ctrl.Result{}, nil
 	}()
+	if errors.Is(loopErr, errHoldForPromotion) {
+		// A promotion gate is holding the rollout at promoteHoldStage. Persist the
+		// stage statuses (so the soak clock + handled token survive), set the held
+		// Ready condition, and requeue. Earlier stages stay applied; later stages
+		// were never processed.
+		ss.Status.Stages = stageStatuses
+		publishStageReady(&ss)
+		ss.Status.ObservedGeneration = ss.Generation
+		reason := ReasonSoaking
+		msg := fmt.Sprintf("stage %q is soaking before promotion", promoteHoldStage)
+		if promoteHoldState != nil && promoteHoldState.SoakUntil != nil {
+			msg = fmt.Sprintf("stage %q is soaking before promotion; soak window closes at %s",
+				promoteHoldStage, promoteHoldState.SoakUntil.Time.UTC().Format(time.RFC3339))
+		}
+		if promoteHoldState != nil && promoteHoldState.Phase == stagesv1.PromotionAwaitingManual {
+			reason = ReasonAwaitingPromotion
+			msg = fmt.Sprintf("stage %q is healthy and awaiting a manual promotion; run: stagesetctl promote %s --namespace %s --stage %s",
+				promoteHoldStage, ss.Name, ss.Namespace, promoteHoldStage)
+		}
+		prevReady := readyConditionSnapshot(&ss)
+		r.setReady(&ss, metav1.ConditionFalse, reason, msg)
+		r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, reason, msg)
+		return loopResult, r.patchStatus(ctx, patchHelper, &ss)
+	}
 	if loopErr != nil {
 		// A stage failed. failStage has already written the failure status. If
 		// rollbackOnFailure is set, restore the last-good snapshot; a snapshot
@@ -1585,6 +1627,7 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				fluxpredicates.ReconcileRequestedPredicate{},
 				reconcileStageRequestedPredicate{},
 				migrationApprovalPredicate{},
+				promoteRequestedPredicate{},
 			),
 		)).
 		Owns(&stagesv1.StageInventory{}).
