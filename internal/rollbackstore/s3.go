@@ -13,7 +13,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -137,7 +136,7 @@ func (s *S3Store) Get(ctx context.Context, key string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	defer func() { _ = obj.Close() }()
-	data, err := io.ReadAll(obj)
+	data, err := readCapped(obj)
 	if err != nil {
 		// GetObject is lazy; a missing object surfaces here as NoSuchKey.
 		var resp minio.ErrorResponse

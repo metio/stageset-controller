@@ -6,7 +6,6 @@ package rollbackstore
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 )
@@ -90,7 +89,7 @@ func (f *FileStore) Get(_ context.Context, key string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(file)
+	data, err := readCapped(file)
 	if err != nil {
 		return nil, false, err
 	}

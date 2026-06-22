@@ -133,6 +133,23 @@ func TestDiffRevisionsHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("a path-bearing digest is rejected before any store read", func(t *testing.T) {
+		cfg := Config{KubeClient: fakeClient(t, ssWithApplied()), RollbackStore: &fakeRollback{data: map[string][]byte{}}}
+		// from with a traversal value: on the S3 backend this would otherwise
+		// become part of the object name and escape the key prefix.
+		res, _, _ := cfg.diffRevisionsHandler(context.Background(), nil,
+			diffRevisionsInput{Namespace: ns, Name: name, Stage: stage, From: "sha256:../../../etc/passwd"})
+		if res == nil || !res.IsError {
+			t.Fatalf("expected a tool error for a path-bearing from digest, got %+v", res)
+		}
+		// An explicit path-bearing to is likewise rejected.
+		res, _, _ = cfg.diffRevisionsHandler(context.Background(), nil,
+			diffRevisionsInput{Namespace: ns, Name: name, Stage: stage, From: from, To: "sha256:a/b"})
+		if res == nil || !res.IsError {
+			t.Fatalf("expected a tool error for a path-bearing to digest, got %+v", res)
+		}
+	})
+
 	t.Run("missing required inputs are tool errors", func(t *testing.T) {
 		cfg := Config{KubeClient: fakeClient(t), RollbackStore: &fakeRollback{data: map[string][]byte{}}}
 		for _, in := range []diffRevisionsInput{
