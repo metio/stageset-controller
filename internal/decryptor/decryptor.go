@@ -151,14 +151,25 @@ func New(keys Keys, opts ...Option) (*Decryptor, error) {
 	}
 
 	if cfg.creds != nil {
-		// Object-level KMS: a per-tenant KMS service handles cloud master keys
-		// with the tenant's federated identity. PGP private keys are still
-		// resolved in-process above; the local client remains the fallback for
-		// any key type the per-tenant service declines (e.g. Vault/HuaweiCloud),
-		// keeping non-cloud-KMS behavior identical to the default path.
+		// Object-level KMS: the per-tenant KMS service (tenant federated
+		// identity) is the ONLY resolver for cloud master keys. We deliberately
+		// do NOT append the stock local key service in this mode: it decrypts
+		// cloud-KMS keys with the controller's AMBIENT credentials, so SOPS —
+		// which tries every key service for a given master key and stops at the
+		// first success — would fall through to it for any key the tenant SA is
+		// not authorized for, a confused-deputy that silently defeats per-tenant
+		// isolation. age and PGP keys are tenant-supplied material handled by the
+		// in-process services appended above (not ambient credentials), so the
+		// tenant chain is complete; a key type with no tenant-scoped resolver
+		// (e.g. Vault via ambient token) correctly fails to decrypt rather than
+		// leaking the controller's identity.
 		services = append(services, &kmsKeyService{creds: cfg.creds})
+	} else {
+		// Default path: no per-tenant identity was requested, so the local key
+		// service resolves every master-key type with the controller's ambient
+		// credentials.
+		services = append(services, keyservice.NewLocalClient())
 	}
-	services = append(services, keyservice.NewLocalClient())
 	return &Decryptor{keyServices: services}, nil
 }
 

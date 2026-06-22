@@ -183,11 +183,49 @@ func TestKMSKeyService_DeclinesNonKMSKeys(t *testing.T) {
 	}
 }
 
+// TestNew_ObjectLevelKMS_OmitsAmbientLocalClient pins the isolation guarantee:
+// with a per-tenant credential source the stock local key service (which would
+// decrypt cloud-KMS keys with the controller's AMBIENT credentials) must NOT be
+// in the chain, so SOPS can't fall through to it for a key the tenant SA isn't
+// authorized for. The ambient path keeps the local client.
+func TestNew_ObjectLevelKMS_OmitsAmbientLocalClient(t *testing.T) {
+	identity, _ := newAgeKey(t)
+	objLevel, err := New(Keys{Age: []string{identity}}, WithCredentialSource(&fakeCredentialSource{}))
+	if err != nil {
+		t.Fatalf("New (object-level): %v", err)
+	}
+	if hasLocalClient(objLevel) {
+		t.Fatal("object-level KMS must not wire the ambient local key service — it would leak the controller identity for keys the tenant can't decrypt")
+	}
+	if !hasKMSKeyService(objLevel) {
+		t.Fatal("object-level KMS must wire the per-tenant kms service")
+	}
+
+	ambient, err := New(Keys{Age: []string{identity}})
+	if err != nil {
+		t.Fatalf("New (ambient): %v", err)
+	}
+	if !hasLocalClient(ambient) {
+		t.Fatal("the ambient path must keep the local key service")
+	}
+}
+
 // hasKMSKeyService reports whether d wired the per-tenant kms service — the
 // observable difference between the object-level and ambient paths.
 func hasKMSKeyService(d *Decryptor) bool {
 	for _, s := range d.keyServices {
 		if _, ok := s.(*kmsKeyService); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLocalClient reports whether d wired the stock ambient-credential local key
+// service.
+func hasLocalClient(d *Decryptor) bool {
+	for _, s := range d.keyServices {
+		if _, ok := s.(keyservice.LocalClient); ok {
 			return true
 		}
 	}
