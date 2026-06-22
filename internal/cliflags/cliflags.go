@@ -15,6 +15,10 @@ package cliflags
 
 import (
 	"flag"
+	"fmt"
+	"net"
+	"slices"
+	"strconv"
 	"time"
 
 	"github.com/metio/stageset-controller/internal/inventory"
@@ -103,6 +107,103 @@ type Flags struct {
 
 	LogLevel  *string
 	LogFormat *string
+}
+
+// Validate checks the parsed flag values for shape errors that would otherwise
+// surface as a confusing mid-startup crash or silent misbehavior, returning a
+// single error suitable for an exit-2 (usage) failure. It is the one place
+// every flag's constraints live, so the runtime and tests agree.
+func (f *Flags) Validate() error {
+	// Bind addresses must parse as host:port (host may be empty, e.g. ":8080").
+	// "0" disables the metrics/probe endpoint (controller-runtime convention);
+	// an empty gate/metrics/probe address keeps controller-runtime's own default
+	// handling, so only a non-empty, non-"0" value is shape-checked. The MCP
+	// address is checked only when MCP is enabled (it is otherwise unused).
+	bindAddrs := []struct {
+		name, val   string
+		allowEmpty  bool
+		allowZero   bool
+		checkWhenOn bool
+		on          bool
+	}{
+		{name: "--metrics-bind-address", val: *f.MetricsAddr, allowEmpty: true, allowZero: true},
+		{name: "--health-probe-bind-address", val: *f.ProbeAddr, allowEmpty: true, allowZero: true},
+		{name: "--gate-bind-address", val: *f.GateAddr, allowEmpty: true},
+		{name: "--mcp-bind-address", val: *f.MCPAddr, checkWhenOn: true, on: *f.EnableMCP},
+	}
+	for _, a := range bindAddrs {
+		if a.checkWhenOn && !a.on {
+			continue
+		}
+		if a.val == "" {
+			if a.allowEmpty {
+				continue
+			}
+			return fmt.Errorf("%s must be a host:port address (e.g. \":8084\"), got empty", a.name)
+		}
+		if a.allowZero && a.val == "0" {
+			continue
+		}
+		if err := validBindAddress(a.name, a.val); err != nil {
+			return err
+		}
+	}
+
+	if *f.WebhookPort < 1 || *f.WebhookPort > 65535 {
+		return fmt.Errorf("--webhook-port must be in 1..65535, got %d", *f.WebhookPort)
+	}
+	if *f.ShardCap < 1 {
+		return fmt.Errorf("--inventory-shard-cap must be >= 1, got %d", *f.ShardCap)
+	}
+	if *f.DefaultInterval <= 0 {
+		return fmt.Errorf("--default-interval must be > 0, got %s", *f.DefaultInterval)
+	}
+	if *f.MaxTeardownWait < 0 {
+		return fmt.Errorf("--max-teardown-wait must be >= 0, got %s", *f.MaxTeardownWait)
+	}
+	if *f.WebhookCertValidity <= 0 {
+		return fmt.Errorf("--webhook-cert-validity must be > 0, got %s", *f.WebhookCertValidity)
+	}
+	if r := *f.TracingSampleRatio; r < 0 || r > 1 {
+		return fmt.Errorf("--tracing-sample-ratio must be in 0.0..1.0, got %v", r)
+	}
+
+	// Enumerated flags.
+	enums := []struct {
+		name, val string
+		allowed   []string
+	}{
+		{"--webhook-cert-mode", *f.WebhookCertMode, []string{"cert-manager", "self-signed"}},
+		{"--rollback-store-s3-sse", *f.RBS3SSE, []string{"none", "s3", "kms"}},
+		{"--log-level", *f.LogLevel, []string{"debug", "info", "warn", "error"}},
+		{"--log-format", *f.LogFormat, []string{"json", "text"}},
+	}
+	for _, e := range enums {
+		if !slices.Contains(e.allowed, e.val) {
+			return fmt.Errorf("%s must be one of %v, got %q", e.name, e.allowed, e.val)
+		}
+	}
+
+	// Cross-flag rules.
+	if *f.MCPAllowMutations && !*f.EnableMCP {
+		return fmt.Errorf("--mcp-allow-mutations requires --enable-mcp")
+	}
+
+	return nil
+}
+
+// validBindAddress checks that addr parses as host:port with a numeric port in
+// 1..65535 (host may be empty, e.g. ":8080").
+func validBindAddress(name, addr string) error {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("%s must be a host:port address (e.g. \":8080\"), got %q", name, addr)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%s port must be an integer in 1..65535, got %q", name, addr)
+	}
+	return nil
 }
 
 // groupByName records each flag's documentation group, populated by Register.
