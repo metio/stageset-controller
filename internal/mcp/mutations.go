@@ -49,6 +49,13 @@ func registerMutationTools(server *mcpsdk.Server, cfg Config) {
 
 func (cfg Config) reconcileStageSetHandler(ctx context.Context, _ *mcpsdk.CallToolRequest, in mutateInput) (*mcpsdk.CallToolResult, mutateOutput, error) {
 	return cfg.mutateStageSet(ctx, in, func(s *stagesv1.StageSet) (string, bool) {
+		// A suspended StageSet is short-circuited before the controller ever reads
+		// the reconcile annotation, so stamping it would report success for a
+		// guaranteed no-op. Mirror the CLI's refusal instead of misleading the
+		// agent.
+		if s.Spec.Suspend {
+			return "StageSet is suspended; the controller will not act on a reconcile request until it is resumed", false
+		}
 		if s.Annotations == nil {
 			s.Annotations = map[string]string{}
 		}
