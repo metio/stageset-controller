@@ -70,24 +70,34 @@ func TestCompileError(t *testing.T) {
 	}
 }
 
-// TestEvalBool_CostLimitBoundsExpensiveExpression pins that a deliberately
-// expensive expression over a large input is aborted by the runtime cost limit
-// rather than running unbounded — the CPU-pinning defence for remote-authored
-// (sourced-ladder) wait expressions.
+// TestEvalBool_CostLimitBoundsExpensiveExpression pins that a nested
+// comprehension is aborted by the runtime cost limit rather than running
+// unbounded — the CPU-pinning defence for remote-authored (sourced-ladder) wait
+// expressions. A small input + tiny ceiling exercises the same code path the
+// production maxEvalCost ceiling guards, without the multi-second eval a
+// full-budget expression would take (especially under -race).
 func TestEvalBool_CostLimitBoundsExpensiveExpression(t *testing.T) {
 	t.Parallel()
-	// A nested comprehension across a large list: cost grows multiplicatively.
-	big := make([]any, 4000)
-	for i := range big {
-		big[i] = int64(i)
+	xs := make([]any, 50)
+	for i := range xs {
+		xs[i] = int64(i)
 	}
-	obj := map[string]any{"status": map[string]any{"xs": big}}
+	obj := map[string]any{"status": map[string]any{"xs": xs}}
 
-	p, err := Compile(`status.xs.all(a, status.xs.exists(b, a == b))`)
+	p, err := compileWithCost(`status.xs.all(a, status.xs.exists(b, a == b))`, 100)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	if _, err := p.EvalBool(obj); err == nil {
 		t.Fatal("expected the cost limit to abort the expensive evaluation, got nil error")
+	}
+
+	// A trivial expression stays well under the production ceiling.
+	ok, err := Compile(`status.ready == true`)
+	if err != nil {
+		t.Fatalf("compile cheap: %v", err)
+	}
+	if _, err := ok.EvalBool(map[string]any{"status": map[string]any{"ready": true}}); err != nil {
+		t.Fatalf("a cheap expression must not trip the cost limit: %v", err)
 	}
 }

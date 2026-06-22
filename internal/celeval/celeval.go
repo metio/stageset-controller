@@ -31,6 +31,13 @@ type Program struct {
 // Compile builds a Program from a CEL expression. The expression must evaluate
 // to a bool.
 func Compile(expr string) (*Program, error) {
+	return compileWithCost(expr, maxEvalCost)
+}
+
+// compileWithCost is Compile with an explicit cost ceiling. Tests use a small
+// ceiling so the cost-limit path can be exercised without running an expression
+// up to the production budget (which is slow, especially under -race).
+func compileWithCost(expr string, costLimit uint64) (*Program, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("apiVersion", cel.StringType),
 		cel.Variable("kind", cel.StringType),
@@ -45,7 +52,7 @@ func Compile(expr string) (*Program, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, fmt.Errorf("compile CEL %q: %w", expr, iss.Err())
 	}
-	program, err := env.Program(ast, cel.CostLimit(maxEvalCost))
+	program, err := env.Program(ast, cel.CostLimit(costLimit))
 	if err != nil {
 		return nil, fmt.Errorf("build CEL program: %w", err)
 	}
