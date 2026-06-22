@@ -62,7 +62,16 @@ wait_ready stageset cli-smoke default
 
 # --- get ---
 log "stagesetctl get — human-readable status"
-GET_OUT="$("$STAGESETCTL" get cli-smoke -n default)"
+# The per-stage rows are written a moment after Ready flips True (a separate
+# status update), so poll the get output until the stage appears instead of
+# racing the first status write — otherwise a fast run reads Ready=True but
+# stage-less status. Bounded; the grep below still fails loudly if it never lands.
+GET_OUT=""
+for _ in $(seq 1 30); do
+  GET_OUT="$("$STAGESETCTL" get cli-smoke -n default)"
+  printf '%s' "$GET_OUT" | grep -q "app" && break
+  sleep 2
+done
 printf '%s\n' "$GET_OUT"
 printf '%s' "$GET_OUT" | grep -q "Name:.*cli-smoke" || die "get: missing name"
 printf '%s' "$GET_OUT" | grep -q "app" || die "get: missing stage"
