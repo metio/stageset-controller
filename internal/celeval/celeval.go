@@ -14,6 +14,15 @@ import (
 	"github.com/google/cel-go/cel"
 )
 
+// maxEvalCost bounds the runtime cost of a single CEL evaluation so a crafted
+// or remote-authored expression (a migration wait.expr can come from a sourced
+// ladder) cannot pin a CPU — the interpreter aborts with an error once the
+// accumulated cost crosses this budget, and the poller treats that as "not
+// satisfied" rather than running unbounded. The ceiling matches the order of
+// magnitude Kubernetes uses for its own per-call CEL budgets; a health-style
+// expression over one object's status is far below it in normal use.
+const maxEvalCost uint64 = 10_000_000
+
 // Program is a compiled boolean CEL expression.
 type Program struct {
 	program cel.Program
@@ -36,7 +45,7 @@ func Compile(expr string) (*Program, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, fmt.Errorf("compile CEL %q: %w", expr, iss.Err())
 	}
-	program, err := env.Program(ast)
+	program, err := env.Program(ast, cel.CostLimit(maxEvalCost))
 	if err != nil {
 		return nil, fmt.Errorf("build CEL program: %w", err)
 	}
