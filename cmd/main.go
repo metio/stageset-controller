@@ -96,8 +96,8 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		return 2
 	}
 
-	if *c.MCPAllowMutations && !*c.EnableMCP {
-		fmt.Fprintln(stderr, "stageset-controller: --mcp-allow-mutations requires --enable-mcp")
+	if err := c.Validate(); err != nil {
+		fmt.Fprintln(stderr, "stageset-controller:", err)
 		return 2
 	}
 
