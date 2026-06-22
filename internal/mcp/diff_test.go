@@ -133,6 +133,18 @@ func TestDiffRevisionsHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("same from and to is a tool error", func(t *testing.T) {
+		cfg := Config{KubeClient: fakeClient(t, ssWithApplied()), RollbackStore: &fakeRollback{data: map[string][]byte{}}}
+		// from == the applied digest that 'to' defaults to → nothing to diff.
+		res, _, _ := cfg.diffRevisionsHandler(context.Background(), nil, diffRevisionsInput{Namespace: ns, Name: name, Stage: stage, From: to})
+		if res == nil || !res.IsError {
+			t.Fatalf("expected a tool error when from == to, got %+v", res)
+		}
+		if !strings.Contains(textContent(t, res), "same revision") {
+			t.Fatalf("error should mention 'same revision', got %q", textContent(t, res))
+		}
+	})
+
 	t.Run("a path-bearing digest is rejected before any store read", func(t *testing.T) {
 		cfg := Config{KubeClient: fakeClient(t, ssWithApplied()), RollbackStore: &fakeRollback{data: map[string][]byte{}}}
 		// from with a traversal value: on the S3 backend this would otherwise

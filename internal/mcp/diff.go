@@ -100,6 +100,14 @@ func (cfg Config) diffRevisionsHandler(ctx context.Context, _ *mcpsdk.CallToolRe
 		// from the StageSet's own verified status.
 		return errorResult(fmt.Sprintf("invalid to digest: %v", err)), diffRevisionsOutput{}, nil
 	}
+	// Diffing a revision against itself reads the same snapshot twice and reports
+	// an all-unchanged result an agent can't distinguish from two distinct
+	// revisions that rendered identically. Fail fast — also covers 'to'
+	// defaulting to the applied digest when the caller passes that same digest as
+	// 'from'.
+	if in.From == to {
+		return errorResult(fmt.Sprintf("from and to are the same revision %s; nothing to diff", to)), diffRevisionsOutput{}, nil
+	}
 
 	fromObjs, err := cfg.readSnapshot(ctx, in.Namespace, in.Name, in.Stage, in.From)
 	if err != nil {
