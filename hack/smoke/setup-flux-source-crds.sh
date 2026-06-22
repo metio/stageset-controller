@@ -2,41 +2,45 @@
 # SPDX-FileCopyrightText: The stageset-controller Authors
 # SPDX-License-Identifier: 0BSD
 #
-# Installs minimal stubs of Flux's classic source CRDs (GitRepository,
-# OCIRepository, Bucket) so the direct-source smoke runs without a live
-# source-controller. The controller reads the same status.artifact +
-# status.conditions contract from these as from an ExternalArtifact, so an
-# unstructured schema is enough — the scenario stamps those fields directly. A
-# real cluster gets the typed CRDs from Flux; the contract under test is identical.
+# Installs Flux's REAL source CRDs (GitRepository, OCIRepository, Bucket, and
+# ExternalArtifact) at a given Flux version, so the smoke exercises the
+# controller against the actual, version-specific source-controller schema rather
+# than a hand-written stub — this is what lets the smoke matrix sweep multiple
+# Flux versions (parity with the jaas smoke). Only the CRDs are installed, not
+# the controllers: the scenarios stamp status.artifact/status.conditions
+# directly, so the contract under test (resolve -> fetch -> verify) needs the
+# schema, not a running source-controller. ExternalArtifact ships in
+# source-controller v1.7.0+ (Flux v2.7.0+), which is the floor the discover job
+# enforces. Usage: setup-flux-source-crds.sh [flux-version]
 set -euo pipefail
+VERSION="${1:-v2.7.0}"
 
-for entry in "GitRepository:gitrepositories" "OCIRepository:ocirepositories" "Bucket:buckets"; do
-  kind="${entry%%:*}"
-  plural="${entry##*:}"
-  cat <<EOF | kubectl apply -f -
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: ${plural}.source.toolkit.fluxcd.io
-spec:
-  group: source.toolkit.fluxcd.io
-  scope: Namespaced
-  names:
-    kind: ${kind}
-    listKind: ${kind}List
-    plural: ${plural}
-    singular: $(printf '%s' "$kind" | tr '[:upper:]' '[:lower:]')
-  versions:
-    - name: v1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      schema:
-        openAPIV3Schema:
-          type: object
-          x-kubernetes-preserve-unknown-fields: true
-EOF
+install_yaml="$(mktemp)"
+crds_yaml="$(mktemp)"
+trap 'rm -f "$install_yaml" "$crds_yaml"' EXIT
+
+# Flux publishes one combined install.yaml per release; we extract only its
+# source.toolkit.fluxcd.io CRDs.
+curl -fsSL --retry 5 --retry-all-errors \
+  "https://github.com/fluxcd/flux2/releases/download/${VERSION}/install.yaml" -o "$install_yaml"
+
+# install.yaml is a well-formed multi-document stream separated by '\n---\n';
+# keep the documents that are CRDs in the source.toolkit group. Plain string
+# split (no PyYAML dependency) is enough for Flux's generated manifest.
+python3 - "$install_yaml" "$crds_yaml" <<'PY'
+import sys
+docs = open(sys.argv[1]).read().split('\n---\n')
+keep = [d for d in docs
+        if 'kind: CustomResourceDefinition' in d
+        and 'group: source.toolkit.fluxcd.io' in d]
+open(sys.argv[2], 'w').write('\n---\n'.join(keep))
+PY
+[ -s "$crds_yaml" ] || { echo "no source.toolkit CRDs found in Flux ${VERSION} install.yaml" >&2; exit 1; }
+
+# Server-side apply: the real source CRDs are large and would blow the
+# client-side last-applied-configuration annotation size limit.
+kubectl apply --server-side -f "$crds_yaml"
+for plural in gitrepositories ocirepositories buckets externalartifacts; do
   kubectl wait --for=condition=Established \
     "crd/${plural}.source.toolkit.fluxcd.io" --timeout=60s
 done
