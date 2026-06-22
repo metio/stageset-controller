@@ -282,6 +282,7 @@ type Action struct {
 
 	// Retries before the action is considered failed.
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
 	// +optional
 	Retries *int32 `json:"retries,omitempty"`
 
