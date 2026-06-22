@@ -3,10 +3,20 @@
 
 // Package decryptor decrypts SOPS-encrypted files in a fetched artifact before
 // the manifests are built and applied. Decryption happens at build time so an
-// encrypted Secret renders to its plaintext form for server-side apply; the
-// decrypted bytes live only in memory on the apply path. The rollback store,
-// which keeps rendered output, is encrypted at rest (see internal/rollbackstore)
-// so this never lands plaintext on disk.
+// encrypted Secret renders to its plaintext form for server-side apply.
+//
+// Plaintext handling — where decrypted Secret data lives, so operators can size
+// the trust boundary correctly:
+//
+//   - During the kustomize build the decrypted files are written to a private
+//     temp tree (mode-0700 dir, 0600 files) and removed when the build returns;
+//     they are not held purely in memory.
+//   - The rollback store keeps rendered output, which can include that plaintext.
+//     The S3 backend encrypts it at rest via server-side encryption
+//     (--rollback-store-s3-sse, on by default). The filesystem backend writes it
+//     verbatim and adds no application-level encryption — at-rest protection
+//     there rests on the PersistentVolume's own encryption and RBAC, so use an
+//     encrypted volume (or the S3 backend) when the store holds Secret data.
 //
 // Three key paths resolve a file's data key:
 //
