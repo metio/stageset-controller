@@ -70,6 +70,24 @@ func TestCompileError(t *testing.T) {
 	}
 }
 
+// TestCompile_RejectsNonBoolResult pins that an expression whose static result
+// type is a concrete non-bool is rejected at compile time (it would otherwise
+// only fail at eval, which pollers read as "not yet satisfied" → silent
+// timeout). bool and dyn (bare field access on dyn-typed status) stay valid.
+func TestCompile_RejectsNonBoolResult(t *testing.T) {
+	t.Parallel()
+	for _, expr := range []string{"1 + 2", `"ready"`, "size(spec.items)"} {
+		if _, err := Compile(expr); err == nil {
+			t.Errorf("Compile(%q) = nil, want a non-bool-result error", expr)
+		}
+	}
+	for _, expr := range []string{"true", `status.phase == "Running"`, "status.ready", "status.replicas == status.readyReplicas"} {
+		if _, err := Compile(expr); err != nil {
+			t.Errorf("Compile(%q) = %v, want nil (bool/dyn is valid)", expr, err)
+		}
+	}
+}
+
 // TestEvalBool_CostLimitBoundsExpensiveExpression pins that a nested
 // comprehension is aborted by the runtime cost limit rather than running
 // unbounded — the CPU-pinning defence for remote-authored (sourced-ladder) wait
