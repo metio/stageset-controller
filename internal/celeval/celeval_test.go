@@ -69,3 +69,25 @@ func TestCompileError(t *testing.T) {
 		t.Fatal("expected a compile error for a malformed expression")
 	}
 }
+
+// TestEvalBool_CostLimitBoundsExpensiveExpression pins that a deliberately
+// expensive expression over a large input is aborted by the runtime cost limit
+// rather than running unbounded — the CPU-pinning defence for remote-authored
+// (sourced-ladder) wait expressions.
+func TestEvalBool_CostLimitBoundsExpensiveExpression(t *testing.T) {
+	t.Parallel()
+	// A nested comprehension across a large list: cost grows multiplicatively.
+	big := make([]any, 4000)
+	for i := range big {
+		big[i] = int64(i)
+	}
+	obj := map[string]any{"status": map[string]any{"xs": big}}
+
+	p, err := Compile(`status.xs.all(a, status.xs.exists(b, a == b))`)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if _, err := p.EvalBool(obj); err == nil {
+		t.Fatal("expected the cost limit to abort the expensive evaluation, got nil error")
+	}
+}
