@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"pgregory.net/rapid"
@@ -86,6 +87,28 @@ func TestListStageSets_ClientError(t *testing.T) {
 	}
 	if res == nil || !res.IsError {
 		t.Fatalf("expected IsError on List failure, got %+v", res)
+	}
+}
+
+// TestListStageSets_ClusterWideForbiddenHints pins that a Forbidden on the
+// cluster-wide list (a namespace-scoped controller SA) returns a hint to pass an
+// explicit namespace rather than a bare denial.
+func TestListStageSets_ClusterWideForbiddenHints(t *testing.T) {
+	forbidden := apierrors.NewForbidden(stagesv1.GroupVersion.WithResource("stagesets").GroupResource(), "", nil)
+	c := failingClient(t, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+			return forbidden
+		},
+	})
+	res, _, err := Config{KubeClient: c}.listStageSetsHandler(context.Background(), nil, listStageSetsInput{})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected IsError, got %+v", res)
+	}
+	if !strings.Contains(textContent(t, res), "pass an explicit namespace") {
+		t.Fatalf("error should hint at an explicit namespace, got %q", textContent(t, res))
 	}
 }
 
