@@ -195,6 +195,56 @@ func TestHTTPAction_AllowedHostStillDials(t *testing.T) {
 	}
 }
 
+// TestHTTPAction_CrossHostRedirectDoesNotLeakSecretHeader pins that a secret
+// header is never delivered to a cross-host redirect target: the action carries
+// X-Api-Key from a Secret, the first host 302s to a different host, and the
+// client must refuse to follow rather than forward the credential.
+func TestHTTPAction_CrossHostRedirectDoesNotLeakSecretHeader(t *testing.T) {
+	t.Parallel()
+	var leaked int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "" {
+			atomic.AddInt32(&leaked, 1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Redirect(w, nil, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("corev1 AddToScheme: %v", err)
+	}
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "ns"},
+		Data:       map[string][]byte{"X-Api-Key": []byte("SECRET-TOKEN")},
+	}
+	e := &Executor{
+		Client:       fake.NewClientBuilder().WithScheme(scheme).WithObjects(sec).Build(),
+		AllowedHosts: []string{hostOf(t, redirector.URL), hostOf(t, target.URL)},
+		IPValidator:  PermissiveIP,
+		lookupIP: func(_ context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(context.Background(), "ip", host)
+		},
+	}
+	err := e.Run(context.Background(), "ns", []stagesv1.Action{{
+		Name: "notify",
+		HTTP: &stagesv1.HTTPAction{
+			URL:         redirector.URL,
+			HeadersFrom: []meta.SecretKeyReference{{Name: "creds", Key: "X-Api-Key"}},
+		},
+	}}, nil, nil)
+	if err == nil {
+		t.Fatal("a cross-host redirect carrying a secret header must fail, not be followed")
+	}
+	if atomic.LoadInt32(&leaked) != 0 {
+		t.Fatal("secret X-Api-Key header was delivered to the cross-host redirect target")
+	}
+}
+
 func TestRun_WaitDuration(t *testing.T) {
 	t.Parallel()
 	e := &Executor{}
