@@ -278,7 +278,8 @@ func (e *Executor) httpCall(ctx context.Context, ns string, h *stagesv1.HTTPActi
 		req.Header.Set(ref.Key, v)
 	}
 
-	resp, err := e.httpClient().Do(req)
+	hasSecrets := h.BodyFrom != nil || len(h.HeadersFrom) > 0
+	resp, err := e.httpClient(req.URL.Host, hasSecrets).Do(req)
 	if err != nil {
 		return err
 	}
@@ -556,7 +557,7 @@ func (e *Executor) allowedURL(raw string) error {
 	return nil
 }
 
-func (e *Executor) httpClient() *http.Client {
+func (e *Executor) httpClient(origHost string, hasSecrets bool) *http.Client {
 	if e.HTTPClient != nil {
 		return e.HTTPClient
 	}
@@ -568,6 +569,17 @@ func (e *Executor) httpClient() *http.Client {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("stopped after 10 redirects")
+			}
+			// Go forwards explicitly-set request headers (and replays the body on
+			// 307/308) to redirect targets — it only strips Authorization/Cookie
+			// on a host change, not custom headers like X-Api-Key. When the action
+			// carries secret material (HeadersFrom / BodyFrom) and the redirect
+			// crosses to a different host, refuse to follow it: a compromised or
+			// malicious endpoint could otherwise 30x us to an attacker host and
+			// harvest the tenant's secret. Same-host redirects (path or
+			// http→https) still carry the credentials, which is intended.
+			if hasSecrets && req.URL.Host != origHost {
+				return fmt.Errorf("refusing cross-host redirect to %q: the action's secret headers/body must not be sent to a different host", req.URL.Host)
 			}
 			return e.allowedURL(req.URL.String())
 		},
