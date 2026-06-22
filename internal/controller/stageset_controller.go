@@ -463,10 +463,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Single-stage force-reconcile: when the stages.metio.wtf/reconcile-stage
 	// token is unhandled for a known stage, clear that stage's action ledger so
-	// its pre/post actions and stage-anchored migrations re-run this pass, even
-	// though the pinned revision is unchanged. The token is recorded on the
-	// stage's status only on success (lastHandledFor), so a forced stage that
-	// fails retries on the next reconcile.
+	// its pre/post actions re-run this pass, even though the pinned revision is
+	// unchanged. Migration ledgers are NOT cleared here — completed migrations
+	// stay completed across a force (only a version advance re-runs them); a
+	// force with no version change has no newly-pending migrations anyway. The
+	// token is recorded on the stage's status only on success (lastHandledFor),
+	// so a forced stage that fails retries on the next reconcile.
 	forceStage, forceToken := parseReconcileStage(&ss)
 	if prior, ok := priorStages[forceStage]; forceStage == "" || !ok || prior.LastHandledReconcileAt == forceToken {
 		forceStage, forceToken = "", ""
@@ -1462,10 +1464,14 @@ func isReady(ss *stagesv1.StageSet) bool {
 }
 
 func stageTimeout(ss *stagesv1.StageSet, stage *stagesv1.Stage) time.Duration {
-	if stage.Timeout != nil {
+	// A non-positive timeout is treated as unset, not "expire immediately": a
+	// zero duration would make the verify wait's context expire at once and fail
+	// every wait-enabled stage instantly. Fall through to the next level so an
+	// explicit 0s means "use the default" as operators expect.
+	if stage.Timeout != nil && stage.Timeout.Duration > 0 {
 		return stage.Timeout.Duration
 	}
-	if ss.Spec.Timeout != nil {
+	if ss.Spec.Timeout != nil && ss.Spec.Timeout.Duration > 0 {
 		return ss.Spec.Timeout.Duration
 	}
 	return 5 * time.Minute
