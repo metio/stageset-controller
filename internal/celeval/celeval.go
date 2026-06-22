@@ -52,6 +52,15 @@ func compileWithCost(expr string, costLimit uint64) (*Program, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, fmt.Errorf("compile CEL %q: %w", expr, iss.Err())
 	}
+	// Reject an expression whose static result type is a concrete non-bool (e.g.
+	// `size(spec.items)` or `status.phase`): EvalBool would only fail at runtime,
+	// which pollers read as "not satisfied yet", so a fat-fingered wait condition
+	// would silently time out instead of erroring. bool is obviously fine; dyn is
+	// allowed because spec/status are dyn-typed, so a bare bool field access
+	// (`status.ready`) is statically dyn and resolves at eval time.
+	if k := ast.OutputType().String(); k != "bool" && k != "dyn" {
+		return nil, fmt.Errorf("CEL %q must evaluate to bool, but its result type is %s", expr, k)
+	}
 	program, err := env.Program(ast, cel.CostLimit(costLimit))
 	if err != nil {
 		return nil, fmt.Errorf("build CEL program: %w", err)
