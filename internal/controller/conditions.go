@@ -132,6 +132,17 @@ const (
 	// names the call so kubectl describe sends operators straight to the fix.
 	ReasonRBACDenied = "RBACDenied"
 
+	// ReasonSoaking: a stage is applied and healthy and the rollout is holding
+	// through that stage's promotion soak window before advancing. Ready=False
+	// while the rollout is mid-flight; drift on the soaking stage keeps being
+	// corrected. Self-resumes when the soak elapses.
+	ReasonSoaking = "Soaking"
+
+	// ReasonAwaitingPromotion: a stage with requireManualPromotion is applied
+	// and healthy, holding until an operator promotes it (stagesetctl promote).
+	// Ready=False until promoted; the stage stays applied meanwhile.
+	ReasonAwaitingPromotion = "AwaitingPromotion"
+
 	// ReasonReady: all stages applied and verified at lastAppliedRevisions.
 	ReasonReady = "Succeeded"
 )
@@ -163,5 +174,7 @@ var AllReasons = []string{
 	ReasonUpdateDeferred,
 	ReasonStageFailed,
 	ReasonRBACDenied,
+	ReasonSoaking,
+	ReasonAwaitingPromotion,
 	ReasonReady,
 }

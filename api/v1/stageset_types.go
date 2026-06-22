@@ -196,6 +196,36 @@ type Stage struct {
 	// ReadyChecks gate stage completion; purely observational.
 	// +optional
 	ReadyChecks *ReadyChecks `json:"readyChecks,omitempty"`
+
+	// Promotion gates advancement from this stage to the next one. Unlike
+	// ReadyChecks (which decide whether the just-applied objects became Ready),
+	// a promotion gate decides whether a healthy, applied stage is allowed to
+	// advance the rollout. Holding a promotion gate parks the rollout at this
+	// stage — the stage stays applied and its drift keeps being corrected — and
+	// never touches later stages.
+	// +optional
+	Promotion *StagePromotion `json:"promotion,omitempty"`
+}
+
+// StagePromotion gates advancement past a stage. Every mechanism is optional;
+// with none set the stage advances as soon as it is Ready (the default).
+type StagePromotion struct {
+	// Soak holds the rollout at this stage for the given duration after it
+	// becomes Ready, advancing only if it stays healthy for the whole window.
+	// This catches delayed regressions (OOM after warm-up, error-rate creep,
+	// crashloop-after-N-minutes) that point-in-time ReadyChecks miss. The soak
+	// gates only advancement to the next stage; drift on this stage's applied
+	// revision keeps being corrected during the window. Defaults to no soak.
+	// +optional
+	Soak *metav1.Duration `json:"soak,omitempty"`
+
+	// RequireManualPromotion holds the rollout at this stage until an operator
+	// promotes it with `stagesetctl promote NAME --stage <name>` (which stamps
+	// the stages.metio.wtf/promote annotation). Kept distinct from a migration's
+	// RequireApproval (which gates a version transition, not a stage advance).
+	// Defaults to false.
+	// +optional
+	RequireManualPromotion bool `json:"requireManualPromotion,omitempty"`
 }
 
 // SourceReference names either an ExternalArtifact directly (the default
@@ -896,6 +926,48 @@ type StageStatus struct {
 	// new token, the per-stage analogue of lastHandledReconcileAt.
 	// +optional
 	LastHandledReconcileAt string `json:"lastHandledReconcileAt,omitempty"`
+
+	// PromotionState reports where this stage stands against its promotion gate
+	// (soak / manual). Absent when the stage has no promotion gate.
+	// +optional
+	PromotionState *PromotionState `json:"promotionState,omitempty"`
+
+	// LastHandledPromotion is the stages.metio.wtf/promote token this stage most
+	// recently acted on, so a manual promotion fires exactly once per new token.
+	// +optional
+	LastHandledPromotion string `json:"lastHandledPromotion,omitempty"`
+}
+
+// PromotionPhase is where a stage stands against its promotion gate.
+type PromotionPhase string
+
+const (
+	// PromotionSoaking means the stage is applied and healthy and the rollout is
+	// holding through its soak window before advancing.
+	PromotionSoaking PromotionPhase = "Soaking"
+	// PromotionAwaitingManual means the stage is waiting for an operator to
+	// promote it (RequireManualPromotion).
+	PromotionAwaitingManual PromotionPhase = "AwaitingManual"
+	// PromotionPromoted means the stage cleared its promotion gate and the
+	// rollout has advanced past it.
+	PromotionPromoted PromotionPhase = "Promoted"
+)
+
+// PromotionState reports a stage's promotion-gate progress. It is keyed to the
+// stage's applied revision: a new revision restarts the soak from scratch.
+type PromotionState struct {
+	// Phase is the current promotion phase.
+	// +optional
+	Phase PromotionPhase `json:"phase,omitempty"`
+
+	// Since is when the current phase began. For Soaking it marks the soak
+	// start, so the soak deadline is Since + spec soak.
+	// +optional
+	Since *metav1.Time `json:"since,omitempty"`
+
+	// SoakUntil is the instant the soak window closes (Soaking only).
+	// +optional
+	SoakUntil *metav1.Time `json:"soakUntil,omitempty"`
 }
 
 // +kubebuilder:object:root=true

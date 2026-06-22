@@ -85,10 +85,28 @@ var (
 		Name: "stageset_stage_ready",
 		Help: "Whether a stage is Ready (1) or not (0) at the current observed state.",
 	}, []string{"namespace", "stageset", "stage"})
+
+	// StagePromotionPending is 1 while a stage is applied and healthy but held by
+	// its promotion gate (soaking or awaiting a manual promote), 0 once promoted
+	// or when the stage has no gate. A sustained 1 is the alertable "a rollout is
+	// parked waiting to advance" signal.
+	StagePromotionPending = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "stageset_stage_promotion_pending",
+		Help: "Whether a stage is held by its promotion gate (1) or not (0).",
+	}, []string{"namespace", "stageset", "stage"})
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending)
+}
+
+// SetStagePromotionPending publishes the promotion-gate gauge for one stage.
+func SetStagePromotionPending(namespace, stageset, stage string, pending bool) {
+	v := 0.0
+	if pending {
+		v = 1
+	}
+	StagePromotionPending.WithLabelValues(namespace, stageset, stage).Set(v)
 }
 
 // SetStageReady publishes the readiness gauge for one stage.
@@ -104,6 +122,7 @@ func SetStageReady(namespace, stageset, stage string, ready bool) {
 // deleted StageSet does not leave a stale gauge behind.
 func DeleteStageReady(namespace, stageset string) {
 	StageReady.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": stageset})
+	StagePromotionPending.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": stageset})
 }
 
 // DeleteStageReadyForStage removes the readiness series for a single stage. It
@@ -111,6 +130,7 @@ func DeleteStageReady(namespace, stageset string) {
 // metric-based rollout gate doesn't keep reading a phantom stage's last value.
 func DeleteStageReadyForStage(namespace, stageset, stage string) {
 	StageReady.DeleteLabelValues(namespace, stageset, stage)
+	StagePromotionPending.DeleteLabelValues(namespace, stageset, stage)
 }
 
 // DeleteStageSetMetrics evicts every per-StageSet operational time series so a

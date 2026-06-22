@@ -164,6 +164,7 @@ func newRootCommand(o *options) *cobra.Command {
 	root.AddCommand(newDiffCommand(o))
 	root.AddCommand(newApplyCommand(o))
 	root.AddCommand(newReconcileCommand(o))
+	root.AddCommand(newPromoteCommand(o))
 	root.AddCommand(newLintMigrationsCommand(o))
 
 	return root
