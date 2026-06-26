@@ -81,10 +81,10 @@ func TestTeardownTimedOut(t *testing.T) {
 		want      bool
 	}{
 		{"not deleting", nil, time.Hour, false},
-		{"within wait", ptrTime(now.Add(-30 * time.Minute)), time.Hour, false},
-		{"past wait", ptrTime(now.Add(-2 * time.Hour)), time.Hour, true},
-		{"zero wait falls back to default (1h), within", ptrTime(now.Add(-30 * time.Minute)), 0, false},
-		{"zero wait falls back to default (1h), past", ptrTime(now.Add(-90 * time.Minute)), 0, true},
+		{"within wait", new(now.Add(-30 * time.Minute)), time.Hour, false},
+		{"past wait", new(now.Add(-2 * time.Hour)), time.Hour, true},
+		{"zero wait falls back to default (1h), within", new(now.Add(-30 * time.Minute)), 0, false},
+		{"zero wait falls back to default (1h), past", new(now.Add(-90 * time.Minute)), 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,8 +101,6 @@ func TestTeardownTimedOut(t *testing.T) {
 		})
 	}
 }
-
-func ptrTime(t time.Time) *time.Time { return &t }
 
 // A teardown failure within the wait window keeps the finalizer and returns the
 // error so controller-runtime retries.

@@ -99,7 +99,7 @@ func TestWebhook_RejectsInvalidAction(t *testing.T) {
 	// is up and accepting first).
 	var lastErr error
 	ready := false
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if err := c.Create(ctx, valid(fmt.Sprintf("valid-%d", i))); err == nil {
 			ready = true
 			break

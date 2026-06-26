@@ -93,7 +93,7 @@ func TestSelect_Property(t *testing.T) {
 
 		n := rapid.IntRange(0, 6).Draw(rt, "count")
 		migs := make([]stagesv1.Migration, 0, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			m := stagesv1.Migration{Name: fmt.Sprintf("m%d", i), To: ver.Draw(rt, fmt.Sprintf("to%d", i)), Stage: "s"}
 			if rapid.Bool().Draw(rt, fmt.Sprintf("hasFrom%d", i)) {
 				m.From = fmt.Sprintf(">=%d.0.0", rapid.IntRange(0, 4).Draw(rt, fmt.Sprintf("fromMajor%d", i)))

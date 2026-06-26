@@ -482,8 +482,8 @@ func dropSupersededLedger(entries []string, name, keep string, action bool) []st
 	for _, e := range entries {
 		migKey := e
 		if action {
-			if i := strings.IndexByte(e, '/'); i >= 0 {
-				migKey = e[:i]
+			if before, _, ok := strings.Cut(e, "/"); ok {
+				migKey = before
 			}
 		}
 		if migEntryName(migKey) == name && migKey != keep {
@@ -497,8 +497,8 @@ func dropSupersededLedger(entries []string, name, keep string, action bool) []st
 // migEntryName returns the migration name from a "name@digest" migKey. Migration
 // names are DNS-1123 (no "@"), so the name is the part before the first "@".
 func migEntryName(migKey string) string {
-	if i := strings.IndexByte(migKey, '@'); i >= 0 {
-		return migKey[:i]
+	if before, _, ok := strings.Cut(migKey, "@"); ok {
+		return before
 	}
 	return migKey
 }
@@ -509,8 +509,8 @@ func actionsDoneFor(ledger []string, migKey string) map[string]bool {
 	prefix := migKey + "/"
 	done := make(map[string]bool)
 	for _, e := range ledger {
-		if strings.HasPrefix(e, prefix) {
-			done[strings.TrimPrefix(e, prefix)] = true
+		if after, ok := strings.CutPrefix(e, prefix); ok {
+			done[after] = true
 		}
 	}
 	return done

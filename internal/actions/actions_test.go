@@ -199,10 +199,10 @@ func TestHTTPAction_AllowedHostStillDials(t *testing.T) {
 // client must refuse to follow rather than forward the credential.
 func TestHTTPAction_CrossHostRedirectDoesNotLeakSecretHeader(t *testing.T) {
 	t.Parallel()
-	var leaked int32
+	var leaked atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Api-Key") != "" {
-			atomic.AddInt32(&leaked, 1)
+			leaked.Add(1)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -238,7 +238,7 @@ func TestHTTPAction_CrossHostRedirectDoesNotLeakSecretHeader(t *testing.T) {
 	if err == nil {
 		t.Fatal("a cross-host redirect carrying a secret header must fail, not be followed")
 	}
-	if atomic.LoadInt32(&leaked) != 0 {
+	if leaked.Load() != 0 {
 		t.Fatal("secret X-Api-Key header was delivered to the cross-host redirect target")
 	}
 }
@@ -598,16 +598,18 @@ func TestPollExpr_TimesOutWhenNeverSatisfied(t *testing.T) {
 }
 
 // ptrInt32 returns a pointer to v for action retry counts.
-func ptrInt32(v int32) *int32 { return &v }
+//
+//go:fix inline
+func ptrInt32(v int32) *int32 { return new(v) }
 
 // TestRun_HTTPClientErrorTerminal proves a deterministic 4xx is terminal: the
 // server is hit exactly once even though retries are configured, and the error
 // carries ErrHTTPClientStatus, the host, and the response body snippet.
 func TestRun_HTTPClientErrorTerminal(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte("malformed payload"))
 	}))
@@ -619,7 +621,7 @@ func TestRun_HTTPClientErrorTerminal(t *testing.T) {
 	if !errors.Is(err, ErrHTTPClientStatus) {
 		t.Fatalf("want ErrHTTPClientStatus, got %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Fatalf("a deterministic 4xx must not retry: hits=%d, want 1", got)
 	}
 	host := hostOf(t, srv.URL)
@@ -646,9 +648,9 @@ func TestRun_HTTPServerErrorRetries(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var hits int32
+			var hits atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				atomic.AddInt32(&hits, 1)
+				hits.Add(1)
 				w.WriteHeader(tc.code)
 			}))
 			defer srv.Close()
@@ -662,7 +664,7 @@ func TestRun_HTTPServerErrorRetries(t *testing.T) {
 				t.Fatalf("status %d must not be classified terminal client-error: %v", tc.code, err)
 			}
 			// 1 initial + 2 retries.
-			if got := atomic.LoadInt32(&hits); got != 3 {
+			if got := hits.Load(); got != 3 {
 				t.Fatalf("a retryable status should retry: hits=%d, want 3", got)
 			}
 		})

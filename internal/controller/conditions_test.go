@@ -43,13 +43,13 @@ func TestAllReasons_CoversEveryConstant(t *testing.T) {
 		t.Fatalf("read conditions.go: %v", err)
 	}
 	var declared []string
-	for _, line := range strings.Split(string(src), "\n") {
+	for line := range strings.SplitSeq(string(src), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "Reason") {
 			continue
 		}
-		if eq := strings.Index(line, "="); eq >= 0 {
-			declared = append(declared, strings.TrimSpace(line[:eq]))
+		if before, _, ok := strings.Cut(line, "="); ok {
+			declared = append(declared, strings.TrimSpace(before))
 		}
 	}
 	if len(declared) != len(AllReasons) {

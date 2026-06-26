@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -178,12 +179,7 @@ func TestReconcile_FinalizerAddRequeues(t *testing.T) {
 }
 
 func controllerContainsFinalizer(ss *stagesv1.StageSet) bool {
-	for _, f := range ss.GetFinalizers() {
-		if f == FinalizerName {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss.GetFinalizers(), FinalizerName)
 }
 
 func makeTarGz(t *testing.T, files map[string]string) []byte {

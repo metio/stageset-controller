@@ -29,8 +29,7 @@ func cmRef(name string) (inventory.ObjectRef, *corev1.ConfigMap) {
 }
 
 // pruneBool returns a *bool for the spec.prune field.
-func pruneBool(b bool) *bool { return &b }
-
+//
 // seedInventory writes a stage's stored inventory via the Recorder so the shard
 // CRs carry the exact labels and entry encoding the production path produces.
 func seedInventory(t *testing.T, c client.Client, ss *stagesv1.StageSet, stage string, position int, refs ...inventory.ObjectRef) {
@@ -79,7 +78,7 @@ func TestPrunePlan_PruneDisabledStageSkipped(t *testing.T) {
 	dropRef, dropCM := cmRef("drop")
 
 	ss := stageSet("s1")
-	ss.Spec.Stages[0].Prune = pruneBool(false)
+	ss.Spec.Stages[0].Prune = new(false)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(keepCM, dropCM).Build()
 	seedInventory(t, c, ss, "s1", 0, keepRef, dropRef)
 
@@ -261,7 +260,7 @@ func TestPrunePlan_SortedByStageThenRef(t *testing.T) {
 // prune (its teardown is governed elsewhere).
 func TestPruneEnabled_Defaults(t *testing.T) {
 	ss := stageSet("on", "off")
-	ss.Spec.Stages[1].Prune = pruneBool(false)
+	ss.Spec.Stages[1].Prune = new(false)
 
 	if !pruneEnabled(ss, "on") {
 		t.Error("nil prune toggle must default to true")

@@ -275,7 +275,7 @@ func FuzzRenderManifestsSeparator(f *testing.F) {
 		// placeholder, so a containment hit means the value itself survived.
 		plaintext := "FUZZSENTINEL\x00" + secretVal
 		objs := make([]*unstructured.Unstructured, 0, count)
-		for i := 0; i < count; i++ {
+		for range count {
 			objs = append(objs, secretWith(plaintext))
 		}
 

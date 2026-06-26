@@ -324,8 +324,8 @@ func readArtifact(obj *unstructured.Unstructured) (ResolvedArtifact, error) {
 // groupOf returns the group of an apiVersion ("group/version" -> "group";
 // a bare "v1" core version -> "").
 func groupOf(apiVersion string) string {
-	if i := strings.IndexByte(apiVersion, '/'); i >= 0 {
-		return apiVersion[:i]
+	if before, _, ok := strings.Cut(apiVersion, "/"); ok {
+		return before
 	}
 	return ""
 }

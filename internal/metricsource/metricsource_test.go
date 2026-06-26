@@ -16,8 +16,6 @@ import (
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
-func ptr(s string) *string { return &s }
-
 func promServer(t *testing.T, body string, status int) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,12 +166,12 @@ func TestThresholdSatisfied(t *testing.T) {
 		want  bool
 	}{
 		{"no bounds", stagesv1.Threshold{}, 5, true},
-		{"max ok", stagesv1.Threshold{Max: ptr("0.01")}, 0.005, true},
-		{"max breached", stagesv1.Threshold{Max: ptr("0.01")}, 0.02, false},
-		{"max boundary inclusive", stagesv1.Threshold{Max: ptr("0.01")}, 0.01, true},
-		{"min ok", stagesv1.Threshold{Min: ptr("0.05")}, 0.1, true},
-		{"min breached", stagesv1.Threshold{Min: ptr("0.05")}, 0.01, false},
-		{"both ok", stagesv1.Threshold{Min: ptr("0"), Max: ptr("1")}, 0.5, true},
+		{"max ok", stagesv1.Threshold{Max: new("0.01")}, 0.005, true},
+		{"max breached", stagesv1.Threshold{Max: new("0.01")}, 0.02, false},
+		{"max boundary inclusive", stagesv1.Threshold{Max: new("0.01")}, 0.01, true},
+		{"min ok", stagesv1.Threshold{Min: new("0.05")}, 0.1, true},
+		{"min breached", stagesv1.Threshold{Min: new("0.05")}, 0.01, false},
+		{"both ok", stagesv1.Threshold{Min: new("0"), Max: new("1")}, 0.5, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,10 +187,10 @@ func TestThresholdSatisfied(t *testing.T) {
 }
 
 func TestThresholdSatisfied_BadBound(t *testing.T) {
-	if _, err := ThresholdSatisfied(stagesv1.Threshold{Max: ptr("abc")}, 1); err == nil {
+	if _, err := ThresholdSatisfied(stagesv1.Threshold{Max: new("abc")}, 1); err == nil {
 		t.Fatal("want error for unparseable max")
 	}
-	if _, err := ThresholdSatisfied(stagesv1.Threshold{Min: ptr("abc")}, 1); err == nil {
+	if _, err := ThresholdSatisfied(stagesv1.Threshold{Min: new("abc")}, 1); err == nil {
 		t.Fatal("want error for unparseable min")
 	}
 }

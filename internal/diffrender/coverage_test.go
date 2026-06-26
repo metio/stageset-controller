@@ -495,7 +495,7 @@ func TestRenderDiff_CreateShowsOnlyAdditions(t *testing.T) {
 		t.Errorf("create body has no added lines:\n%s", out)
 	}
 	// No removal gutter lines (a single "-", not the "---" file header).
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
 			t.Errorf("create body has a removal line %q:\n%s", line, out)
 		}
@@ -672,7 +672,7 @@ func TestToYAML_StableAcrossInvocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		again, err := ToYAML(obj)
 		if err != nil {
 			t.Fatal(err)

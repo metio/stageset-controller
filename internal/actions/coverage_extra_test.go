@@ -389,9 +389,9 @@ func TestWait_DurationContextCancelled(t *testing.T) {
 // the first attempt, then a 200, succeeds within the retry budget.
 func TestExec_RetriesThenSucceeds(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if atomic.AddInt32(&hits, 1) == 1 {
+		if hits.Add(1) == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -405,7 +405,7 @@ func TestExec_RetriesThenSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a transient failure that recovers must succeed within the budget: %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Fatalf("expected one failure then one success, hits=%d", got)
 	}
 }

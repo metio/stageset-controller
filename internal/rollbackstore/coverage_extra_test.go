@@ -244,8 +244,8 @@ func dechunk(body []byte) []byte {
 		header := strings.TrimRight(string(body[:nl]), "\r")
 		body = body[nl+1:]
 		sizeHex := header
-		if i := strings.IndexByte(header, ';'); i >= 0 {
-			sizeHex = header[:i]
+		if before, _, ok := strings.Cut(header, ";"); ok {
+			sizeHex = before
 		}
 		size := parseHex(sizeHex)
 		if size == 0 {
@@ -287,8 +287,8 @@ func parseHex(s string) int {
 // object name the client addressed.
 func objectKeyFromPath(u *url.URL) string {
 	p := strings.TrimPrefix(u.EscapedPath(), "/")
-	if i := strings.IndexByte(p, '/'); i >= 0 {
-		return p[i+1:]
+	if _, after, ok := strings.Cut(p, "/"); ok {
+		return after
 	}
 	return ""
 }

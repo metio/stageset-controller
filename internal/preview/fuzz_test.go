@@ -101,7 +101,7 @@ func FuzzReadDirFiles(f *testing.F) {
 		// That's an OS limit, not a readDirFiles property — which only ever reads
 		// files that already exist on disk — so skip such inputs rather than fail
 		// the harness on its own setup.
-		for _, seg := range strings.Split(clean, "/") {
+		for seg := range strings.SplitSeq(clean, "/") {
 			if len(seg) > 255 {
 				return
 			}
@@ -139,7 +139,7 @@ func FuzzReadDirFiles(f *testing.F) {
 			// A ".." path *segment* would escape the root; a filename that merely
 			// contains ".." (e.g. "..0", "a..b") is a legitimate entry and must
 			// not trip this check.
-			for _, seg := range strings.Split(k, "/") {
+			for seg := range strings.SplitSeq(k, "/") {
 				if seg == ".." {
 					t.Fatalf("key %q escapes the root", k)
 				}
@@ -150,7 +150,7 @@ func FuzzReadDirFiles(f *testing.F) {
 
 func splitNonEmpty(csv string) []string {
 	var out []string
-	for _, p := range strings.Split(csv, ",") {
+	for p := range strings.SplitSeq(csv, ",") {
 		if p != "" {
 			out = append(out, p)
 		}
@@ -173,7 +173,7 @@ func specIndex(names []string, name string) int {
 func sanitizeRel(rel string) string {
 	rel = strings.ReplaceAll(rel, "\\", "/")
 	var segs []string
-	for _, seg := range strings.Split(rel, "/") {
+	for seg := range strings.SplitSeq(rel, "/") {
 		if seg == "" || seg == "." || seg == ".." {
 			continue
 		}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"sort"
 	"strings"
@@ -1634,11 +1635,11 @@ func dependsOnKeys(ss *stagesv1.StageSet) []string {
 }
 
 func splitKey(k string) (ns, name string, ok bool) {
-	i := strings.IndexByte(k, '/')
-	if i < 0 {
+	before, after, ok := strings.Cut(k, "/")
+	if !ok {
 		return "", "", false
 	}
-	return k[:i], k[i+1:], true
+	return before, after, true
 }
 
 func isReady(ss *stagesv1.StageSet) bool {
@@ -1679,9 +1680,7 @@ func (r *StageSetReconciler) resolvePostBuildVars(ctx context.Context, ns string
 				}
 				return nil, fmt.Errorf("substituteFrom ConfigMap %q: %w", ref.Name, err)
 			}
-			for k, v := range cm.Data {
-				vars[k] = v
-			}
+			maps.Copy(vars, cm.Data)
 		case "Secret":
 			var sec corev1.Secret
 			if err := r.Get(ctx, key, &sec); err != nil {
@@ -1695,9 +1694,7 @@ func (r *StageSetReconciler) resolvePostBuildVars(ctx context.Context, ns string
 			}
 		}
 	}
-	for k, v := range pb.Substitute {
-		vars[k] = v
-	}
+	maps.Copy(vars, pb.Substitute)
 	return vars, nil
 }
 
@@ -1938,8 +1935,8 @@ func (r *StageSetReconciler) mapProducer(ctx context.Context, obj client.Object)
 }
 
 func groupOf(apiVersion string) string {
-	if i := strings.IndexByte(apiVersion, '/'); i >= 0 {
-		return apiVersion[:i]
+	if before, _, ok := strings.Cut(apiVersion, "/"); ok {
+		return before
 	}
 	return ""
 }

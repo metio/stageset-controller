@@ -416,7 +416,7 @@ func TestNewToken_FormatAndUniqueness(t *testing.T) {
 	// Two successive tokens must differ. RFC3339Nano keeps nanosecond
 	// resolution, but to avoid any clock-granularity flakiness, retry briefly.
 	prev := tok
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		next := newToken()
 		if next != prev {
 			return
