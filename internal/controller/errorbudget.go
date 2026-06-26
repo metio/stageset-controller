@@ -40,7 +40,7 @@ func (r *StageSetReconciler) readSecretData(ctx context.Context, namespace, name
 // gateErrorBudget decides whether this run may proceed past the rollout-wide
 // error-budget freeze. It returns deferred=true (with a requeue result) when the
 // freeze holds a new-revision rollout; the caller then returns without applying.
-// It is evaluated beside gateUpdateWindows and ANDed with it.
+// It is evaluated beside gateUpdateWindows and combined with it under AND.
 //
 // The freeze holds only NEW-revision rollouts (mirroring windowScope's Updates
 // default): a frozen service still has its declared state enforced, so drift on
@@ -61,7 +61,7 @@ func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpa
 		return ctrl.Result{}, false, nil
 	}
 
-	freezeThr, resumeThr, perr := budgetThresholds(eb)
+	freezeAt, resumeAt, perr := budgetThresholds(eb)
 	if perr != nil {
 		// A malformed threshold normally fails admission; this is the fallback.
 		r.setReady(ss, metav1.ConditionFalse, ReasonInvalidSpec, fmt.Sprintf("spec.errorBudget: %v", perr))
@@ -113,9 +113,9 @@ func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpa
 	// Hysteresis: once frozen, stay frozen until the budget recovers to
 	// resumeThreshold; otherwise freeze when it drops below freezeThreshold.
 	wasFrozen := ss.Status.BudgetFreeze != nil
-	shouldFreeze := value < freezeThr
+	shouldFreeze := value < freezeAt
 	if wasFrozen {
-		shouldFreeze = value < resumeThr
+		shouldFreeze = value < resumeAt
 	}
 
 	if !shouldFreeze {
@@ -131,7 +131,7 @@ func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpa
 	ss.Status.BudgetFreeze = &stagesv1.BudgetFreeze{
 		Remaining:       strconv.FormatFloat(value, 'f', -1, 64),
 		FreezeThreshold: eb.FreezeThreshold,
-		ResumeThreshold: resumeThr3(eb),
+		ResumeThreshold: effectiveResume(eb),
 		Since:           &since,
 		DryRun:          eb.DryRun,
 	}
@@ -148,7 +148,7 @@ func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpa
 
 	metrics.SetBudgetFrozen(ss.Namespace, ss.Name, true)
 	msg := fmt.Sprintf("error budget exhausted: remaining %s < freezeThreshold %s; new-revision rollouts are frozen until it recovers to %s",
-		ss.Status.BudgetFreeze.Remaining, eb.FreezeThreshold, resumeThr3(eb))
+		ss.Status.BudgetFreeze.Remaining, eb.FreezeThreshold, effectiveResume(eb))
 	return r.deferBudget(ctx, helper, ss, ReasonBudgetExhausted, msg, interval)
 }
 
@@ -199,8 +199,8 @@ func budgetThresholds(eb *stagesv1.ErrorBudget) (freeze, resume float64, err err
 	return freeze, resume, nil
 }
 
-// resumeThr3 is the effective resume threshold string for status/messages.
-func resumeThr3(eb *stagesv1.ErrorBudget) string {
+// effectiveResume is the effective resume threshold string for status/messages.
+func effectiveResume(eb *stagesv1.ErrorBudget) string {
 	if eb.ResumeThreshold != "" {
 		return eb.ResumeThreshold
 	}
