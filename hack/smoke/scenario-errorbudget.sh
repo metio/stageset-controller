@@ -71,6 +71,14 @@ spec:
         jsonPath: "{.remaining}"
     freezeThreshold: "0.1"
     interval: 15s
+    # Hold (not the default Allow) so the freeze is deterministic: the metric
+    # stub's Deployment has no readiness probe, so there is a brief window after
+    # rollout where the Service has no listening backend. Under the fail-open
+    # default that window would let the FIRST reconcile proceed (a real, intended
+    # behavior — but it makes "assert frozen" racy). Hold keeps the rollout held
+    # whether the source is unreachable OR reports an exhausted budget, which is
+    # exactly what this scenario asserts; it also smoke-tests the fail-closed path.
+    onSourceError: Hold
   stages:
     - name: app
       sourceRef:
