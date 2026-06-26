@@ -90,6 +90,40 @@ func TestDecision_RecurringCronWindow(t *testing.T) {
 	}
 }
 
+// nextChange across two DISTINCT overlapping Allow windows is the instant the
+// aggregate decision actually flips (the later end), not the earlier window's
+// end — at the earlier end the second window still covers, so the decision does
+// not change there.
+func TestDecision_CrossWindowOverlap_NextChangeIsActualFlip(t *testing.T) {
+	t.Parallel()
+	early := stagesv1.UpdateWindow{Type: TypeAllow, From: mt("2026-06-13T00:00:00Z"), To: mt("2026-06-13T03:00:00Z")}
+	late := stagesv1.UpdateWindow{Type: TypeAllow, From: mt("2026-06-13T01:00:00Z"), To: mt("2026-06-13T05:00:00Z")}
+	allowed, next, err := Decision([]stagesv1.UpdateWindow{early, late}, at("2026-06-13T02:00:00Z"))
+	if err != nil || !allowed {
+		t.Fatalf("02:00 is inside both allow windows: allowed=%v err=%v", allowed, err)
+	}
+	// 03:00 (early ends) does NOT flip the decision — late still covers until
+	// 05:00, so that is the next change.
+	if !next.Equal(at("2026-06-13T05:00:00Z")) {
+		t.Fatalf("nextChange should be the actual flip at 05:00, got %v", next)
+	}
+}
+
+// A Deny nested inside an Allow: the decision flips to blocked when the Deny
+// opens, even though the Allow's boundary is later.
+func TestDecision_CrossWindowOverlap_DenyOpensFirst(t *testing.T) {
+	t.Parallel()
+	allow := stagesv1.UpdateWindow{Type: TypeAllow, From: mt("2026-06-13T00:00:00Z"), To: mt("2026-06-13T10:00:00Z")}
+	deny := stagesv1.UpdateWindow{Type: TypeDeny, From: mt("2026-06-13T04:00:00Z"), To: mt("2026-06-13T06:00:00Z")}
+	allowed, next, err := Decision([]stagesv1.UpdateWindow{allow, deny}, at("2026-06-13T02:00:00Z"))
+	if err != nil || !allowed {
+		t.Fatalf("02:00 is allowed (deny not yet active): allowed=%v err=%v", allowed, err)
+	}
+	if !next.Equal(at("2026-06-13T04:00:00Z")) {
+		t.Fatalf("nextChange should be when the deny opens at 04:00, got %v", next)
+	}
+}
+
 func TestDecision_RecurringOverlappingWindows(t *testing.T) {
 	t.Parallel()
 	// Hourly starts, each 2h long → consecutive windows overlap. At 02:30 both

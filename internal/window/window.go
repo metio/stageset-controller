@@ -29,11 +29,48 @@ func Decision(windows []stagesv1.UpdateWindow, now time.Time) (allowed bool, nex
 	if len(windows) == 0 {
 		return true, time.Time{}, nil
 	}
+	allowed, earliest, err := decisionAt(windows, now)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	// nextChange must be the instant the AGGREGATE decision flips, not merely the
+	// earliest window boundary: when windows overlap, a boundary can pass without
+	// changing the decision (e.g. one Allow ends while another Allow still
+	// covers). evalWindow only yields each window's NEXT boundary, so walk
+	// forward boundary-by-boundary, re-evaluating the aggregate, until it flips.
+	// Bounded so a pathological set can't loop forever — on the cap we fall back
+	// to the earliest boundary, a harmless early re-check.
+	cur := now
+	for i := 0; i < 2*len(windows)+2; i++ {
+		_, boundary, derr := decisionAt(windows, cur)
+		if derr != nil {
+			return false, time.Time{}, derr
+		}
+		if boundary.IsZero() {
+			// No further boundaries: the decision never changes again.
+			return allowed, time.Time{}, nil
+		}
+		flipped, _, derr := decisionAt(windows, boundary)
+		if derr != nil {
+			return false, time.Time{}, derr
+		}
+		if flipped != allowed {
+			return allowed, boundary, nil
+		}
+		cur = boundary
+	}
+	return allowed, earliest, nil
+}
+
+// decisionAt evaluates the aggregate allow/deny decision at t and the earliest
+// next window boundary after t (deny-overrides; an Allow set means updates
+// happen only while an Allow is active and no Deny is).
+func decisionAt(windows []stagesv1.UpdateWindow, t time.Time) (allowed bool, earliestBoundary time.Time, err error) {
 	var denyActive, allowActive, hasAllow bool
 	var next time.Time
 	for i := range windows {
 		w := &windows[i]
-		active, boundary, werr := evalWindow(w, now)
+		active, boundary, werr := evalWindow(w, t)
 		if werr != nil {
 			return false, time.Time{}, werr
 		}
