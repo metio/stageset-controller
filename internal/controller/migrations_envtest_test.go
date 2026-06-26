@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,116 @@ func TestReconcile_SourcedMigration_RunsAndAdvancesVersion(t *testing.T) {
 	// victim and the advanced version are the proof the migration ran.
 	if len(final.Status.ExecutedMigrations) != 0 {
 		t.Fatalf("ledger should be cleared after the transition, got %v", final.Status.ExecutedMigrations)
+	}
+}
+
+// deleteThenPatchLadder is a one-migration ladder whose first action deletes a
+// ConfigMap (succeeds) and whose second patches a non-existent one (fails with
+// NotFound) — so the migration halts mid-way with the first action recorded.
+func deleteThenPatchLadder(ns, victim string) string {
+	return "" +
+		"- name: drop-then-patch\n" +
+		"  to: \"2.0.0\"\n" +
+		"  stage: stage-a\n" +
+		"  actions:\n" +
+		"    - name: delete-legacy\n" +
+		"      delete:\n" +
+		"        target:\n" +
+		"          apiVersion: v1\n" +
+		"          kind: ConfigMap\n" +
+		"          name: " + victim + "\n" +
+		"          namespace: " + ns + "\n" +
+		"    - name: patch-ghost\n" +
+		"      patch:\n" +
+		"        target:\n" +
+		"          apiVersion: v1\n" +
+		"          kind: ConfigMap\n" +
+		"          name: ghost\n" +
+		"          namespace: " + ns + "\n" +
+		"        patch: '{\"data\":{\"x\":\"y\"}}'\n"
+}
+
+// A migration that halts mid-way must persist its per-action ledger in apiserver
+// status, and a retry must SKIP the already-completed destructive action — proven
+// here end-to-end (not just with a fake executor): the delete runs once, the
+// migration fails on a later action, and after the victim is recreated a retry
+// does not delete it again because the ledger (round-tripped through the
+// apiserver) records it as done.
+func TestReconcile_SourcedMigration_LedgerPersistsAndSkipsDestructiveRetry(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+
+	victim := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}
+	if err := c.Create(context.Background(), victim); err != nil {
+		t.Fatalf("create victim: %v", err)
+	}
+	servedArtifact(t, c, ns, "stage-ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
+	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": deleteThenPatchLadder(ns, "legacy")})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "migrator"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:            metav1.Duration{Duration: time.Minute},
+			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
+			MigrationsSourceRef: &stagesv1.MigrationsSource{SourceRef: stagesv1.SourceReference{Name: "ladder-ea"}},
+			Stages:              []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "stage-ea"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+
+	// Baseline at 1.0.0 (no migration runs).
+	if err := reconcileWith(t, c, ss, nil); err != nil {
+		t.Fatalf("baseline reconcile: %v", err)
+	}
+	base := getStageSet(t, c, ns, "migrator")
+
+	// Advance to 2.0.0 → the transition runs delete-legacy (ok) then patch-ghost
+	// (NotFound → migration fails). The reconcile returns an error (backoff).
+	base.Spec.Version = &stagesv1.VersionSource{Value: "2.0.0"}
+	if err := c.Update(context.Background(), base); err != nil {
+		t.Fatalf("bump version: %v", err)
+	}
+	_ = reconcileWith(t, c, base, nil)
+
+	mid := getStageSet(t, c, ns, "migrator")
+	if mid.Status.Version == "2.0.0" {
+		t.Fatal("version must not advance while the migration is failing")
+	}
+	if cmExists(t, c, ns, "legacy") {
+		t.Fatal("the first migration action (delete-legacy) should have run")
+	}
+	doneKey := ""
+	for _, e := range mid.Status.ExecutedMigrationActions {
+		if strings.HasSuffix(e, "/delete-legacy") {
+			doneKey = e
+		}
+	}
+	if doneKey == "" {
+		t.Fatalf("the completed delete action must persist in status.executedMigrationActions, got %v", mid.Status.ExecutedMigrationActions)
+	}
+
+	// Recreate the victim and retry: the ledger (read back from the apiserver)
+	// must skip delete-legacy, so the recreated victim SURVIVES — the migration
+	// does not re-run the destructive action.
+	if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}); err != nil {
+		t.Fatalf("recreate victim: %v", err)
+	}
+	_ = reconcileWith(t, c, getStageSet(t, c, ns, "migrator"), nil)
+
+	if !cmExists(t, c, ns, "legacy") {
+		t.Fatal("retry re-ran the destructive delete: the per-action ledger was not honored across reconciles")
+	}
+	final := getStageSet(t, c, ns, "migrator")
+	stillDone := false
+	for _, e := range final.Status.ExecutedMigrationActions {
+		if e == doneKey {
+			stillDone = true
+		}
+	}
+	if !stillDone {
+		t.Fatalf("the ledger entry must remain across the retry, got %v", final.Status.ExecutedMigrationActions)
 	}
 }
 
