@@ -25,17 +25,17 @@ like `StageSet`. The difference is granularity.
   dependencies. `StageSet` expresses that as one resource with ordered `stages` —
   and the controller waits for each stage's health before the next.
 - **Typed actions between steps.** Migrations, HTTP gates, waits, and transient
-  applies are first-class [actions](/usage/actions/); in plain Flux you'd model
+  applies are first-class [actions](/defining-a-release/actions/); in plain Flux you'd model
   these as extra Kustomizations and Jobs.
-- **Release-level features.** [Update windows](/usage/update-windows/),
-  [versioned migrations](/usage/versioned-migrations/), and
-  [rollback](/usage/rollback/) operate across the whole staged release.
+- **Release-level features.** [Update windows](/gating/update-windows/),
+  [versioned migrations](/gating/versioned-migrations/), and
+  [rollback](/gating/rollback/) operate across the whole staged release.
 - **Source-native.** A stage consumes a `GitRepository`/`OCIRepository`/`Bucket`
   directly (just like `kustomize-controller`), or an `ExternalArtifact` (RFC-0012),
   or a *producer* resolved to its artifact — which is how it also pairs with
   renderers like [JaaS](https://jaas.projects.metio.wtf/).
 - **SOPS parity.** Encrypted Secrets in a source decrypt the same way, via
-  [`spec.decryption`](/usage/encryption/) (age, PGP, or cloud KMS), so a SOPS-using
+  [`spec.decryption`](/security/encryption/) (age, PGP, or cloud KMS), so a SOPS-using
   repo ports across unchanged.
 
 ## Using them together

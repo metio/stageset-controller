@@ -28,7 +28,7 @@ Common causes:
 - A typo in a migration's `stage` value, or a stage was renamed without updating
   the anchor.
 
-## Fix
+## Remediation
 
 - If the migration should run before a particular stage, declare that role on
   the stage:

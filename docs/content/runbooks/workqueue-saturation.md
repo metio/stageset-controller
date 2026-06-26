@@ -8,7 +8,7 @@ tags: [runbooks, metrics, alerts, troubleshooting]
 
 `workqueue_depth{controller="stageset"}` stays high; StageSets reconcile slowly or
 lag behind their `spec.interval`. The `StageSetControllerWorkqueueDepthHigh` alert
-fires (see [operations](/installation/operations/) for the alert set and its
+fires (see [operations](/running/operations/) for the alert set and its
 thresholds).
 
 ## Cause
@@ -45,7 +45,7 @@ Correlate with `controller_runtime_reconcile_time_seconds` (see
   worker.
 - Adding replicas does **not** help: leader election means only the lease holder
   reconciles, so a second replica is failover, not added throughput
-  ([production](/installation/production/#high-availability)). The controller has no
+  ([production](/running/production/#high-availability)). The controller has no
   reconcile-concurrency flag — the levers are reducing load (longer intervals, fewer
   StageSets, fewer objects per stage) and removing the slow operations below.
 - Investigate apiserver / tenant-authorization latency if reconciles are uniformly

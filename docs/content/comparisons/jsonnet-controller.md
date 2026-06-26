@@ -34,14 +34,14 @@ The two projects sit at **different layers**, which is the whole comparison.
   delivery are separate concerns, owned by separate components.
 - **Ordering and gating *within* a release.** A `Konfiguration` applies as one unit;
   sequencing exists only *between* Konfigurations via `dependsOn`. `StageSet` expresses
-  a release as ordered [stages](/usage/stages-and-sources/), each waiting on the
-  previous stage's health, with typed [actions](/usage/actions/) (migration Jobs,
+  a release as ordered [stages](/defining-a-release/stages-and-sources/), each waiting on the
+  previous stage's health, with typed [actions](/defining-a-release/actions/) (migration Jobs,
   HTTP gates, waits) *between* steps.
 - **Release-level machinery** jsonnet-controller doesn't carry:
-  [update windows](/usage/update-windows/),
-  [versioned migrations](/usage/versioned-migrations/),
-  [conflict policies](/usage/conflict-policies/), and
-  [rollback](/usage/rollback/) across the whole staged release.
+  [update windows](/gating/update-windows/),
+  [versioned migrations](/gating/versioned-migrations/),
+  [conflict policies](/defining-a-release/conflict-policies/), and
+  [rollback](/gating/rollback/) across the whole staged release.
 
 ## Which to reach for
 
@@ -112,7 +112,7 @@ This is the important distinction, and it changes who prunes what:
   cluster. `StageSet` fetches that artifact and applies the manifests itself, so
   **`StageSet`'s inventory owns every rendered object directly** and prunes them from
   its own `StageInventory` record. One owner, and `StageSet`'s drift correction,
-  [conflict policies](/usage/conflict-policies/), and [rollback](/usage/rollback/)
+  [conflict policies](/defining-a-release/conflict-policies/), and [rollback](/gating/rollback/)
   apply to the resources themselves.
 
 So if you want `StageSet` to be the single owner and pruner of the delivered

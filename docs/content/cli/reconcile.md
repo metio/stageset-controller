@@ -49,4 +49,4 @@ stagesetctl reconcile payments --with-source --update-now --wait --timeout 10m
 
 `--update-now` is the CLI equivalent of the `stages.metio.wtf/update-now`
 annotation — the supported escape hatch when an [update
-window](/usage/update-windows/) is holding a rollout you need to ship now.
+window](/gating/update-windows/) is holding a rollout you need to ship now.

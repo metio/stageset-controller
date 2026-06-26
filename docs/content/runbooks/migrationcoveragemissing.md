@@ -19,7 +19,7 @@ for an explicit decision.
 
 Minor and patch transitions are never gated by this — only a major boundary.
 
-## Fix
+## Remediation
 
 Either add a migration that covers the boundary:
 

@@ -31,7 +31,7 @@ staging     web        False   StageFailed  1/2      -         -
 ```
 
 `STAGES` is `ready/total`; `PENDING` shows `held until <time>` when an
-[update window](/usage/update-windows/) is holding a rollout. A `False` `READY`
+[update window](/gating/update-windows/) is holding a rollout. A `False` `READY`
 maps to a [runbook](/runbooks/) by its `REASON`.
 
 ## Detail
@@ -55,9 +55,9 @@ Stages:
 
 Conditional lines fill in when the StageSet is in that state: `Suspended: true`
 when [`spec.suspend`](/api/stageset/#scheduling) is set, `Pending migrations:`
-when a [version boundary](/usage/versioned-migrations/) is queued, and a
+when a [version boundary](/gating/versioned-migrations/) is queued, and a
 `Pending update:` block (next-window time plus the held revisions) when an
-[update window](/usage/update-windows/) is holding a rollout — for example:
+[update window](/gating/update-windows/) is holding a rollout — for example:
 
 ```text
 Ready:      False (UpdateDeferred)

@@ -8,7 +8,7 @@ tags: [runbooks, metrics, alerts, troubleshooting]
 
 `controller_runtime_reconcile_time_seconds` p99 for `controller="stageset"` exceeds
 the configured threshold; the `StageSetReconcileLatencyHigh` alert fires (see
-[operations](/installation/operations/) for the alert set and its thresholds).
+[operations](/running/operations/) for the alert set and its thresholds).
 
 ## Cause
 

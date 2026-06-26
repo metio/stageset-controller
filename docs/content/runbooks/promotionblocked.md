@@ -10,7 +10,7 @@ tags: [runbooks, promotion, analysis, metrics, troubleshooting]
 
 ## Cause
 
-A [promotion analysis](/usage/stage-promotion/) on the named stage failed: one or more checks read a metric outside its threshold for more than `failureLimit` consecutive evaluations. The stage applied and became Ready, but its *observed behavior* — error rate, latency, SLO burn, whatever the checks measure — is out of bounds, so the rollout is not advanced to the next stage.
+A [promotion analysis](/gating/stage-promotion/) on the named stage failed: one or more checks read a metric outside its threshold for more than `failureLimit` consecutive evaluations. The stage applied and became Ready, but its *observed behavior* — error rate, latency, SLO burn, whatever the checks measure — is out of bounds, so the rollout is not advanced to the next stage.
 
 `onFailure` decides what happened:
 

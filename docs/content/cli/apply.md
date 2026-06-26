@@ -10,9 +10,9 @@ the resulting objects in stage order, under the controller's field manager and o
 labels — so a later reconcile sees no drift. Preview first with [`diff`](/cli/diff/).
 
 `apply` materializes the manifests only. It does **not** run stage
-[actions](/usage/actions/), [migrations](/usage/versioned-migrations/),
-[update-window](/usage/update-windows/) gating, ready checks (beyond `--wait`), or
-[pruning](/usage/inventory/) — those belong to the controller's reconcile loop. When
+[actions](/defining-a-release/actions/), [migrations](/gating/versioned-migrations/),
+[update-window](/gating/update-windows/) gating, ready checks (beyond `--wait`), or
+[pruning](/defining-a-release/inventory/) — those belong to the controller's reconcile loop. When
 a controller manages this StageSet it stays the source of truth and reconciles on its
 own schedule; reach for `apply` in cluster-free workflows (no controller installed)
 and break-glass.
@@ -25,7 +25,7 @@ stagesetctl apply NAME [flags]
 |---|---|---|
 | `--stage` | _(all)_ | Apply only the named stage(s); repeatable. |
 | `--source-dir` | _(none)_ | Use a local artifact tree as `[STAGE=]PATH`; repeatable. Skips the cluster fetch. |
-| `--as-tenant` | `false` | Render and apply impersonating `spec.serviceAccountName` (see [multi-cluster and tenancy](/usage/multi-cluster/)). |
+| `--as-tenant` | `false` | Render and apply impersonating `spec.serviceAccountName` (see [multi-cluster and tenancy](/security/multi-cluster/)). |
 | `--wait` | `false` | Wait for each stage's objects to become ready before applying the next stage. |
 | `--timeout` | `5m` | Per-stage readiness timeout with `--wait`. |
 

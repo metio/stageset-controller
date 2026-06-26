@@ -18,7 +18,7 @@ migrations that have not been approved. So destructive migrations don't run
 unattended, the whole rollout (app and migrations) waits until an operator
 authorizes the target version.
 
-## Fix
+## Remediation
 
 Review `status.pendingMigrations` (or `stagesetctl diff`) to see what will run,
 then approve the target version by setting the annotation to it:

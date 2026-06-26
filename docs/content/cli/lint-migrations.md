@@ -4,7 +4,7 @@ description: Validate a migration ladder file or directory before publishing it 
 tags: [cli, migrations, sources]
 ---
 
-Validate a [migration ladder](/usage/versioned-migrations/) — a single file, or a
+Validate a [migration ladder](/gating/versioned-migrations/) — a single file, or a
 directory of `.yaml`/`.yml`/`.json` files — before publishing it to a source the
 controller will fetch. It runs the **exact checks the controller runs** at
 admission and at sourced-artifact fetch time, so a ladder that lints clean here

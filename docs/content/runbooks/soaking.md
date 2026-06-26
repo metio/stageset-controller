@@ -10,7 +10,7 @@ tags: [runbooks, promotion, stages, scheduling, troubleshooting]
 
 ## Cause
 
-This is **not a failure** — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its [`spec.stages[].promotion.soak`](/usage/stage-promotion/) holds the rollout at this stage for the configured duration before advancing to the next one. A soak catches delayed regressions — an OOM after warm-up, error-rate creep, a crashloop after several minutes — that the point-in-time `readyChecks` cannot see.
+This is **not a failure** — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its [`spec.stages[].promotion.soak`](/gating/stage-promotion/) holds the rollout at this stage for the configured duration before advancing to the next one. A soak catches delayed regressions — an OOM after warm-up, error-rate creep, a crashloop after several minutes — that the point-in-time `readyChecks` cannot see.
 
 The soak gates only *advancement to the next stage*. The soaking stage stays applied and its drift keeps being corrected; earlier stages remain promoted. The controller requeues at `soakUntil` and advances on its own once the window closes (provided the stage is still healthy).
 

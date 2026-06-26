@@ -1,5 +1,5 @@
 ---
-title: vs Flux Operator ResourceSet
+title: StageSet vs Flux Operator ResourceSet
 description: Horizontal fan-out and scheduled discovery versus vertical, gated promotion.
 tags: [comparison, flux-operator, resourceset, stages]
 ---
@@ -12,15 +12,15 @@ solve different axes of delivery, and they compose cleanly:
   `ResourceSetInputProvider` (RSIP) to *discover* those inputs — pull requests,
   branches, tags, OCI artifact tags — on a schedule.
 - **`StageSet` is vertical promotion.** It moves *one* application through an
-  ordered list of gated [stages](/usage/stages-and-sources/), with typed
-  [actions](/usage/actions/), [versioned migrations](/usage/versioned-migrations/),
-  and [rollback](/usage/rollback/) along the way.
+  ordered list of gated [stages](/defining-a-release/stages-and-sources/), with typed
+  [actions](/defining-a-release/actions/), [versioned migrations](/gating/versioned-migrations/),
+  and [rollback](/gating/rollback/) along the way.
 
 Reach for `ResourceSet` to stamp out many similar deployments from a changing set
 of inputs. Reach for `StageSet` to roll a single release out in order, gated at
 each step. To do both — discover a new version, then promote it through gated
 stages — run them together; see the
-[Flux Operator integration](/usage/flux-operator/) page.
+[Flux Operator integration](/integrations/flux-operator/) page.
 
 ## What ResourceSet gives you
 
@@ -49,14 +49,14 @@ no automatic rollback to a previous revision.
 ## What StageSet adds
 
 - **Ordered, gated stages.** `spec.stages` runs top to bottom; each waits for the
-  previous to report healthy via [ready checks](/usage/ready-checks/) before the
+  previous to report healthy via [ready checks](/defining-a-release/ready-checks/) before the
   next begins.
 - **Typed actions between steps.** `patch`, `http`, `wait`, `job`, `delete`, and
-  `apply` [actions](/usage/actions/) run as `pre` / `post` / `onFailure` gates
+  `apply` [actions](/defining-a-release/actions/) run as `pre` / `post` / `onFailure` gates
   around a stage.
-- **Version-gated migrations.** [`spec.migrations`](/usage/versioned-migrations/)
+- **Version-gated migrations.** [`spec.migrations`](/gating/versioned-migrations/)
   run an action ladder exactly once when crossing a version boundary.
-- **Rollback.** [`rollbackOnFailure`](/usage/rollback/) restores the last good
+- **Rollback.** [`rollbackOnFailure`](/gating/rollback/) restores the last good
   revisions when a run fails.
 
 ## Both time-gate delivery
@@ -66,13 +66,13 @@ Both tools can gate delivery on a clock, but at different layers:
 | Layer | Field | Gates |
 |---|---|---|
 | `ResourceSetInputProvider` | `spec.schedule` (cron, `timeZone`, `window`) | *when inputs refresh* — how often a new version or PR is discovered |
-| `StageSet` | [`spec.updateWindows`](/usage/update-windows/) (`Allow` / `Deny`) | *when a discovered revision rolls out* through the stages |
+| `StageSet` | [`spec.updateWindows`](/gating/update-windows/) (`Allow` / `Deny`) | *when a discovered revision rolls out* through the stages |
 
 When you combine them, gate at **one** layer to avoid double-gating. Either let the
 RSIP `schedule` constrain when a new version becomes visible and leave the
 `StageSet` always-open, or refresh inputs freely and let the `StageSet`
 `updateWindows` decide when the promotion happens. The
-[integration page](/usage/flux-operator/) shows both.
+[integration page](/integrations/flux-operator/) shows both.
 
 ## Using them together
 
@@ -81,4 +81,4 @@ a new version on a schedule, a `ResourceSet` templates a `StageSet` pinned to th
 version, and the `StageSet` runs the ordered, gated promotion. The other direction
 fans a `ResourceSet` out into one `StageSet` per tenant, branch, or pull request.
 Both patterns, with complete manifests, are on the
-[Flux Operator integration](/usage/flux-operator/) page.
+[Flux Operator integration](/integrations/flux-operator/) page.

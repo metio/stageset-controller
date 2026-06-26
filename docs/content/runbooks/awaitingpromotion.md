@@ -10,7 +10,7 @@ tags: [runbooks, promotion, stages, troubleshooting]
 
 ## Cause
 
-This is **not a failure** — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its [`spec.stages[].promotion.requireManualPromotion`](/usage/stage-promotion/) holds the rollout there until an operator promotes it. This is the "hold before prod" gate: a human confirms the stage is good (ideally after reviewing metrics) before the rollout advances.
+This is **not a failure** — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its [`spec.stages[].promotion.requireManualPromotion`](/gating/stage-promotion/) holds the rollout there until an operator promotes it. This is the "hold before prod" gate: a human confirms the stage is good (ideally after reviewing metrics) before the rollout advances.
 
 The gate holds only *advancement to the next stage*. The awaiting stage stays applied and its drift keeps being corrected; earlier stages remain promoted. A manual promotion gate is distinct from a migration's `requireApproval`, which gates a destructive version transition rather than a stage advance.
 

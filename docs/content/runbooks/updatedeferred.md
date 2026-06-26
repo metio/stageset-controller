@@ -10,7 +10,7 @@ tags: [runbooks, update-windows, scheduling, troubleshooting]
 
 ## Cause
 
-This is **not a failure** — it is time-based delivery working as configured. A new revision (or the first deploy) is being held because the StageSet's [`spec.updateWindows`](/usage/update-windows/) do not currently permit a rollout: either a `Deny` window is active, or `Allow` windows are declared and none is active right now. With `spec.windowScope: All`, even drift correction is paused while a window is closed.
+This is **not a failure** — it is time-based delivery working as configured. A new revision (or the first deploy) is being held because the StageSet's [`spec.updateWindows`](/gating/update-windows/) do not currently permit a rollout: either a `Deny` window is active, or `Allow` windows are declared and none is active right now. With `spec.windowScope: All`, even drift correction is paused while a window is closed.
 
 `status.pendingUpdate` shows the held revisions and `nextWindowOpens` (when delivery resumes); the controller requeues at that boundary.
 

@@ -10,7 +10,7 @@ tags: [runbooks, migrations, versioning, troubleshooting]
 
 ## Cause
 
-The desired version (`spec.version`) is **lower** than the version the controller last recorded as deployed (`status.version`). Downgrades are refused by default: [migrations](/usage/versioned-migrations/) are forward-only action ladders, and replaying upgrade migrations in reverse is how data gets destroyed. The controller does not silently run a downgrade.
+The desired version (`spec.version`) is **lower** than the version the controller last recorded as deployed (`status.version`). Downgrades are refused by default: [migrations](/gating/versioned-migrations/) are forward-only action ladders, and replaying upgrade migrations in reverse is how data gets destroyed. The controller does not silently run a downgrade.
 
 ## Diagnosis
 

@@ -12,11 +12,11 @@ tags: [runbooks, troubleshooting, api]
 
 The spec failed validation that the CRD schema cannot express cheaply, normally one of:
 
-- an **action sets zero or more than one verb** — each action must set exactly one of `patch`, `http`, `wait`, `job`, `delete`, `apply` (see [actions](/usage/actions/));
-- **`spec.migrations` without `spec.version`**, or a migration anchored to a stage name that does not exist (see [versioned migrations](/usage/versioned-migrations/));
+- an **action sets zero or more than one verb** — each action must set exactly one of `patch`, `http`, `wait`, `job`, `delete`, `apply` (see [actions](/defining-a-release/actions/));
+- **`spec.migrations` without `spec.version`**, or a migration anchored to a stage name that does not exist (see [versioned migrations](/gating/versioned-migrations/));
 - **`spec.version` does not name exactly one source** — set one of `value`, `fromObject`, or `fromArtifact`;
-- **`spec.decryption.provider` is not `sops`**, or a `secretRef` is given without a `name` (see [encryption](/usage/encryption/));
-- an **invalid update window** — a malformed `schedule`, `duration`, or `timeZone` (see [update windows](/usage/update-windows/)).
+- **`spec.decryption.provider` is not `sops`**, or a `secretRef` is given without a `name` (see [encryption](/security/encryption/));
+- an **invalid update window** — a malformed `schedule`, `duration`, or `timeZone` (see [update windows](/gating/update-windows/)).
 
 The admission webhook normally rejects these at write time; seeing this on the object means the webhook was bypassed or disabled and the reconciler caught it.
 

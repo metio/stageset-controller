@@ -26,7 +26,7 @@ delivery controller. The overlap is ordering: Helm's hooks and hook weights give
   artifact, with readiness gating between them.
 - **Typed gates between steps.** Hooks run Jobs; `StageSet` stages can run Jobs,
   HTTP gates, waits, patches, deletes, and transient applies, as pre/post/onFailure
-  [actions](/usage/actions/).
+  [actions](/defining-a-release/actions/).
 - **Identity.** A `StageSet` applies under a per-tenant `ServiceAccount`; `helm
   upgrade` runs as whoever ran it.
 
@@ -35,5 +35,5 @@ delivery controller. The overlap is ordering: Helm's hooks and hook weights give
 Render a chart to manifests (e.g. via a producer that publishes an
 `ExternalArtifact`) and deliver it with `StageSet`. The controller understands
 `helm.sh/hook` resources: `applyHelmHookResources` (default `true`) applies them as
-ordinary objects, so a Helm-style chart's hook resources still get created — now
-under `StageSet`'s ordering and gating instead of Helm's.
+ordinary objects, so a Helm-style chart's hook resources still get created, under
+`StageSet`'s ordering and gating rather than Helm's.

@@ -8,7 +8,7 @@ tags: [runbooks, security, operations, troubleshooting]
 
 `stageset_webhook_cert_renewal_failures_total` is increasing; the
 `StageSetWebhookCertRenewalFailing` alert fires (see
-[operations](/installation/operations/) for the alert set and its thresholds).
+[operations](/running/operations/) for the alert set and its thresholds).
 The current certificate keeps working until its natural expiry — that expiry is
 the deadline, after which cluster-wide `StageSet` admission breaks.
 

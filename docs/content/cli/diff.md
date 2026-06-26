@@ -8,7 +8,7 @@ By default `diff` performs a
 [server-side](https://kubernetes.io/docs/reference/using-api/server-side-apply/)
 dry-run apply and exits `1` when there are changes, so it works as a CI gate. It
 shows, per object, what a reconcile would create, configure, or delete, plus the
-[actions](/usage/actions/) a rollout would run. To see the full rendered manifests
+[actions](/defining-a-release/actions/) a rollout would run. To see the full rendered manifests
 without comparing against the cluster, use [`build`](/cli/build/).
 
 ```text
@@ -20,7 +20,7 @@ stagesetctl diff NAME [flags]
 | `--stage` | _(all)_ | Diff only the named stage(s); repeatable. |
 | `--source-dir` | _(none)_ | Use a local artifact tree as `[STAGE=]PATH`; repeatable. Skips the cluster fetch. |
 | `--server-side` | `true` | Server-side dry-run apply diff (needs update/patch RBAC). `false` renders client-side against live objects. |
-| `--as-tenant` | `false` | Render and dry-run impersonating `spec.serviceAccountName` (see [multi-cluster and tenancy](/usage/multi-cluster/)). |
+| `--as-tenant` | `false` | Render and dry-run impersonating `spec.serviceAccountName` (see [multi-cluster and tenancy](/security/multi-cluster/)). |
 | `--show-secrets` | `false` | Reveal Secret values instead of masking. |
 | `--show-unchanged` | `false` | Include objects with no change. |
 | `--prune` | `true` | Show resources that would be deleted (fell out of inventory). |
@@ -51,7 +51,7 @@ Actions to run:
 
 Objects that left the stage's [inventory](/api/stageinventory/) show as deletions
 (`pruned: …`); pass `--prune=false` to hide them. The trailing `Actions to run`
-block lists the [pre/post/onFailure actions](/usage/actions/) a real reconcile
+block lists the [pre/post/onFailure actions](/defining-a-release/actions/) a real reconcile
 would execute — `diff` never runs them, it only reports them.
 
 A clean run prints nothing and exits `0`; pending changes exit `1`. To inspect

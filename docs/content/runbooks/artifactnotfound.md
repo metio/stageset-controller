@@ -34,4 +34,4 @@ kubectl --namespace <namespace> get <producer-kind> <name> --output yaml
 - For a direct ref, create (or wait for) the named `ExternalArtifact`.
 - For a producer ref, ensure the producer actually publishes an artifact and that it lands in the same namespace as the StageSet (cross-namespace producer refs are gated by `--no-cross-namespace-refs`).
 
-If the artifact exists but is not yet published, the reason is [`SourceNotReady`](/runbooks/sourcenotready/); a spec/API resolution failure is [`ResolveFailed`](/runbooks/resolvefailed/). See [stages and sources](/usage/stages-and-sources/).
+If the artifact exists but is not yet published, the reason is [`SourceNotReady`](/runbooks/sourcenotready/); a spec/API resolution failure is [`ResolveFailed`](/runbooks/resolvefailed/). See [stages and sources](/defining-a-release/stages-and-sources/).
