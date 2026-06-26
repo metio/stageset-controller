@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -37,6 +38,78 @@ func (r *StageSetReconciler) readSecretData(ctx context.Context, namespace, name
 	return sec.Data, nil
 }
 
+// errHoldForBudget is the stage-loop sentinel meaning "a new revision is frozen
+// from entering this stage by the stage's own errorBudget." Like
+// errHoldForPromotion it is a hold, not a failure: earlier stages stay applied,
+// this stage keeps its current revision, later stages are not processed.
+var errHoldForBudget = errors.New("hold for stage error budget")
+
+// freshBudgetOverride reports the budget-override token when it is present and
+// not yet handled — the one-shot break-glass that ships a rollout once regardless
+// of any budget (rollout-wide or per-stage).
+func freshBudgetOverride(ss *stagesv1.StageSet) (token string, fresh bool) {
+	t := ss.Annotations[budgetOverrideAnnotation]
+	return t, t != "" && t != ss.Status.LastHandledBudgetOverride
+}
+
+// budgetVerdict is the outcome of evaluating one errorBudget against its source,
+// independent of scope (rollout-wide or per-stage). The caller wires status,
+// conditions, and scoped metrics.
+type budgetVerdict struct {
+	value     float64
+	freeze    *stagesv1.BudgetFreeze // the freeze state to record; nil when not frozen
+	frozen    bool                   // hysteresis decision (before the dryRun gate)
+	sourceErr error                  // source unreadable
+	specErr   error                  // malformed thresholds (terminal)
+}
+
+// evaluateBudget queries eb's source and decides, with hysteresis against
+// prevFreeze, whether the budget is frozen. It carries no status/condition/metric
+// side effects so both the rollout-wide and per-stage gates can share it.
+func (r *StageSetReconciler) evaluateBudget(ctx context.Context, namespace string, eb *stagesv1.ErrorBudget, prevFreeze *stagesv1.BudgetFreeze) budgetVerdict {
+	freezeAt, resumeAt, perr := budgetThresholds(eb)
+	if perr != nil {
+		return budgetVerdict{specErr: perr}
+	}
+	value, qerr := r.MetricQuerier.Query(ctx, namespace, eb.Source)
+	if qerr != nil {
+		return budgetVerdict{sourceErr: qerr}
+	}
+	// Hysteresis: once frozen, stay frozen until the budget recovers to
+	// resumeThreshold; otherwise freeze when it drops below freezeThreshold.
+	wasFrozen := prevFreeze != nil
+	frozen := value < freezeAt
+	if wasFrozen {
+		frozen = value < resumeAt
+	}
+	if !frozen {
+		return budgetVerdict{value: value}
+	}
+	since := metav1.Time{Time: r.now()}
+	if wasFrozen && prevFreeze.Since != nil {
+		since = *prevFreeze.Since
+	}
+	return budgetVerdict{
+		value:  value,
+		frozen: true,
+		freeze: &stagesv1.BudgetFreeze{
+			Remaining:       strconv.FormatFloat(value, 'f', -1, 64),
+			FreezeThreshold: eb.FreezeThreshold,
+			ResumeThreshold: effectiveResume(eb),
+			Since:           &since,
+			DryRun:          eb.DryRun,
+		},
+	}
+}
+
+// budgetInterval is the re-check cadence while a budget freeze holds.
+func (r *StageSetReconciler) budgetInterval(ss *stagesv1.StageSet, eb *stagesv1.ErrorBudget) time.Duration {
+	if eb.Interval != nil && eb.Interval.Duration > 0 {
+		return eb.Interval.Duration
+	}
+	return r.retryInterval(ss)
+}
+
 // gateErrorBudget decides whether this run may proceed past the rollout-wide
 // error-budget freeze. It returns deferred=true (with a requeue result) when the
 // freeze holds a new-revision rollout; the caller then returns without applying.
@@ -46,27 +119,13 @@ func (r *StageSetReconciler) readSecretData(ctx context.Context, namespace, name
 // default): a frozen service still has its declared state enforced, so drift on
 // the current revision keeps being corrected. With nothing new to roll out, the
 // source is not even queried — the gate's only job is to decide a pending
-// rollout.
-func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact) (ctrl.Result, bool, error) {
+// rollout. override short-circuits the freeze (the break-glass, consumed by the
+// caller).
+func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact, override bool) (ctrl.Result, bool, error) {
 	eb := ss.Spec.ErrorBudget
-	if eb == nil {
+	if eb == nil || override {
 		r.clearBudgetFreeze(ss)
 		return ctrl.Result{}, false, nil
-	}
-
-	// Break-glass: ship once regardless of the budget.
-	if token := ss.Annotations[budgetOverrideAnnotation]; token != "" && token != ss.Status.LastHandledBudgetOverride {
-		ss.Status.LastHandledBudgetOverride = token
-		r.clearBudgetFreeze(ss)
-		return ctrl.Result{}, false, nil
-	}
-
-	freezeAt, resumeAt, perr := budgetThresholds(eb)
-	if perr != nil {
-		// A malformed threshold normally fails admission; this is the fallback.
-		r.setReady(ss, metav1.ConditionFalse, ReasonInvalidSpec, fmt.Sprintf("spec.errorBudget: %v", perr))
-		ss.Status.ObservedGeneration = ss.Generation
-		return ctrl.Result{RequeueAfter: permanentRetryInterval}, true, r.patchStatus(ctx, helper, ss)
 	}
 
 	// Only a new revision is gated; a steady reconcile (drift correction) flows.
@@ -82,74 +141,105 @@ func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpa
 		return ctrl.Result{}, false, nil
 	}
 
-	interval := r.retryInterval(ss)
-	if eb.Interval != nil && eb.Interval.Duration > 0 {
-		interval = eb.Interval.Duration
-	}
-
-	value, qerr := r.MetricQuerier.Query(ctx, ss.Namespace, eb.Source)
-	if qerr != nil {
+	interval := r.budgetInterval(ss, eb)
+	v := r.evaluateBudget(ctx, ss.Namespace, eb, ss.Status.BudgetFreeze)
+	switch {
+	case v.specErr != nil:
+		// A malformed threshold normally fails admission; this is the fallback.
+		r.setReady(ss, metav1.ConditionFalse, ReasonInvalidSpec, fmt.Sprintf("spec.errorBudget: %v", v.specErr))
+		ss.Status.ObservedGeneration = ss.Generation
+		return ctrl.Result{RequeueAfter: permanentRetryInterval}, true, r.patchStatus(ctx, helper, ss)
+	case v.sourceErr != nil:
 		metrics.MetricSourceErrorsTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
-		// onSourceError: Hold blocks the rollout; Allow (default) proceeds. Either
-		// way the error is loud (metric above + event/condition here).
 		if eb.OnSourceError == "Hold" {
-			msg := fmt.Sprintf("error-budget source unavailable and onSourceError=Hold: %v", qerr)
+			msg := fmt.Sprintf("error-budget source unavailable and onSourceError=Hold: %v", v.sourceErr)
 			return r.deferBudget(ctx, helper, ss, ReasonBudgetSourceUnavailable, msg, interval)
 		}
-		// Allow: the rollout proceeds; surface the error without holding. The
+		// Allow (default): proceed; surface the error without holding. The
 		// continuing reconcile sets the final Ready condition, so only an event
 		// is emitted here (deduped against the prior Ready state).
 		prev := readyConditionSnapshot(ss)
 		if prev == nil || prev.Reason != ReasonBudgetSourceUnavailable {
 			r.event(ss, corev1.EventTypeWarning, ReasonBudgetSourceUnavailable,
-				fmt.Sprintf("error-budget source unavailable; proceeding (onSourceError=Allow): %v", qerr))
+				fmt.Sprintf("error-budget source unavailable; proceeding (onSourceError=Allow): %v", v.sourceErr))
 		}
 		r.clearBudgetFreeze(ss)
 		return ctrl.Result{}, false, nil
 	}
 
-	metrics.BudgetRemaining.WithLabelValues(ss.Namespace, ss.Name).Set(value)
-
-	// Hysteresis: once frozen, stay frozen until the budget recovers to
-	// resumeThreshold; otherwise freeze when it drops below freezeThreshold.
-	wasFrozen := ss.Status.BudgetFreeze != nil
-	shouldFreeze := value < freezeAt
-	if wasFrozen {
-		shouldFreeze = value < resumeAt
-	}
-
-	if !shouldFreeze {
+	metrics.BudgetRemaining.WithLabelValues(ss.Namespace, ss.Name).Set(v.value)
+	if !v.frozen {
 		r.clearBudgetFreeze(ss)
 		return ctrl.Result{}, false, nil
 	}
-
-	// Record the freeze. Preserve the start instant across a steady freeze.
-	since := metav1.Time{Time: r.now()}
-	if wasFrozen && ss.Status.BudgetFreeze.Since != nil {
-		since = *ss.Status.BudgetFreeze.Since
-	}
-	ss.Status.BudgetFreeze = &stagesv1.BudgetFreeze{
-		Remaining:       strconv.FormatFloat(value, 'f', -1, 64),
-		FreezeThreshold: eb.FreezeThreshold,
-		ResumeThreshold: effectiveResume(eb),
-		Since:           &since,
-		DryRun:          eb.DryRun,
-	}
+	ss.Status.BudgetFreeze = v.freeze
 
 	if eb.DryRun {
-		// Record what would freeze; do not hold. The gauge stays 0 (not enforced).
 		metrics.SetBudgetFrozen(ss.Namespace, ss.Name, false)
-		if !wasFrozen {
+		if prev := readyConditionSnapshot(ss); prev == nil || prev.Reason != ReasonBudgetExhausted {
 			r.event(ss, corev1.EventTypeNormal, ReasonBudgetExhausted,
-				fmt.Sprintf("error-budget freeze would activate (dryRun): remaining %s < freezeThreshold %s", ss.Status.BudgetFreeze.Remaining, eb.FreezeThreshold))
+				fmt.Sprintf("error-budget freeze would activate (dryRun): remaining %s < freezeThreshold %s", v.freeze.Remaining, eb.FreezeThreshold))
 		}
 		return ctrl.Result{}, false, nil
 	}
 
 	metrics.SetBudgetFrozen(ss.Namespace, ss.Name, true)
 	msg := fmt.Sprintf("error budget exhausted: remaining %s < freezeThreshold %s; new-revision rollouts are frozen until it recovers to %s",
-		ss.Status.BudgetFreeze.Remaining, eb.FreezeThreshold, effectiveResume(eb))
+		v.freeze.Remaining, eb.FreezeThreshold, effectiveResume(eb))
 	return r.deferBudget(ctx, helper, ss, ReasonBudgetExhausted, msg, interval)
+}
+
+// stageBudgetGate is how a per-stage errorBudget resolves for one reconcile.
+type stageBudgetGate struct {
+	hold      bool                   // the rollout must hold at this stage
+	freeze    *stagesv1.BudgetFreeze // freeze to record on the stage status (nil = none)
+	reason    string                 // Ready reason when holding
+	msg       string
+	requeue   time.Duration
+	specErr   error // malformed thresholds (terminal)
+	sourceErr error // source unreadable under onSourceError=Allow (proceed, but event it)
+}
+
+// gateStageBudget evaluates a stage's own errorBudget for a new-revision entry.
+// It mirrors gateErrorBudget but scoped to one stage, writing the per-stage
+// frozen gauge; the caller wires the held status/condition and the dryRun freeze
+// record. Only called when the stage has a new revision and no override is active.
+func (r *StageSetReconciler) gateStageBudget(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, prior stagesv1.StageStatus) stageBudgetGate {
+	eb := stage.ErrorBudget
+	interval := r.budgetInterval(ss, eb)
+	v := r.evaluateBudget(ctx, ss.Namespace, eb, prior.BudgetFreeze)
+	switch {
+	case v.specErr != nil:
+		return stageBudgetGate{specErr: v.specErr}
+	case v.sourceErr != nil:
+		metrics.MetricSourceErrorsTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
+		if eb.OnSourceError == "Hold" {
+			return stageBudgetGate{
+				hold:    true,
+				reason:  ReasonBudgetSourceUnavailable,
+				msg:     fmt.Sprintf("stage %q error-budget source unavailable and onSourceError=Hold: %v", stage.Name, v.sourceErr),
+				requeue: interval,
+			}
+		}
+		return stageBudgetGate{sourceErr: v.sourceErr} // Allow: proceed
+	}
+	if !v.frozen {
+		metrics.SetStageBudgetFrozen(ss.Namespace, ss.Name, stage.Name, false)
+		return stageBudgetGate{}
+	}
+	if eb.DryRun {
+		metrics.SetStageBudgetFrozen(ss.Namespace, ss.Name, stage.Name, false)
+		return stageBudgetGate{freeze: v.freeze} // record what would freeze; do not hold
+	}
+	metrics.SetStageBudgetFrozen(ss.Namespace, ss.Name, stage.Name, true)
+	return stageBudgetGate{
+		hold:   true,
+		freeze: v.freeze,
+		reason: ReasonBudgetExhausted,
+		msg: fmt.Sprintf("stage %q error budget exhausted: remaining %s < freezeThreshold %s; the new revision is held from entering this stage until it recovers to %s",
+			stage.Name, v.freeze.Remaining, eb.FreezeThreshold, effectiveResume(eb)),
+		requeue: interval,
+	}
 }
 
 // deferBudget holds the rollout for a budget reason: an already-deployed StageSet

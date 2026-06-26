@@ -389,6 +389,100 @@ func TestReconcile_ErrorBudget_DeployedStaysReadyWhenFrozen(t *testing.T) {
 	}
 }
 
+// A per-stage errorBudget freezes a NEW revision out of that stage while its
+// budget is exhausted; earlier stages still apply, and it resumes on recovery.
+func TestReconcile_StageErrorBudget_FreezesEntryThenResumes(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea-a", "", map[string]string{"cm.yaml": configMapManifest(ns, "stg-a")})
+	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "stg-b")})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "stage-budget"},
+		Spec: stagesv1.StageSetSpec{
+			Interval: metav1.Duration{Duration: time.Minute},
+			Stages: []stagesv1.Stage{
+				{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea-a"}},
+				{Name: "stage-b", SourceRef: stagesv1.SourceReference{Name: "ea-b"}, ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"}},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	q := &fakeQuerier{value: 0.0} // stage-b budget exhausted
+	start := tm("2026-01-01T00:00:00Z").Time
+	reconcileWithQuerier(t, c, ss, start, q)
+
+	if !cmExists(t, c, ns, "stg-a") {
+		t.Fatal("stage-a (no budget) should apply")
+	}
+	if cmExists(t, c, ns, "stg-b") {
+		t.Fatal("stage-b must be held out by its exhausted error budget")
+	}
+	got := getStageSet(t, c, ns, "stage-budget")
+	if readyReason(got) != ReasonBudgetExhausted {
+		t.Fatalf("Ready reason = %q, want %q", readyReason(got), ReasonBudgetExhausted)
+	}
+	var stageB *stagesv1.StageStatus
+	for i := range got.Status.Stages {
+		if got.Status.Stages[i].Name == "stage-b" {
+			stageB = &got.Status.Stages[i]
+		}
+	}
+	if stageB == nil || stageB.BudgetFreeze == nil {
+		t.Fatalf("stage-b status should carry a budgetFreeze: %+v", got.Status.Stages)
+	}
+	if v := testutil.ToFloat64(metrics.StageBudgetFrozen.WithLabelValues(ns, "stage-budget", "stage-b")); v != 1 {
+		t.Errorf("stage_budget_frozen gauge = %v, want 1", v)
+	}
+
+	// Budget recovers → stage-b applies.
+	q.value = 0.9
+	reconcileWithQuerier(t, c, getStageSet(t, c, ns, "stage-budget"), start.Add(time.Minute), q)
+	if !cmExists(t, c, ns, "stg-b") {
+		t.Fatal("stage-b should apply once its budget recovers")
+	}
+	if r := readyReason(getStageSet(t, c, ns, "stage-budget")); r != ReasonReady {
+		t.Fatalf("Ready reason after recovery = %q, want %q", r, ReasonReady)
+	}
+}
+
+// The budget-override break-glass ships a per-stage-frozen rollout once.
+func TestReconcile_StageErrorBudget_OverrideShipsOnce(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea-a", "", map[string]string{"cm.yaml": configMapManifest(ns, "ov-a")})
+	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "ov-b")})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:   ns,
+			Name:        "stage-budget-ov",
+			Annotations: map[string]string{budgetOverrideAnnotation: "tok-1"},
+		},
+		Spec: stagesv1.StageSetSpec{
+			Interval: metav1.Duration{Duration: time.Minute},
+			Stages: []stagesv1.Stage{
+				{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea-a"}},
+				{Name: "stage-b", SourceRef: stagesv1.SourceReference{Name: "ea-b"}, ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"}},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	q := &fakeQuerier{value: 0.0} // exhausted, but override wins
+	reconcileWithQuerier(t, c, ss, tm("2026-01-01T00:00:00Z").Time, q)
+
+	if !cmExists(t, c, ns, "ov-b") {
+		t.Fatal("budget-override should ship stage-b despite the exhausted budget")
+	}
+	if q.calls != 0 {
+		t.Errorf("override should skip the per-stage budget query, got %d calls", q.calls)
+	}
+}
+
 func TestBudgetThresholds(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

@@ -80,34 +80,47 @@ func ValidateSpec(ss *stagesv1.StageSet) error {
 	return window.Validate(ss.Spec.UpdateWindows)
 }
 
-// validateErrorBudget enforces spec.errorBudget's shape: a usable metric source,
-// numeric thresholds, a resumeThreshold not below freezeThreshold (so hysteresis
-// can't invert), and a known onSourceError value.
+// validateErrorBudget enforces the shape of the rollout-wide spec.errorBudget
+// and each stage's per-stage errorBudget: a usable metric source, numeric
+// thresholds, a resumeThreshold not below freezeThreshold (so hysteresis can't
+// invert), and a known onSourceError value.
 func validateErrorBudget(ss *stagesv1.StageSet) error {
-	eb := ss.Spec.ErrorBudget
+	if err := validateBudget("spec.errorBudget", ss.Spec.ErrorBudget); err != nil {
+		return err
+	}
+	for i := range ss.Spec.Stages {
+		st := &ss.Spec.Stages[i]
+		if err := validateBudget(fmt.Sprintf("stage %q errorBudget", st.Name), st.ErrorBudget); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBudget(where string, eb *stagesv1.ErrorBudget) error {
 	if eb == nil {
 		return nil
 	}
-	if err := validateMetricSource("spec.errorBudget.source", eb.Source); err != nil {
+	if err := validateMetricSource(where+".source", eb.Source); err != nil {
 		return err
 	}
-	freeze, err := parseThresholdValue("spec.errorBudget.freezeThreshold", eb.FreezeThreshold)
+	freeze, err := parseThresholdValue(where+".freezeThreshold", eb.FreezeThreshold)
 	if err != nil {
 		return err
 	}
 	if eb.ResumeThreshold != "" {
-		resume, err := parseThresholdValue("spec.errorBudget.resumeThreshold", eb.ResumeThreshold)
+		resume, err := parseThresholdValue(where+".resumeThreshold", eb.ResumeThreshold)
 		if err != nil {
 			return err
 		}
 		if resume < freeze {
-			return fmt.Errorf("spec.errorBudget.resumeThreshold (%s) must be >= freezeThreshold (%s)", eb.ResumeThreshold, eb.FreezeThreshold)
+			return fmt.Errorf("%s.resumeThreshold (%s) must be >= freezeThreshold (%s)", where, eb.ResumeThreshold, eb.FreezeThreshold)
 		}
 	}
 	switch eb.OnSourceError {
 	case "", "Allow", "Hold":
 	default:
-		return fmt.Errorf("spec.errorBudget.onSourceError must be Allow or Hold, got %q", eb.OnSourceError)
+		return fmt.Errorf("%s.onSourceError must be Allow or Hold, got %q", where, eb.OnSourceError)
 	}
 	return nil
 }
@@ -118,7 +131,21 @@ func validateErrorBudget(ss *stagesv1.StageSet) error {
 func validatePromotion(ss *stagesv1.StageSet) error {
 	for i := range ss.Spec.Stages {
 		st := &ss.Spec.Stages[i]
-		if st.Promotion == nil || st.Promotion.Analysis == nil {
+		if st.Promotion == nil {
+			continue
+		}
+		if ft := st.Promotion.FastTrack; ft != nil {
+			if st.Promotion.Soak == nil || st.Promotion.Soak.Duration <= 0 {
+				return fmt.Errorf("stage %q promotion.fastTrack requires a soak to shorten", st.Name)
+			}
+			if err := validateMetricSource(fmt.Sprintf("stage %q promotion.fastTrack.source", st.Name), ft.Source); err != nil {
+				return err
+			}
+			if _, err := parseThresholdValue(fmt.Sprintf("stage %q promotion.fastTrack.max", st.Name), ft.Max); err != nil {
+				return err
+			}
+		}
+		if st.Promotion.Analysis == nil {
 			continue
 		}
 		an := st.Promotion.Analysis
@@ -174,19 +201,40 @@ func validateThresholdBounds(stage string, c *stagesv1.AnalysisCheck) error {
 	return nil
 }
 
-// validateMetricSource enforces that a MetricSource names a usable provider.
+// validateMetricSource enforces that a MetricSource names exactly one usable
+// provider (prometheus or webhook).
 func validateMetricSource(where string, src stagesv1.MetricSource) error {
-	if src.Prometheus == nil {
-		return fmt.Errorf("%s must set prometheus", where)
+	n := 0
+	if src.Prometheus != nil {
+		n++
 	}
-	if src.Prometheus.Address == "" {
-		return fmt.Errorf("%s.prometheus.address must be set", where)
+	if src.Webhook != nil {
+		n++
 	}
-	if src.Prometheus.Query == "" {
-		return fmt.Errorf("%s.prometheus.query must be set", where)
+	if n != 1 {
+		return fmt.Errorf("%s must set exactly one of prometheus or webhook, found %d", where, n)
 	}
-	if src.Prometheus.SecretRef != nil && src.Prometheus.SecretRef.Name == "" {
-		return fmt.Errorf("%s.prometheus.secretRef.name must be set when secretRef is given", where)
+	if p := src.Prometheus; p != nil {
+		if p.Address == "" {
+			return fmt.Errorf("%s.prometheus.address must be set", where)
+		}
+		if p.Query == "" {
+			return fmt.Errorf("%s.prometheus.query must be set", where)
+		}
+		if p.SecretRef != nil && p.SecretRef.Name == "" {
+			return fmt.Errorf("%s.prometheus.secretRef.name must be set when secretRef is given", where)
+		}
+	}
+	if w := src.Webhook; w != nil {
+		if w.URL == "" {
+			return fmt.Errorf("%s.webhook.url must be set", where)
+		}
+		if w.JSONPath == "" {
+			return fmt.Errorf("%s.webhook.jsonPath must be set", where)
+		}
+		if w.SecretRef != nil && w.SecretRef.Name == "" {
+			return fmt.Errorf("%s.webhook.secretRef.name must be set when secretRef is given", where)
+		}
 	}
 	return nil
 }

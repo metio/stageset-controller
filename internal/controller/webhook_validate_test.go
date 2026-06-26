@@ -5,8 +5,10 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
@@ -126,6 +128,79 @@ func TestValidatePromotion(t *testing.T) {
 				t.Fatalf("validatePromotion err = %v, wantErr %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func webhookSource() stagesv1.MetricSource {
+	return stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: "https://slo.example/api", JSONPath: "{.remaining}"}}
+}
+
+// TestValidateMetricSource_Union covers the prometheus|webhook oneof and the
+// per-provider field checks.
+func TestValidateMetricSource_Union(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		src     stagesv1.MetricSource
+		wantErr bool
+	}{
+		{"prometheus ok", okSource(), false},
+		{"webhook ok", webhookSource(), false},
+		{"neither set", stagesv1.MetricSource{}, true},
+		{"both set", stagesv1.MetricSource{Prometheus: okSource().Prometheus, Webhook: webhookSource().Webhook}, true},
+		{"webhook missing url", stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{JSONPath: "{.x}"}}, true},
+		{"webhook missing jsonPath", stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: "https://x"}}, true},
+		{"webhook secretRef no name", stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: "https://x", JSONPath: "{.x}", SecretRef: &meta.LocalObjectReference{}}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateMetricSource("src", tc.src); (err != nil) != tc.wantErr {
+				t.Fatalf("validateMetricSource err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidatePromotion_FastTrack covers fast-track's shape: it requires a soak,
+// a usable source, and a numeric max.
+func TestValidatePromotion_FastTrack(t *testing.T) {
+	t.Parallel()
+	soak := &metav1.Duration{Duration: time.Minute}
+	tests := []struct {
+		name    string
+		promo   *stagesv1.StagePromotion
+		wantErr bool
+	}{
+		{"fastTrack with soak ok", &stagesv1.StagePromotion{Soak: soak, FastTrack: &stagesv1.FastTrack{Source: okSource(), Max: "1"}}, false},
+		{"fastTrack without soak rejected", &stagesv1.StagePromotion{FastTrack: &stagesv1.FastTrack{Source: okSource(), Max: "1"}}, true},
+		{"fastTrack bad source", &stagesv1.StagePromotion{Soak: soak, FastTrack: &stagesv1.FastTrack{Source: stagesv1.MetricSource{}, Max: "1"}}, true},
+		{"fastTrack bad max", &stagesv1.StagePromotion{Soak: soak, FastTrack: &stagesv1.FastTrack{Source: okSource(), Max: "fast"}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{}
+			ss.Spec.Stages = []stagesv1.Stage{{Name: "s", Promotion: tc.promo}}
+			if err := validatePromotion(ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validatePromotion err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateErrorBudget_PerStage covers that a stage's own errorBudget is
+// validated like the rollout-wide one.
+func TestValidateErrorBudget_PerStage(t *testing.T) {
+	t.Parallel()
+	ss := &stagesv1.StageSet{}
+	ss.Spec.Stages = []stagesv1.Stage{{Name: "prod", ErrorBudget: &stagesv1.ErrorBudget{Source: webhookSource(), FreezeThreshold: "0.1"}}}
+	if err := validateErrorBudget(ss); err != nil {
+		t.Fatalf("valid per-stage budget rejected: %v", err)
+	}
+	ss.Spec.Stages[0].ErrorBudget.ResumeThreshold = "0.05" // < freeze
+	if err := validateErrorBudget(ss); err == nil {
+		t.Fatal("per-stage resume < freeze should be rejected")
 	}
 }
 

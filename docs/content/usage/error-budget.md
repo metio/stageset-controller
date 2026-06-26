@@ -81,6 +81,59 @@ The source address is dialed with the same SSRF guard as HTTP actions: loopback,
 link-local, cloud-metadata, multicast, and unspecified addresses are refused,
 while in-cluster private addresses (where Prometheus usually lives) are allowed.
 
+## Reading from a SaaS SLO API (webhook)
+
+When the budget lives in a SaaS SLO platform with no Prometheus endpoint (Nobl9,
+Grafana Cloud), use a `webhook` source instead: the controller GETs a JSON
+document and extracts the scalar with a kubectl-style JSONPath.
+
+```yaml
+  errorBudget:
+    source:
+      webhook:
+        url: https://nobl9.example/api/v2/slos/shop/checkout
+        jsonPath: "{.objectives[0].errorBudgetRemaining}"
+        secretRef:
+          name: nobl9-token        # optional bearer token, under the "token" key
+    freezeThreshold: "0"
+```
+
+A source is exactly one of `prometheus` or `webhook`. The `jsonPath` must resolve
+to a single numeric (or numeric-string) value; anything else (no match, multiple
+matches, an object, `NaN`) is treated as an unreadable source and routed through
+`onSourceError`. The webhook URL is dialed through the same SSRF guard.
+
+## Freezing a single stage
+
+`spec.errorBudget` freezes the whole rollout. To freeze only one stage on its own
+SLO — e.g. hold `prod` while `prod`'s budget is spent, but let `staging` keep
+rolling — put an `errorBudget` on that stage:
+
+```yaml
+  stages:
+    - name: staging
+      sourceRef:
+        name: web-staging
+    - name: prod
+      sourceRef:
+        name: web-prod
+      errorBudget:
+        source:
+          prometheus:
+            address: http://prometheus.monitoring:9090
+            query: slo:period_error_budget_remaining:ratio{sloth_service="checkout-prod"}
+        freezeThreshold: "0.1"
+```
+
+A per-stage budget gates **entry** to the stage: while it is exhausted, a new
+revision is held from rolling into that stage (earlier stages keep rolling, and
+the stage's currently-applied revision keeps having its drift corrected). It takes
+the same fields as the rollout-wide budget (`freezeThreshold`/`resumeThreshold`
+hysteresis, `interval`, `onSourceError`, `dryRun`) and the same
+[`budget-override`](#shipping-a-reliability-fix-while-frozen) break-glass clears
+both. This complements a [promotion analysis](/usage/stage-promotion/), which
+gates *exit* (advancing past a stage once it has applied).
+
 ## When the source is unreachable
 
 `onSourceError` decides what happens when the query can't be read (Prometheus

@@ -15,9 +15,37 @@ import "github.com/fluxcd/pkg/apis/meta"
 type MetricSource struct {
 	// Prometheus runs an instant query that must evaluate to a single scalar.
 	// PromQL natively covers Sloth, Pyrra, Grafana, and Nobl9's Prometheus API,
-	// so the bulk of SLO installs need no per-tool code.
+	// so the bulk of SLO installs need no per-tool code. Exactly one of
+	// prometheus or webhook must be set.
+	// +optional
+	Prometheus *PrometheusSource `json:"prometheus,omitempty"`
+
+	// Webhook fetches a JSON document over HTTP and extracts the scalar with a
+	// JSONPath expression — the escape hatch for SaaS SLO APIs (Nobl9, Grafana
+	// Cloud) that have no Prometheus endpoint. Exactly one of prometheus or
+	// webhook must be set.
+	// +optional
+	Webhook *WebhookSource `json:"webhook,omitempty"`
+}
+
+// WebhookSource fetches a JSON document and extracts a single scalar from it.
+type WebhookSource struct {
+	// URL is the endpoint to GET. Public addresses are expected (SaaS APIs);
+	// loopback, link-local (incl. cloud metadata), multicast, and unspecified
+	// addresses are refused, mirroring the http-action SSRF guard.
 	// +required
-	Prometheus *PrometheusSource `json:"prometheus"`
+	URL string `json:"url"`
+
+	// JSONPath is a kubectl-style JSONPath expression selecting the scalar from
+	// the response body, e.g. '{.objectives[0].errorBudgetRemaining}'. It must
+	// resolve to exactly one numeric (or numeric-string) value.
+	// +required
+	JSONPath string `json:"jsonPath"`
+
+	// SecretRef optionally names a Secret in the StageSet's namespace holding a
+	// bearer token under the "token" key, sent as Authorization: Bearer.
+	// +optional
+	SecretRef *meta.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 // PrometheusSource is an instant Prometheus query yielding one scalar.

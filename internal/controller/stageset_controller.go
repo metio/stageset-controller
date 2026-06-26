@@ -372,11 +372,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return res, nil
 	}
 
+	// Budget break-glass: a fresh stages.metio.wtf/budget-override ships this run
+	// once, past every error-budget freeze (rollout-wide and per-stage). Consume
+	// it here so both gates see the same one-shot decision.
+	budgetOverride := false
+	if token, fresh := freshBudgetOverride(&ss); fresh {
+		ss.Status.LastHandledBudgetOverride = token
+		budgetOverride = true
+	}
+
 	// Error-budget freeze: hold a new-revision rollout while the service is out
 	// of its SLO error budget. Combined with the update-window gate above; both
 	// must allow. A frozen-but-deployed StageSet stays Ready with status.budgetFreeze.
 	budgetCtx, budgetSpan := observability.Tracer().Start(ctx, "stageset.gateErrorBudget")
-	budgetRes, budgetDeferred, berr := r.gateErrorBudget(budgetCtx, patchHelper, &ss, resolved)
+	budgetRes, budgetDeferred, berr := r.gateErrorBudget(budgetCtx, patchHelper, &ss, resolved, budgetOverride)
 	if berr != nil {
 		budgetSpan.RecordError(berr)
 		budgetSpan.SetStatus(codes.Error, "error-budget gating failed")
@@ -538,6 +547,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// phase so the post-loop hold handler can set the right Ready reason.
 	var promoteHoldStage string
 	var promoteHoldState *stagesv1.PromotionState
+	// When a stage's own errorBudget holds a new-revision entry, these carry the
+	// hold for the post-loop handler. stageBudgetFreeze records a dryRun
+	// would-freeze to stamp on the stage status of a stage that still proceeds.
+	var budgetHoldReason, budgetHoldMsg string
+	stageBudgetFreeze := map[string]*stagesv1.BudgetFreeze{}
 	// The stage loop runs in a closure so a stage failure can be intercepted
 	// for rollbackOnFailure before it is finalized; failStage's returns become
 	// the closure's result.
@@ -574,6 +588,41 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 			}
 			record := func(name string) error { executed = append(executed, name); return nil }
+
+			// Per-stage error-budget freeze: gate ENTRY of a new revision into this
+			// stage on the stage's own SLO budget, before anything is applied.
+			// Holding parks the rollout here (earlier stages stay applied, this
+			// stage keeps its current revision); a dryRun would-freeze is recorded
+			// on the stage status but does not hold. The override skips it.
+			if stage.ErrorBudget != nil && !budgetOverride && priorRevision != ra.Revision {
+				g := r.gateStageBudget(ctx, &ss, stage, priorStages[stage.Name])
+				switch {
+				case g.specErr != nil:
+					// Malformed thresholds: terminal, like other InvalidSpec fallbacks.
+					r.setReady(&ss, metav1.ConditionFalse, ReasonInvalidSpec, fmt.Sprintf("stage %q errorBudget: %v", stage.Name, g.specErr))
+					ss.Status.ObservedGeneration = ss.Generation
+					return ctrl.Result{RequeueAfter: permanentRetryInterval}, r.patchStatus(ctx, patchHelper, &ss)
+				case g.sourceErr != nil:
+					// onSourceError=Allow: proceed, but surface the error (deduped).
+					if prev := readyConditionSnapshot(&ss); prev == nil || prev.Reason != ReasonBudgetSourceUnavailable {
+						r.event(&ss, corev1.EventTypeWarning, ReasonBudgetSourceUnavailable,
+							fmt.Sprintf("stage %q error-budget source unavailable; proceeding (onSourceError=Allow): %v", stage.Name, g.sourceErr))
+					}
+				case g.hold:
+					// Hold the new revision out of this stage. Keep the stage at its
+					// prior applied state and record the freeze.
+					held := priorStages[stage.Name]
+					held.Name = stage.Name
+					held.BudgetFreeze = g.freeze
+					stageStatuses = append(stageStatuses, held)
+					budgetHoldReason, budgetHoldMsg = g.reason, g.msg
+					return ctrl.Result{RequeueAfter: g.requeue}, errHoldForBudget
+				case g.freeze != nil:
+					// dryRun would-freeze: stamp it on the status this stage builds
+					// after it applies (below), without holding.
+					stageBudgetFreeze[stage.Name] = g.freeze
+				}
+			}
 
 			// Migrations anchored to this stage run before its pre-actions, so
 			// version-conditional work (data conversions, immutable-object
@@ -726,7 +775,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				v := r.evaluatePromotionAnalysis(ctx, &ss, stage)
 				verdict = &v
 			}
-			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict)
+			fastTrackOK := false
+			if stage.Promotion != nil && stage.Promotion.FastTrack != nil {
+				fastTrackOK = r.evaluateFastTrack(ctx, &ss, stage)
+			}
+			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK)
 			appliedRevision := ra.Revision
 			if rollback {
 				// Analysis failed with onFailure=Rollback: revert THIS stage to its
@@ -759,6 +812,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				LastHandledReconcileAt: lastHandledFor(stage.Name),
 				PromotionState:         promoState,
 				LastHandledPromotion:   handledPromotion,
+				BudgetFreeze:           stageBudgetFreeze[stage.Name],
 			})
 			metrics.StageAppliedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Inc()
 			metrics.SetStagePromotionPending(ss.Namespace, ss.Name, stage.Name, !promoted)
@@ -783,6 +837,23 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		prevReady := readyConditionSnapshot(&ss)
 		r.setReady(&ss, metav1.ConditionFalse, reason, msg)
 		r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, reason, msg)
+		return loopResult, r.patchStatus(ctx, patchHelper, &ss)
+	}
+	if errors.Is(loopErr, errHoldForBudget) {
+		// A stage's own errorBudget is holding a new revision out of that stage.
+		// Persist the stage statuses, set the held Ready condition (a deployed
+		// StageSet stays Ready=True — its current state is healthy), and requeue.
+		ss.Status.Stages = stageStatuses
+		publishStageReady(&ss)
+		ss.Status.ObservedGeneration = ss.Generation
+		prevReady := readyConditionSnapshot(&ss)
+		if len(ss.Status.LastAppliedRevisions) > 0 {
+			r.setReady(&ss, metav1.ConditionTrue, ReasonReady, "Deployed; "+budgetHoldMsg)
+			r.emitReadyEvent(&ss, prevReady, metav1.ConditionTrue, ReasonReady, budgetHoldMsg)
+		} else {
+			r.setReady(&ss, metav1.ConditionFalse, budgetHoldReason, budgetHoldMsg)
+			r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, budgetHoldReason, budgetHoldMsg)
+		}
 		return loopResult, r.patchStatus(ctx, patchHelper, &ss)
 	}
 	if loopErr != nil {

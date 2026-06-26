@@ -259,6 +259,16 @@ type Stage struct {
 	// never touches later stages.
 	// +optional
 	Promotion *StagePromotion `json:"promotion,omitempty"`
+
+	// ErrorBudget freezes a NEW revision from rolling into THIS stage while the
+	// stage's own SLO error budget is exhausted — the per-stage analogue of
+	// spec.errorBudget. It gates entry (before this stage applies); the stage's
+	// currently-applied revision keeps having its drift corrected, and earlier
+	// stages are unaffected. Use it to freeze only a sensitive stage (e.g. prod)
+	// on that environment's budget while earlier stages keep rolling. This gates
+	// entry; promotion.analysis gates exit (advancing past a stage once applied).
+	// +optional
+	ErrorBudget *ErrorBudget `json:"errorBudget,omitempty"`
 }
 
 // StagePromotion gates advancement past a stage. Every mechanism is optional;
@@ -289,6 +299,34 @@ type StagePromotion struct {
 	// point-in-time ReadyChecks miss. Combine with soak to observe over a window.
 	// +optional
 	Analysis *PromotionAnalysis `json:"analysis,omitempty"`
+
+	// FastTrack shortens the soak when the system is demonstrably healthy: once
+	// the minimum soak has elapsed and a burn-rate (or similar) metric is within
+	// its bound, the stage promotes early instead of waiting out the full soak.
+	// It only ever promotes EARLIER than soak — it never blocks past it (blocking
+	// on a metric is promotion.analysis's job). Requires soak.
+	// +optional
+	FastTrack *FastTrack `json:"fastTrack,omitempty"`
+}
+
+// FastTrack accelerates a soak based on a metric. After the minimum soak, if the
+// metric stays at or below max, the stage promotes without waiting the full soak.
+type FastTrack struct {
+	// Source resolves to the scalar gating early promotion — typically a
+	// burn-rate ratio (e.g. Sloth's slo:current_burn_rate:ratio).
+	// +required
+	Source MetricSource `json:"source"`
+
+	// Max is the highest value that still allows early promotion (a decimal
+	// string). For a burn rate, "1" means "not burning faster than sustainable".
+	// +required
+	Max string `json:"max"`
+
+	// After is the minimum soak that must elapse before early promotion is
+	// considered, so a stage always soaks at least this long. Defaults to 0 (a
+	// healthy metric can promote immediately).
+	// +optional
+	After *metav1.Duration `json:"after,omitempty"`
 }
 
 // PromotionAnalysis evaluates metric checks at a stage boundary. Every check
@@ -1098,6 +1136,11 @@ type StageStatus struct {
 	// recently acted on, so a manual promotion fires exactly once per new token.
 	// +optional
 	LastHandledPromotion string `json:"lastHandledPromotion,omitempty"`
+
+	// BudgetFreeze is set while this stage's own errorBudget is holding a
+	// new-revision entry into the stage (or, under dryRun, would hold it).
+	// +optional
+	BudgetFreeze *BudgetFreeze `json:"budgetFreeze,omitempty"`
 }
 
 // PromotionPhase is where a stage stands against its promotion gate.

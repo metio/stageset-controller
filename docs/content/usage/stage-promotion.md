@@ -134,6 +134,32 @@ the rollout at the current healthy stage.) See the
 tuning a new analysis, set `dryRun: true` to record what *would* block without
 holding or rolling back anything.
 
+## Promote early when the system is healthy
+
+A long soak is insurance against a slow regression — but when the system is
+demonstrably healthy there's no reason to wait it out. `fastTrack` shortens a
+soak based on a metric: once a minimum soak has elapsed and a burn-rate (or
+similar) metric stays within bounds, the stage promotes early.
+
+```yaml
+      promotion:
+        soak: 30m              # the maximum soak
+        fastTrack:
+          after: 5m            # always soak at least this long
+          max: "1"             # promote early once burn rate <= 1
+          source:
+            prometheus:
+              address: http://prometheus.monitoring:9090
+              query: slo:current_burn_rate:ratio{sloth_service="checkout"}
+```
+
+`fastTrack` only ever promotes *earlier* than `soak` — it never extends it. If the
+metric is over `max`, unreadable, or the minimum `after` hasn't elapsed, the stage
+just keeps soaking as normal. Use it with `analysis` when you also want to *block*
+on a bad metric: analysis holds/rolls back on breach, fastTrack accelerates on
+health. `fastTrack` requires a `soak` (there's nothing to shorten otherwise), and
+`after` defaults to `0` (a healthy metric can promote immediately).
+
 ## Combine soak and a manual gate
 
 With both set, the stage soaks first, then awaits a manual promotion:
