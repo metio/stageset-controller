@@ -45,12 +45,12 @@ For the missing-CRD variant:
 ```shell
 kubectl get crd | grep -E 'source.toolkit.fluxcd.io'
 # If source-controller's CRDs are missing, install Flux:
-# https://fluxcd.io/flux/installation/
+# https://fluxcd.io/flux/get-started/
 ```
 
 ## Remediation
 
-Grant the missing verb to the controller's ClusterRole or to the tenant `ServiceAccount`'s `Role`. The expected verbs are documented in the [Tenancy and RBAC](/usage/multi-cluster/) guide. After the RBAC change (or after installing the missing CRD), force the next reconcile — the non-transient classification means the last spec edit does not auto-retrigger:
+Grant the missing verb to the controller's ClusterRole or to the tenant `ServiceAccount`'s `Role`. The expected verbs are documented in the [Tenancy and RBAC](/security/multi-cluster/) guide. After the RBAC change (or after installing the missing CRD), force the next reconcile — the non-transient classification means the last spec edit does not auto-retrigger:
 
 ```shell
 kubectl --namespace <ns> annotate stageset <name> reconcile.fluxcd.io/requestedAt=$(date -u +%FT%TZ) --overwrite

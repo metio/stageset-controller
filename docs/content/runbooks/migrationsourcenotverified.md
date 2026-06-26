@@ -25,7 +25,7 @@ source's `spec.verify` (cosign or notation):
 - **No `SourceVerified` condition + `--require-verified-migration-sources`** — the
   controller requires verification, but the source configures none.
 
-## Fix
+## Remediation
 
 - Configure signature verification on the source. For an `OCIRepository`:
 

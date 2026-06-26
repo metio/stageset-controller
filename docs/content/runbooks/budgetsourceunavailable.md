@@ -10,7 +10,7 @@ A `BudgetSourceUnavailable` Warning event, the `stageset_metric_source_errors_to
 
 ## Cause
 
-A metric source (the [error-budget freeze](/usage/error-budget/) or a [promotion analysis](/usage/stage-promotion/) check) was unreachable or returned no usable scalar: the Prometheus endpoint was down or returned a non-2xx, the query evaluated to an error, an empty or multi-sample vector, or `NaN` (the shape a wrong query takes). This is treated as *transient* — the controller keeps retrying.
+A metric source (the [error-budget freeze](/gating/error-budget/) or a [promotion analysis](/gating/stage-promotion/) check) was unreachable or returned no usable scalar: the Prometheus endpoint was down or returned a non-2xx, the query evaluated to an error, an empty or multi-sample vector, or `NaN` (the shape a wrong query takes). This is treated as *transient* — the controller keeps retrying.
 
 What happens to the rollout depends on the gate's `onSourceError`:
 

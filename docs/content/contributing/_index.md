@@ -1,5 +1,7 @@
 ---
 title: Contributing
+description: Build and test stageset-controller locally, pass the pull-request checks, and understand how releases are cut.
+tags: [contributing, development, dco]
 ---
 
 Contributions are welcome. Build and test the controller locally, satisfy the

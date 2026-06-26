@@ -21,7 +21,7 @@ front of it.
 `StageSet` orchestrates a **whole release** as an ordered list of stages, each built
 from a Flux `ExternalArtifact` — CRDs before the operator that needs them, a
 migration before the app, config before the workload — gating each stage on health
-and running typed [actions](/usage/actions/) between them. It does not shift
+and running typed [actions](/defining-a-release/actions/) between them. It does not shift
 traffic or run metric analysis; its unit of work is the **multi-component release**
 and the order things apply in.
 
@@ -31,9 +31,9 @@ and the order things apply in.
 | Mechanism | weighted traffic shifting + metric analysis | ordered apply with readiness gates + actions |
 | Promotion driver | analysis metrics (Prometheus, web, Job) | stage readiness (kstatus, CEL) and actions |
 | Pruning / inventory | no (owns the Rollout's pods) | yes (StageInventory record, per-stage prune) |
-| GitOps reconcile | via Argo CD / a GitOps tool | native (Flux controller) |
+| GitOps reconcile | via your GitOps tool (e.g. Argo CD) | native (Flux controller) |
 
-## They compose
+## Using them together
 
 A realistic setup uses both: `StageSet` rolls out the release in order, and a
 workload *inside* one stage is itself an Argo `Rollout` doing a canary. `StageSet`
@@ -46,15 +46,15 @@ Both directions are supported:
 
 - **Argo gating on StageSet.** The controller exports a
   `stageset_stage_ready{namespace,stageset,stage}` gauge that Argo's Prometheus
-  metric reads directly, and the stage [gate endpoint](/tutorials/progressive-delivery/)
+  metric reads directly, and the stage [gate endpoint](/guides/progressive-delivery/)
   also answers JSON for Argo's web metric. So an Argo `Rollout` can hold its
   promotion until a `StageSet` stage is Ready — no Job bridge needed.
-- **StageSet gating on Argo.** A `StageSet` stage's [ready checks](/usage/ready-checks/)
+- **StageSet gating on Argo.** A `StageSet` stage's [ready checks](/defining-a-release/ready-checks/)
   can wait (via CEL) on an Argo `Rollout` reaching `Healthy` before the next stage
   runs.
 
 The full, worked examples for both are in the
-[progressive-delivery tutorial](/tutorials/progressive-delivery/#argo-rollouts).
+[progressive-delivery tutorial](/guides/progressive-delivery/#argo-rollouts).
 Where the gate's HTTP-status contract is a native fit for
 [Flagger](https://flagger.app/), the readiness gauge and JSON endpoint make
 `Argo Rollouts` a first-class consumer too.

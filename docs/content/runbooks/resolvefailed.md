@@ -29,5 +29,5 @@ kubectl --namespace <namespace> get externalartifact --output yaml | grep -A3 so
 ## Remediation
 
 - **Ambiguous producer:** ensure exactly one `ExternalArtifact` back-points at the producer, or reference the `ExternalArtifact` directly by name.
-- **Cross-namespace rejected:** move the source into the StageSet's namespace, or run the controller without `--no-cross-namespace-refs` if your [tenancy model](/usage/multi-cluster/) allows it.
+- **Cross-namespace rejected:** move the source into the StageSet's namespace, or run the controller without `--no-cross-namespace-refs` if your [tenancy model](/security/multi-cluster/) allows it.
 - **RBAC / missing CRD:** these surface as [`RBACDenied`](/runbooks/rbacdenied/) — grant the controller (or the impersonated `serviceAccountName`) read on the source kind, or install the `source-controller` CRDs.

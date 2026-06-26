@@ -1,5 +1,7 @@
 ---
 title: Comparisons
+description: How StageSet relates to Helm, Kustomize, Flux, Tanka, kubecfg, Argo Rollouts, jsonnet-controller, and the Flux Operator ResourceSet.
+tags: [comparisons, helm, kustomize, flux, argo-rollouts]
 ---
 
 `StageSet` isn't a templating tool and isn't a replacement for your manifest
@@ -25,3 +27,13 @@ Progressive-delivery controllers ([Flagger](https://flagger.app/),
 [Argo Rollouts](https://argoproj.github.io/argo-rollouts/)) sit at another layer —
 traffic shifting for a single workload — and also compose with `StageSet` rather
 than replace it; see [vs Argo Rollouts](/comparisons/argo-rollouts/).
+
+## All comparisons
+
+- **[vs Helm](/comparisons/helm/)** — templating and release hooks vs ordered, gated delivery.
+- **[vs Kustomize](/comparisons/kustomize/)** — overlay rendering vs continuous, staged apply.
+- **[vs Flux kustomize-controller](/comparisons/flux/)** — one-shot reconciliation vs sequenced stages with gates.
+- **[vs Tanka and kubecfg](/comparisons/tanka-kubecfg/)** — Jsonnet rendering vs delivery of the rendered result.
+- **[vs Argo Rollouts](/comparisons/argo-rollouts/)** — single-workload traffic shifting vs release-wide staging.
+- **[vs jsonnet-controller](/comparisons/jsonnet-controller/)** — in-cluster Jsonnet apply vs the producer/delivery split.
+- **[vs Flux Operator ResourceSet](/comparisons/flux-operator/)** — horizontal fan-out vs vertical, gated promotion.

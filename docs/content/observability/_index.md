@@ -1,7 +1,7 @@
 ---
 title: Observability
-description: The four observability pillars for the controller — structured logging, OTLP tracing, Prometheus metrics, and the opt-in alert catalog — and where each is configured.
-tags: [observability, logging, tracing, metrics, alerts]
+description: The four observability pillars for the controller — structured logging, OTLP tracing, Prometheus metrics, and the opt-in alert catalog — plus service level objectives and a ready-made dashboard.
+tags: [observability, logging, tracing, metrics, alerts, slos, dashboard]
 ---
 
 > **Status Conditions and Kubernetes Events are the primary status surface** —
@@ -27,6 +27,14 @@ small set of binary flags that the Helm chart drives from values:
   controller emits on StageSet transitions. Every alert links to a
   [runbook](/runbooks/).
 
+Two further pages build on the metrics:
+
+- **[Service level objectives](/observability/slos/)** — the controller's own
+  reconcile-availability and reconcile-latency SLOs, computed from the
+  `stageset_*` series, with their targets and error budgets.
+- **[Dashboard](/observability/dashboard/)** — a ready-made Grafana dashboard
+  over the controller and workqueue series.
+
 For each pillar you configure the controller binary's flags, read or query its
 output, and drive both from the Helm chart values. The full flag list with
-defaults is on the [configuration reference](/installation/configuration/).
+defaults is on the [configuration reference](/reference/configuration/).

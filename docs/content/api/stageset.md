@@ -83,17 +83,17 @@ spec:
 
 - **`serviceAccountName`** — the ServiceAccount the controller applies as (via a
   minted TokenRequest token on the local cluster); the StageSet can do exactly what
-  its RBAC allows. See [multi-cluster and tenancy](/usage/multi-cluster/).
+  its RBAC allows. See [multi-cluster and tenancy](/security/multi-cluster/).
 - **`kubeConfig`** — apply to a remote cluster. Set exactly one of:
   - **`secretRef`** — a Secret holding a self-contained kubeconfig (with its own
     embedded credentials).
   - **`configMapRef`** — a ConfigMap selecting cloud-provider workload-identity
     auth (`aws`, `azure`, `gcp`, or `generic`); the cluster bearer token is
     minted by the cloud's IAM/STS. See
-    [multi-cluster and tenancy](/usage/multi-cluster/).
+    [multi-cluster and tenancy](/security/multi-cluster/).
 - **`decryption`** — decrypt SOPS-encrypted files (`age`) in every stage's source
   before they are built. `provider` is `sops`; `secretRef` names the key Secret,
-  read under `serviceAccountName`. See [secrets encryption](/usage/encryption/).
+  read under `serviceAccountName`. See [secrets encryption](/security/encryption/).
 
 ## Versioning and migrations
 
@@ -132,7 +132,7 @@ spec:
 `>=1.0.0, <2.0.0`, `1.x`, or `^1.2`, matched against the currently deployed
 version. The migration fires only when the deployed version satisfies `from`
 *and* the run crosses up to `to`. See
-[versioned migrations](/usage/versioned-migrations/).
+[versioned migrations](/gating/versioned-migrations/).
 
 ## Rollback
 
@@ -141,7 +141,7 @@ spec:
   rollbackOnFailure: true       # restore last-good revisions on a failed run
 ```
 
-Needs a rollback store configured; see [rollback](/usage/rollback/).
+Needs a rollback store configured; see [rollback](/gating/rollback/).
 
 ## Update windows
 
@@ -164,7 +164,7 @@ spec:
 ```
 
 A recurring window uses `schedule` + `duration`; an absolute window uses
-`from` + `to`. See [update windows](/usage/update-windows/).
+`from` + `to`. See [update windows](/gating/update-windows/).
 
 ---
 
@@ -201,8 +201,8 @@ artifact in one of three ways: an `ExternalArtifact`
 Flux source — `GitRepository`, `OCIRepository`, or `Bucket` — consumed **directly**,
 or any other kind treated as a *producer* and resolved to its `ExternalArtifact` via
 the back-pointer index. See
-[stages and sources](/usage/stages-and-sources/#source-kinds) and
-[producer-aware sources](/usage/producer-aware-sources/).
+[stages and sources](/defining-a-release/stages-and-sources/#source-kinds) and
+[producer-aware sources](/integrations/producer-aware-sources/).
 
 `sourceRef.kind` is intentionally **open**: it defaults to `ExternalArtifact` but
 accepts any producer kind, because a producer reference is resolved through the
@@ -262,7 +262,7 @@ Per-resource answers to apply conflicts (immutable fields, ownership):
             allowDataLoss: true        # required to Recreate a PVC/PV
 ```
 
-See [conflict policies](/usage/conflict-policies/).
+See [conflict policies](/defining-a-release/conflict-policies/).
 
 ### readyChecks
 
@@ -285,7 +285,7 @@ Gate when the stage counts as complete:
 ```
 
 Health expressions use [CEL](https://github.com/google/cel-spec). See
-[ready checks](/usage/ready-checks/).
+[ready checks](/defining-a-release/ready-checks/).
 
 ---
 
@@ -363,7 +363,7 @@ The six operation types — one per Action:
     wait: true                 # block until applied objects report Ready
 ```
 
-See [actions](/usage/actions/).
+See [actions](/defining-a-release/actions/).
 
 ---
 

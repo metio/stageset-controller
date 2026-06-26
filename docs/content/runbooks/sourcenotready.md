@@ -31,4 +31,4 @@ This usually clears on its own when the producer publishes. If it persists:
 - check the producer's own Ready condition for an upstream error (a failed render, an unreachable `GitRepository`/`OCIRepository` source);
 - once the producer reports `Ready=True` with a `status.artifact`, the StageSet converges on the next reconcile.
 
-If the artifact never appears at all, the reason is [`ArtifactNotFound`](/runbooks/artifactnotfound/); a spec/API resolution failure is [`ResolveFailed`](/runbooks/resolvefailed/). See [stages and sources](/usage/stages-and-sources/).
+If the artifact never appears at all, the reason is [`ArtifactNotFound`](/runbooks/artifactnotfound/); a spec/API resolution failure is [`ResolveFailed`](/runbooks/resolvefailed/). See [stages and sources](/defining-a-release/stages-and-sources/).

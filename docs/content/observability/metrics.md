@@ -107,4 +107,4 @@ kubectl annotate service <release>-metrics \
 ```
 
 For the full flag list with defaults, see the
-[configuration reference](/installation/configuration/).
+[configuration reference](/reference/configuration/).

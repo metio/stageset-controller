@@ -20,10 +20,10 @@ A persistently-failing destructive migration usually means something needs
 fixing by hand (a bad action, a half-applied change, missing RBAC, a broken
 target) that retrying cannot resolve.
 
-## Fix
+## Remediation
 
 1. Diagnose the failure from the Message and the migration's Events; the earlier
-   failures surfaced as [`MigrationFailed`](../migrationfailed/).
+   failures surfaced as [`MigrationFailed`](/runbooks/migrationfailed/).
 2. Fix the underlying cause. If a destructive action partially applied, reconcile
    the real-world state by hand so the migration's actions can complete (the
    per-action ledger will skip the actions that already succeeded).

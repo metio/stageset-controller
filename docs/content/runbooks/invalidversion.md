@@ -46,4 +46,4 @@ Match the failing input in the Message:
 - **`fromObject`** — fix the `stage`/`kind`/`name` to point at a real rendered object, fix the `fieldPath`, and ensure the field (default: `app.kubernetes.io/version` label) carries a semver.
 - **`fromArtifact`** — fix `path`/`stage` to the real version file, or correct the file to a bare semver.
 - **migration `to`/`from`** — correct the boundary to a valid semver.
-- If you don't need [versioned migrations](/usage/versioned-migrations/), remove `spec.version` entirely (this disables versioning and migrations).
+- If you don't need [versioned migrations](/gating/versioned-migrations/), remove `spec.version` entirely (this disables versioning and migrations).

@@ -1,5 +1,7 @@
 ---
 title: CLI
+description: Install and use stagesetctl to preview, render, and drive StageSets from your own kubeconfig.
+tags: [cli, stagesetctl, kubectl-plugin]
 ---
 
 `stagesetctl` previews, renders, and drives StageSets without waiting for the next
@@ -40,6 +42,7 @@ After that, `kubectl stageset <command>` works.
 | [`diff`](/cli/diff/) | Preview what a reconcile would change; usable as a CI gate. |
 | [`apply`](/cli/apply/) | Server-side-apply a StageSet's rendered manifests directly. |
 | [`reconcile`](/cli/reconcile/) | Force an out-of-band reconcile. |
+| [`lint-migrations`](/cli/lint-migrations/) | Validate a migration ladder before publishing it to a source. |
 
 ## Global flags
 
@@ -60,5 +63,7 @@ Every command shares the same baseline:
 | `2` | Usage or flag error. |
 | `3` | Runtime error. |
 
-[`diff`](/cli/diff/) adds one more: it exits `1` when it finds changes (the
-`diff(1)` convention), so it can gate a CI pipeline.
+Two commands exit `1` for their own reason, so they can gate a CI pipeline:
+[`diff`](/cli/diff/) when it finds changes (the `diff(1)` convention), and
+[`lint-migrations`](/cli/lint-migrations/) when it finds a validation problem in
+a migration ladder.

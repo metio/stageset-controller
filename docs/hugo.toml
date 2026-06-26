@@ -20,7 +20,7 @@ pygmentsUseClasses = true
   term = ["HTML", "RSS", "ATOM"]
 
 [params]
-  mainSections = ["installation", "tutorials", "usage", "observability", "cli", "api", "comparisons", "runbooks", "contributing"]
+  mainSections = ["get-started", "guides", "defining-a-release", "gating", "security", "integrations", "running", "observability", "cli", "api", "reference", "comparisons", "runbooks", "contributing"]
   author = "metio.wtf"
   github = "metio/stageset-controller"
   # Header mark (rendered left of the title) plus the favicon link set; the image
@@ -44,192 +44,217 @@ pygmentsUseClasses = true
   # Cross-project JSON-LD link (emitted as schema.org mentions on the home page).
   relatedProjects = [{ name = "Jsonnet-as-a-Service", url = "https://jaas.projects.metio.wtf/" }]
 
-# Desktop navigation. The theme renders a main-menu entry only when it has
-# children, so each section is a parent linking to its list page.
+# Navigation. The theme renders a main-menu entry with a child list only when it
+# has children. The menu is a reader's journey — most important first — and each
+# group is a content section under docs/content of the same name, so a page's URL
+# matches where it sits in the menu. Each group header links to its section
+# landing page.
 [menu]
+  # 1 ── Get started: the shortest onboarding path.
   [[menu.main]]
-    identifier = "installation"
-    name = "Installation"
-    url = "/installation/"
+    identifier = "get-started"
+    name = "Get started"
+    url = "/get-started/"
     weight = 10
   [[menu.main]]
-    parent = "installation"
-    name = "Kubernetes"
-    url = "/installation/kubernetes/"
-    weight = 1
-  [[menu.main]]
-    parent = "installation"
-    name = "Production"
-    url = "/installation/production/"
-    weight = 2
-  [[menu.main]]
-    parent = "installation"
-    name = "Operations"
-    url = "/installation/operations/"
-    weight = 3
-  [[menu.main]]
-    parent = "installation"
-    name = "Backup and disaster recovery"
-    url = "/installation/disaster-recovery/"
-    weight = 4
-  [[menu.main]]
-    parent = "installation"
-    name = "Scale and capacity"
-    url = "/installation/scale-and-capacity/"
-    weight = 5
-  [[menu.main]]
-    parent = "installation"
-    name = "Configuration reference"
-    url = "/installation/configuration/"
-    weight = 6
-  [[menu.main]]
-    parent = "installation"
-    name = "Helm chart values"
-    url = "/installation/helm-values/"
-    weight = 7
-  [[menu.main]]
-    parent = "installation"
-    name = "Verifying releases"
-    url = "/installation/verifying-releases/"
-    weight = 8
-  [[menu.main]]
-    parent = "installation"
-    name = "Upgrading"
-    url = "/installation/upgrading/"
-    weight = 9
-
-  [[menu.main]]
-    identifier = "tutorials"
-    name = "Tutorials"
-    url = "/tutorials/"
-    weight = 15
-  [[menu.main]]
-    parent = "tutorials"
+    parent = "get-started"
     name = "Quickstart"
-    url = "/tutorials/quickstart/"
+    url = "/get-started/quickstart/"
     weight = 1
   [[menu.main]]
-    parent = "tutorials"
-    name = "From Jsonnet to a gated rollout"
-    url = "/tutorials/jsonnet-to-rollout/"
+    parent = "get-started"
+    name = "Install on Kubernetes"
+    url = "/get-started/kubernetes/"
     weight = 2
   [[menu.main]]
-    parent = "tutorials"
-    name = "Stage sources"
-    url = "/tutorials/flux-sources/"
+    parent = "get-started"
+    name = "From Jsonnet to a gated rollout"
+    url = "/get-started/jsonnet-to-rollout/"
     weight = 3
   [[menu.main]]
-    parent = "tutorials"
-    name = "Parameterizing a rollout"
-    url = "/tutorials/parameters/"
+    parent = "get-started"
+    name = "Stage sources"
+    url = "/get-started/flux-sources/"
     weight = 4
-  [[menu.main]]
-    parent = "tutorials"
-    name = "Progressive delivery"
-    url = "/tutorials/progressive-delivery/"
-    weight = 5
-  [[menu.main]]
-    parent = "tutorials"
-    name = "Generating migrations with Jsonnet"
-    url = "/tutorials/jsonnet-migrations/"
-    weight = 6
 
+  # 2 ── Guides: deeper end-to-end walkthroughs.
   [[menu.main]]
-    identifier = "usage"
-    name = "Usage"
-    url = "/usage/"
+    identifier = "guides"
+    name = "Guides"
+    url = "/guides/"
     weight = 20
   [[menu.main]]
-    parent = "usage"
-    name = "Stages and sources"
-    url = "/usage/stages-and-sources/"
+    parent = "guides"
+    name = "Parameterizing a rollout"
+    url = "/guides/parameters/"
     weight = 1
   [[menu.main]]
-    parent = "usage"
-    name = "Actions"
-    url = "/usage/actions/"
+    parent = "guides"
+    name = "Progressive delivery"
+    url = "/guides/progressive-delivery/"
     weight = 2
   [[menu.main]]
-    parent = "usage"
+    parent = "guides"
+    name = "Generating migrations with Jsonnet"
+    url = "/guides/jsonnet-migrations/"
+    weight = 3
+
+  # 3 ── Defining a release: the core StageSet spec.
+  [[menu.main]]
+    identifier = "defining"
+    name = "Defining a release"
+    url = "/defining-a-release/"
+    weight = 30
+  [[menu.main]]
+    parent = "defining"
+    name = "Stages and sources"
+    url = "/defining-a-release/stages-and-sources/"
+    weight = 1
+  [[menu.main]]
+    parent = "defining"
+    name = "Actions"
+    url = "/defining-a-release/actions/"
+    weight = 2
+  [[menu.main]]
+    parent = "defining"
     name = "Ready checks"
-    url = "/usage/ready-checks/"
+    url = "/defining-a-release/ready-checks/"
     weight = 3
   [[menu.main]]
-    parent = "usage"
+    parent = "defining"
     name = "Conflict policies"
-    url = "/usage/conflict-policies/"
+    url = "/defining-a-release/conflict-policies/"
     weight = 4
   [[menu.main]]
-    parent = "usage"
-    name = "Update windows"
-    url = "/usage/update-windows/"
-    weight = 5
-  [[menu.main]]
-    parent = "usage"
-    name = "Versioned migrations"
-    url = "/usage/versioned-migrations/"
-    weight = 6
-  [[menu.main]]
-    parent = "usage"
-    name = "Rollback"
-    url = "/usage/rollback/"
-    weight = 7
-  [[menu.main]]
-    parent = "usage"
-    name = "Secrets encryption"
-    url = "/usage/encryption/"
-    weight = 8
-  [[menu.main]]
-    parent = "usage"
-    name = "Multi-cluster and tenancy"
-    url = "/usage/multi-cluster/"
-    weight = 9
-  [[menu.main]]
-    parent = "usage"
-    name = "Producer-aware sources"
-    url = "/usage/producer-aware-sources/"
-    weight = 10
-  [[menu.main]]
-    parent = "usage"
+    parent = "defining"
     name = "Inventory and pruning"
-    url = "/usage/inventory/"
-    weight = 11
-  [[menu.main]]
-    parent = "usage"
-    name = "Admission webhook"
-    url = "/usage/admission-webhook/"
-    weight = 12
-  [[menu.main]]
-    parent = "usage"
-    name = "Network policy"
-    url = "/usage/network-policy/"
-    weight = 13
-  [[menu.main]]
-    parent = "usage"
-    name = "Service mesh"
-    url = "/usage/service-mesh/"
-    weight = 14
-  [[menu.main]]
-    parent = "usage"
-    name = "Flux Operator integration"
-    url = "/usage/flux-operator/"
-    weight = 15
-  [[menu.main]]
-    parent = "usage"
-    name = "Claude Code skill"
-    url = "/usage/claude-code/"
-    weight = 16
-  [[menu.main]]
-    parent = "usage"
-    name = "MCP server"
-    url = "/usage/mcp-server/"
-    weight = 17
+    url = "/defining-a-release/inventory/"
+    weight = 5
 
+  # 4 ── Gating & rollout safety: when and whether a rollout proceeds.
+  [[menu.main]]
+    identifier = "gating"
+    name = "Gating & rollout safety"
+    url = "/gating/"
+    weight = 40
+  [[menu.main]]
+    parent = "gating"
+    name = "Update windows"
+    url = "/gating/update-windows/"
+    weight = 1
+  [[menu.main]]
+    parent = "gating"
+    name = "Stage promotion"
+    url = "/gating/stage-promotion/"
+    weight = 2
+  [[menu.main]]
+    parent = "gating"
+    name = "Error-budget freeze"
+    url = "/gating/error-budget/"
+    weight = 3
+  [[menu.main]]
+    parent = "gating"
+    name = "Versioned migrations"
+    url = "/gating/versioned-migrations/"
+    weight = 4
+  [[menu.main]]
+    parent = "gating"
+    name = "Rollback"
+    url = "/gating/rollback/"
+    weight = 5
+
+  # 5 ── Security & multi-tenancy.
+  [[menu.main]]
+    identifier = "security"
+    name = "Security & multi-tenancy"
+    url = "/security/"
+    weight = 50
+  [[menu.main]]
+    parent = "security"
+    name = "Secrets encryption"
+    url = "/security/encryption/"
+    weight = 1
+  [[menu.main]]
+    parent = "security"
+    name = "Multi-cluster and tenancy"
+    url = "/security/multi-cluster/"
+    weight = 2
+  [[menu.main]]
+    parent = "security"
+    name = "Admission webhook"
+    url = "/security/admission-webhook/"
+    weight = 3
+  [[menu.main]]
+    parent = "security"
+    name = "Network policy"
+    url = "/security/network-policy/"
+    weight = 4
+  [[menu.main]]
+    parent = "security"
+    name = "Service mesh"
+    url = "/security/service-mesh/"
+    weight = 5
+
+  # 6 ── Integrations & tooling.
+  [[menu.main]]
+    identifier = "integrations"
+    name = "Integrations & tooling"
+    url = "/integrations/"
+    weight = 60
+  [[menu.main]]
+    parent = "integrations"
+    name = "Producer-aware sources"
+    url = "/integrations/producer-aware-sources/"
+    weight = 1
+  [[menu.main]]
+    parent = "integrations"
+    name = "Flux Operator integration"
+    url = "/integrations/flux-operator/"
+    weight = 2
+  [[menu.main]]
+    parent = "integrations"
+    name = "Claude Code skill"
+    url = "/integrations/claude-code/"
+    weight = 3
+  [[menu.main]]
+    parent = "integrations"
+    name = "MCP server"
+    url = "/integrations/mcp-server/"
+    weight = 4
+
+  # 7 ── Run in production: day-two operation of the controller.
+  [[menu.main]]
+    identifier = "production"
+    name = "Run in production"
+    url = "/running/"
+    weight = 70
+  [[menu.main]]
+    parent = "production"
+    name = "Production"
+    url = "/running/production/"
+    weight = 1
+  [[menu.main]]
+    parent = "production"
+    name = "Operations"
+    url = "/running/operations/"
+    weight = 2
+  [[menu.main]]
+    parent = "production"
+    name = "Scale and capacity"
+    url = "/running/scale-and-capacity/"
+    weight = 3
+  [[menu.main]]
+    parent = "production"
+    name = "Backup and disaster recovery"
+    url = "/running/disaster-recovery/"
+    weight = 4
+
+  # 8 ── Observability.
   [[menu.main]]
     identifier = "observability"
     name = "Observability"
     url = "/observability/"
-    weight = 25
+    weight = 80
   [[menu.main]]
     parent = "observability"
     name = "Logging"
@@ -261,11 +286,12 @@ pygmentsUseClasses = true
     url = "/observability/dashboard/"
     weight = 6
 
+  # 9 ── CLI.
   [[menu.main]]
     identifier = "cli"
     name = "CLI"
     url = "/cli/"
-    weight = 30
+    weight = 90
   [[menu.main]]
     parent = "cli"
     name = "get"
@@ -291,12 +317,18 @@ pygmentsUseClasses = true
     name = "reconcile"
     url = "/cli/reconcile/"
     weight = 5
+  [[menu.main]]
+    parent = "cli"
+    name = "lint-migrations"
+    url = "/cli/lint-migrations/"
+    weight = 6
 
+  # 10 ── API reference.
   [[menu.main]]
     identifier = "api"
-    name = "API reference"
+    name = "API"
     url = "/api/"
-    weight = 40
+    weight = 100
   [[menu.main]]
     parent = "api"
     name = "StageSet"
@@ -308,11 +340,39 @@ pygmentsUseClasses = true
     url = "/api/stageinventory/"
     weight = 2
 
+  # 11 ── Reference: install-time and release reference pages.
+  [[menu.main]]
+    identifier = "reference"
+    name = "Reference"
+    url = "/reference/"
+    weight = 110
+  [[menu.main]]
+    parent = "reference"
+    name = "Configuration reference"
+    url = "/reference/configuration/"
+    weight = 1
+  [[menu.main]]
+    parent = "reference"
+    name = "Helm chart values"
+    url = "/reference/helm-values/"
+    weight = 2
+  [[menu.main]]
+    parent = "reference"
+    name = "Verifying releases"
+    url = "/reference/verifying-releases/"
+    weight = 3
+  [[menu.main]]
+    parent = "reference"
+    name = "Upgrading"
+    url = "/reference/upgrading/"
+    weight = 4
+
+  # 12 ── Comparisons.
   [[menu.main]]
     identifier = "comparisons"
     name = "Comparisons"
     url = "/comparisons/"
-    weight = 50
+    weight = 120
   [[menu.main]]
     parent = "comparisons"
     name = "vs Helm"
@@ -349,17 +409,19 @@ pygmentsUseClasses = true
     url = "/comparisons/flux-operator/"
     weight = 7
 
+  # 13 ── Runbooks (flat index page).
   [[menu.main]]
     identifier = "runbooks"
     name = "Runbooks"
     url = "/runbooks/"
-    weight = 60
+    weight = 130
 
+  # 14 ── Contributing.
   [[menu.main]]
     identifier = "contributing"
     name = "Contributing"
     url = "/contributing/"
-    weight = 70
+    weight = 140
   [[menu.main]]
     parent = "contributing"
     name = "Building and testing"

@@ -10,7 +10,7 @@ tags: [runbooks, error-budget, slo, scheduling, troubleshooting]
 
 ## Cause
 
-This is **not a failure** — it is the [error-budget freeze](/usage/error-budget/) working as configured. The metric source named in `spec.errorBudget.source` returned a remaining-budget value below `freezeThreshold`, so new-revision rollouts are held until the budget recovers. This is the Google SRE error-budget policy: when the budget is spent, stop shipping feature changes until reliability recovers.
+This is **not a failure** — it is the [error-budget freeze](/gating/error-budget/) working as configured. The metric source named in `spec.errorBudget.source` returned a remaining-budget value below `freezeThreshold`, so new-revision rollouts are held until the budget recovers. This is the Google SRE error-budget policy: when the budget is spent, stop shipping feature changes until reliability recovers.
 
 The freeze holds only new-revision rollouts. Drift on the current revision keeps being corrected — a frozen service still has its declared state enforced — and the freeze self-resumes once the remaining budget reaches `resumeThreshold`.
 

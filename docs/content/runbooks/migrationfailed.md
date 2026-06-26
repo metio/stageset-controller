@@ -22,12 +22,12 @@ Retries are safe for the actions that already completed: the per-action ledger
 each finished action, so a retry resumes at the failed action rather than
 re-running destructive work from the top.
 
-## Fix
+## Remediation
 
 - Read the Message and the migration's Events (`MigrationStarted` /
   `MigrationFailed`) to find the failed action and its error.
 - Fix the underlying cause (the target object, RBAC for the action, the endpoint
   an `http` action calls, the image a `job` runs).
 - The migration re-attempts automatically on the next retry. After repeated
-  failures it escalates to [`MigrationDirty`](../migrationdirty/), which halts
+  failures it escalates to [`MigrationDirty`](/runbooks/migrationdirty/), which halts
   auto-retry — see that page for the manual-recovery step.

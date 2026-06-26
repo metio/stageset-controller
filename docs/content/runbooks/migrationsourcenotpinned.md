@@ -27,7 +27,7 @@ that auto-rollout window.
 A `Bucket` source is never pinned; an in-cluster `ExternalArtifact` is exempt
 (its producer owns the revision).
 
-## Fix
+## Remediation
 
 Pin the source to an immutable revision. For an `OCIRepository`:
 

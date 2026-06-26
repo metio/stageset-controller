@@ -32,7 +32,7 @@ This validates the same invariants the admission webhook enforces for inline
 `spec.migrations`; for a sourced ladder they can only be checked at fetch time,
 not at `kubectl apply`.
 
-## Fix
+## Remediation
 
 - Fix the offending file in the source repository/registry and republish the
   artifact. Validate it the same way the controller does before publishing — the

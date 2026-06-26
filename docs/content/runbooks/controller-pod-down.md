@@ -34,9 +34,9 @@ Look for flag-parse errors at startup, RBAC `Forbidden` on the controller's own
 - Fix the surfaced cause (correct the flag/values, grant the missing controller
   RBAC, raise resource limits).
 - Run more than one replica with leader election so a single pod failure doesn't
-  stop reconciliation — see [production](/installation/production/#high-availability).
+  stop reconciliation — see [production](/running/production/#high-availability).
 - If admission is blocking writes during the outage and you must unblock urgently,
   scope or relax the webhook `failurePolicy`, then restore it once the controller
   is healthy.
 
-See [operations](/installation/operations/) for the full alert set and its thresholds.
+See [operations](/running/operations/) for the full alert set and its thresholds.

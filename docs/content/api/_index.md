@@ -1,5 +1,7 @@
 ---
 title: API reference
+description: Field-by-field reference for the StageSet and StageInventory custom resources in the stages.metio.wtf/v1 API group.
+tags: [api, reference, crd]
 ---
 
 The controller serves two custom resources in the `stages.metio.wtf/v1` API

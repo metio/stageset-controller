@@ -80,7 +80,7 @@ receives spans from your apiserver or source-controller can stitch a reconcile t
 its upstream cause.
 
 When the controller runs under a NetworkPolicy, the OTLP collector egress must be
-allowed; see the [network policy page](/usage/network-policy/) for the egress row.
+allowed; see the [network policy page](/security/network-policy/) for the egress row.
 
 ## The Helm chart
 
@@ -101,4 +101,4 @@ The chart threads these into the deployment only when `endpoint` is non-empty, s
 leaving the default empty endpoint renders no tracing flags at all and the
 controller stays in no-op mode. `sampleRatio` is schema-bounded to the `0.0..1.0`
 range. For the full flag list with defaults, see the
-[configuration reference](/installation/configuration/).
+[configuration reference](/reference/configuration/).

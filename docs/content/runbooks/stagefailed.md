@@ -38,8 +38,8 @@ Match the operation in the Message:
 - **fetch / digest** — confirm the producer republished cleanly; a digest mismatch means the artifact changed mid-flight or is corrupt.
 - **build** — validate the manifests/patches locally; ensure every `substituteFrom` ConfigMap/Secret exists.
 - **apply RBAC** — grant the impersonated `serviceAccountName` (or the controller) the verbs it was denied; the Message names the resource.
-- **apply immutable conflict** — set a per-stage [`conflictPolicy`](/usage/conflict-policies/) (or `force: true`, its blunt `Recreate`-everything form) so the controller deletes and recreates the conflicting object; for objects holding data (`PersistentVolumeClaim`/`PersistentVolume`) a `Recreate` rule additionally requires `allowDataLoss: true`. Alternatively, use content-hash-suffixed names so a change is a new object rather than a mutation.
+- **apply immutable conflict** — set a per-stage [`conflictPolicy`](/defining-a-release/conflict-policies/) (or `force: true`, its blunt `Recreate`-everything form) so the controller deletes and recreates the conflicting object; for objects holding data (`PersistentVolumeClaim`/`PersistentVolume`) a `Recreate` rule additionally requires `allowDataLoss: true`. Alternatively, use content-hash-suffixed names so a change is a new object rather than a mutation.
 - **verify timeout** — raise the stage `timeout`, or fix why the workload is not becoming Ready.
 - **action** — read the action's error; for `http`, confirm the host is in `--allowed-action-hosts`.
 
-Retries re-run the same pinned snapshot idempotently — actions already recorded in the stage's ledger do not re-fire. See [stages and sources](/usage/stages-and-sources/) for how a stage resolves and applies.
+Retries re-run the same pinned snapshot idempotently — actions already recorded in the stage's ledger do not re-fire. See [stages and sources](/defining-a-release/stages-and-sources/) for how a stage resolves and applies.
