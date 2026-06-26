@@ -86,7 +86,7 @@ func (promoteRequestedPredicate) Update(e event.UpdateEvent) bool {
 // design's self-review): if status is lost the soak restarts, which is
 // acceptable. verdict carries the metric-analysis evaluation for this reconcile,
 // or nil when the stage has no analysis.
-func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict, fastTrackOK bool, restart *restartVerdict) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
+func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict, fastTrackOK bool, restart *restartVerdict, event *eventVerdict) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
 	p := stage.Promotion
 	if p == nil {
 		return true, nil, 0, prior.LastHandledPromotion, false
@@ -121,6 +121,18 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 			ObservedRestarts: restart.observed,
 		}
 		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, restart.rollback
+	}
+
+	// Event gate: a watched pod group has accumulated too many Warning events.
+	// Block the advance (or roll back) — same semantics as the restart gate.
+	if event != nil {
+		s := &stagesv1.PromotionState{
+			Phase:          stagesv1.PromotionBlocked,
+			Since:          phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now),
+			EventCheck:     event.check,
+			ObservedEvents: event.observed,
+		}
+		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, event.rollback
 	}
 
 	// Analysis bookkeeping: count consecutive failing evaluations for this
@@ -238,6 +250,18 @@ func promotionHoldCondition(ss *stagesv1.StageSet, stage string, state *stagesv1
 			return ReasonPromotionBlocked, fmt.Sprintf(
 				"stage %q restart check %q observed %d pod restart(s) over its limit; the rollout will not advance past it",
 				stage, state.RestartCheck, state.ObservedRestarts,
+			)
+		}
+		if state != nil && state.EventCheck != "" {
+			if state.AbortedRevision != "" {
+				return ReasonPromotionBlocked, fmt.Sprintf(
+					"stage %q event check %q observed %d warning event(s) over its limit; rolled back to its last-good revision",
+					stage, state.EventCheck, state.ObservedEvents,
+				)
+			}
+			return ReasonPromotionBlocked, fmt.Sprintf(
+				"stage %q event check %q observed %d warning event(s) over its limit; the rollout will not advance past it",
+				stage, state.EventCheck, state.ObservedEvents,
 			)
 		}
 		if state != nil && state.AbortedRevision != "" {

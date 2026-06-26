@@ -2027,6 +2027,125 @@ spec:
                           required:
                           - checks
                           type: object
+                        eventGate:
+                          description: |-
+                            EventGate blocks promotion when a watched group of pods accumulates too many
+                            Warning events (FailedScheduling, OOMKilling, ImagePullBackOff, FailedMount,
+                            …) while the stage soaks. It surfaces behaviour that leaves the workload
+                            Ready — so ReadyChecks pass and pods may not even restart — yet the rollout
+                            is sick; a companion to the restart gate.
+                          properties:
+                            checks:
+                              description: Checks are the pod groups to watch; a breach
+                                in any one blocks promotion.
+                              items:
+                                description: |-
+                                  EventCheck blocks a stage's promotion when its pods accumulate more than
+                                  maxEvents Warning events carrying one of the named reasons. Pods are selected
+                                  by label (in the StageSet's namespace), so the group is not tied to a single
+                                  workload kind. The pods must be observable by the controller (the same cluster,
+                                  or the one the stage's kubeConfig targets), which needs events list access.
+                                properties:
+                                  maxEvents:
+                                    description: |-
+                                      MaxEvents is the total matching Warning events — summed by occurrence count
+                                      across the selected pods — tolerated before the check fails. Defaults to 0:
+                                      any matching event fails.
+                                    format: int32
+                                    minimum: 0
+                                    type: integer
+                                  name:
+                                    description: |-
+                                      Name identifies the check in status, events, and the Ready message. Unique
+                                      within a stage's promotion.
+                                    type: string
+                                  onFailure:
+                                    description: |-
+                                      OnFailure overrides the gate's default action for this check (Hold or
+                                      Rollback). Defaults to the EventGate's onFailure.
+                                    enum:
+                                    - Hold
+                                    - Rollback
+                                    type: string
+                                  reasons:
+                                    description: |-
+                                      Reasons is the set of Warning event reasons that count — e.g.
+                                      FailedScheduling, OOMKilling, BackOff, FailedMount, ErrImagePull. Required:
+                                      events are noisy, so a check counts only the reasons you name and ignores the
+                                      rest.
+                                    items:
+                                      type: string
+                                    minItems: 1
+                                    type: array
+                                  selector:
+                                    description: |-
+                                      Selector chooses the pods this check watches, in the StageSet's namespace.
+                                      It must match at least one label; an empty selector is rejected.
+                                    properties:
+                                      matchExpressions:
+                                        description: matchExpressions is a list of
+                                          label selector requirements. The requirements
+                                          are ANDed.
+                                        items:
+                                          description: |-
+                                            A label selector requirement is a selector that contains values, a key, and an operator that
+                                            relates the key and values.
+                                          properties:
+                                            key:
+                                              description: key is the label key that
+                                                the selector applies to.
+                                              type: string
+                                            operator:
+                                              description: |-
+                                                operator represents a key's relationship to a set of values.
+                                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                                              type: string
+                                            values:
+                                              description: |-
+                                                values is an array of string values. If the operator is In or NotIn,
+                                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                the values array must be empty. This array is replaced during a strategic
+                                                merge patch.
+                                              items:
+                                                type: string
+                                              type: array
+                                              x-kubernetes-list-type: atomic
+                                          required:
+                                          - key
+                                          - operator
+                                          type: object
+                                        type: array
+                                        x-kubernetes-list-type: atomic
+                                      matchLabels:
+                                        additionalProperties:
+                                          type: string
+                                        description: |-
+                                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                        type: object
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                required:
+                                - name
+                                - reasons
+                                - selector
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
+                            onFailure:
+                              description: |-
+                                OnFailure is the default action when a check breaches: Hold (default) or
+                                Rollback. Identical semantics to RestartGate.onFailure; a check may override.
+                              enum:
+                              - Hold
+                              - Rollback
+                              type: string
+                          required:
+                          - checks
+                          type: object
                         fastTrack:
                           description: |-
                             FastTrack shortens the soak when the system is demonstrably healthy: once
@@ -2862,6 +2981,11 @@ spec:
                             once it exceeds failureLimit.
                           format: int32
                           type: integer
+                        eventCheck:
+                          description: |-
+                            EventCheck names the promotion.eventGate check whose pods exceeded their
+                            maxEvents, when a Warning-event breach is what blocks the rollout.
+                          type: string
                         lastAnalysis:
                           description: |-
                             LastAnalysis records the most recent promotion-analysis evaluation, so an
@@ -2903,6 +3027,12 @@ spec:
                               format: date-time
                               type: string
                           type: object
+                        observedEvents:
+                          description: |-
+                            ObservedEvents is the matching Warning-event total the breaching EventCheck
+                            observed.
+                          format: int32
+                          type: integer
                         observedRestarts:
                           description: ObservedRestarts is the restart total the breaching
                             RestartCheck observed.

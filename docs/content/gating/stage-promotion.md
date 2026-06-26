@@ -102,6 +102,51 @@ While a check is breached the StageSet reports `Ready=False` with reason
 watched pods must be readable by the apply identity (the tenant `ServiceAccount`,
 or the cluster the stage's `kubeConfig` targets), so grant it `pods` `list`.
 
+## Block on bad events
+
+A pod can stay `Ready` and never restart while the API streams Warning events
+about it — new replicas that can't schedule, probes flapping under load, an
+image that won't pull. An `eventGate` watches those events on a group of pods and
+blocks the promotion once they pile up.
+
+```yaml
+    - name: staging
+      sourceRef:
+        name: web-staging
+      promotion:
+        soak: 10m
+        eventGate:
+          onFailure: Hold        # default for every check below (Hold | Rollback)
+          checks:
+            - name: api
+              selector:
+                matchLabels:
+                  app: web-api
+              reasons:            # only these Warning reasons count
+                - FailedScheduling
+                - OOMKilling
+                - FailedMount
+                - ErrImagePull
+              maxEvents: 0        # any matching event fails (the default)
+    - name: prod
+      sourceRef:
+        name: web-prod
+```
+
+Each check counts Warning events whose `reason` is in its `reasons` list and whose
+target pod matches the `selector`, in the StageSet's namespace, and fails once the
+total (by occurrence count) exceeds `maxEvents` (`0` by default). `reasons` is
+required — events are noisy, so a check only counts the reasons you name. Events
+are matched to the exact pods running this revision, so a previous revision's
+events don't carry over.
+
+`selector` and `onFailure` work exactly as they do for the
+[restart gate](#block-on-pod-restarts) — pods matched by label (any source), the
+gate default overridable per check, and `Rollback` reverting the stage to its
+last-good revision. While a check is breached the StageSet reports `Ready=False`
+with reason `PromotionBlocked`, naming the failing check and the event total. The
+apply identity needs `events` `list` (alongside `pods` `list`).
+
 ## Require a manual promotion
 
 Hold at a stage until an operator promotes it — the "confirm before prod" gate.

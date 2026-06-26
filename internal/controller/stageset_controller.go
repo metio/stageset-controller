@@ -791,7 +791,15 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 				restart = rv
 			}
-			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK, restart)
+			var event *eventVerdict
+			if stage.Promotion != nil && stage.Promotion.EventGate != nil {
+				ev, eerr := r.evaluateEventChecks(ctx, target, &ss, stage)
+				if eerr != nil {
+					return ctrl.Result{}, eerr // can't read events: fail closed, retry
+				}
+				event = ev
+			}
+			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK, restart, event)
 			appliedRevision := ra.Revision
 			if rollback {
 				// A promotion gate with onFailure=Rollback (analysis or a restart
@@ -802,6 +810,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				cause := "promotion analysis"
 				if promoState != nil && promoState.RestartCheck != "" {
 					cause = fmt.Sprintf("restart check %q", promoState.RestartCheck)
+				} else if promoState != nil && promoState.EventCheck != "" {
+					cause = fmt.Sprintf("event check %q", promoState.EventCheck)
 				}
 				reverted, ok, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, applier, fetcher, recorder)
 				if rerr != nil {

@@ -314,6 +314,14 @@ type StagePromotion struct {
 	// restarting — the dependency-free companion to a soak.
 	// +optional
 	RestartGate *RestartGate `json:"restartGate,omitempty"`
+
+	// EventGate blocks promotion when a watched group of pods accumulates too many
+	// Warning events (FailedScheduling, OOMKilling, ImagePullBackOff, FailedMount,
+	// …) while the stage soaks. It surfaces behaviour that leaves the workload
+	// Ready — so ReadyChecks pass and pods may not even restart — yet the rollout
+	// is sick; a companion to the restart gate.
+	// +optional
+	EventGate *EventGate `json:"eventGate,omitempty"`
 }
 
 // RestartGate watches one or more pod groups for restarts during a stage's soak;
@@ -364,6 +372,60 @@ type RestartCheck struct {
 
 	// OnFailure overrides the gate's default action for this check (Hold or
 	// Rollback). Defaults to the RestartGate's onFailure.
+	// +optional
+	// +kubebuilder:validation:Enum=Hold;Rollback
+	OnFailure string `json:"onFailure,omitempty"`
+}
+
+// EventGate watches one or more pod groups for Warning events during a stage's
+// soak; a breach in any check blocks the stage's promotion.
+type EventGate struct {
+	// OnFailure is the default action when a check breaches: Hold (default) or
+	// Rollback. Identical semantics to RestartGate.onFailure; a check may override.
+	// +optional
+	// +kubebuilder:validation:Enum=Hold;Rollback
+	OnFailure string `json:"onFailure,omitempty"`
+
+	// Checks are the pod groups to watch; a breach in any one blocks promotion.
+	// +required
+	// +listType=map
+	// +listMapKey=name
+	Checks []EventCheck `json:"checks"`
+}
+
+// EventCheck blocks a stage's promotion when its pods accumulate more than
+// maxEvents Warning events carrying one of the named reasons. Pods are selected
+// by label (in the StageSet's namespace), so the group is not tied to a single
+// workload kind. The pods must be observable by the controller (the same cluster,
+// or the one the stage's kubeConfig targets), which needs events list access.
+type EventCheck struct {
+	// Name identifies the check in status, events, and the Ready message. Unique
+	// within a stage's promotion.
+	// +required
+	Name string `json:"name"`
+
+	// Selector chooses the pods this check watches, in the StageSet's namespace.
+	// It must match at least one label; an empty selector is rejected.
+	// +required
+	Selector metav1.LabelSelector `json:"selector"`
+
+	// Reasons is the set of Warning event reasons that count — e.g.
+	// FailedScheduling, OOMKilling, BackOff, FailedMount, ErrImagePull. Required:
+	// events are noisy, so a check counts only the reasons you name and ignores the
+	// rest.
+	// +required
+	// +kubebuilder:validation:MinItems=1
+	Reasons []string `json:"reasons"`
+
+	// MaxEvents is the total matching Warning events — summed by occurrence count
+	// across the selected pods — tolerated before the check fails. Defaults to 0:
+	// any matching event fails.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxEvents int32 `json:"maxEvents,omitempty"`
+
+	// OnFailure overrides the gate's default action for this check (Hold or
+	// Rollback). Defaults to the EventGate's onFailure.
 	// +optional
 	// +kubebuilder:validation:Enum=Hold;Rollback
 	OnFailure string `json:"onFailure,omitempty"`
@@ -1254,6 +1316,16 @@ type PromotionState struct {
 	// ObservedRestarts is the restart total the breaching RestartCheck observed.
 	// +optional
 	ObservedRestarts int32 `json:"observedRestarts,omitempty"`
+
+	// EventCheck names the promotion.eventGate check whose pods exceeded their
+	// maxEvents, when a Warning-event breach is what blocks the rollout.
+	// +optional
+	EventCheck string `json:"eventCheck,omitempty"`
+
+	// ObservedEvents is the matching Warning-event total the breaching EventCheck
+	// observed.
+	// +optional
+	ObservedEvents int32 `json:"observedEvents,omitempty"`
 
 	// AbortedRevision names the revision a promotion analysis with
 	// onFailure=Rollback reverted away from. While it equals the pinned revision
