@@ -143,6 +143,27 @@ const (
 	// Ready=False until promoted; the stage stays applied meanwhile.
 	ReasonAwaitingPromotion = "AwaitingPromotion"
 
+	// ReasonBudgetExhausted: spec.errorBudget's remaining budget is below
+	// freezeThreshold, so new-revision rollouts are frozen (the SRE error-budget
+	// policy). Drift on the current revision keeps being corrected; the freeze
+	// self-resumes once the budget recovers to resumeThreshold. Set on Ready
+	// only when nothing is deployed yet; an already-deployed StageSet stays
+	// Ready=True with status.budgetFreeze.
+	ReasonBudgetExhausted = "BudgetExhausted"
+
+	// ReasonBudgetSourceUnavailable: a metric source (error-budget freeze or a
+	// promotion analysis check) was unreachable or returned no usable scalar.
+	// Loud by design so a silently-disabled gate is alertable. Transient — the
+	// controller keeps retrying. The gate's onSourceError decides whether the
+	// rollout proceeds (Allow) or holds (Hold) meanwhile.
+	ReasonBudgetSourceUnavailable = "BudgetSourceUnavailable"
+
+	// ReasonPromotionBlocked: a stage's promotion analysis has breached its
+	// thresholds more than failureLimit times, so the rollout is not advanced.
+	// onFailure decides whether the stage holds (default) or is rolled back to
+	// its last-known-good revision.
+	ReasonPromotionBlocked = "PromotionBlocked"
+
 	// ReasonReady: all stages applied and verified at lastAppliedRevisions.
 	ReasonReady = "Succeeded"
 )
@@ -176,5 +197,8 @@ var AllReasons = []string{
 	ReasonRBACDenied,
 	ReasonSoaking,
 	ReasonAwaitingPromotion,
+	ReasonBudgetExhausted,
+	ReasonBudgetSourceUnavailable,
+	ReasonPromotionBlocked,
 	ReasonReady,
 }

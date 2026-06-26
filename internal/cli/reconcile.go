@@ -39,17 +39,19 @@ const (
 	requestedAtAnnotation    = fluxmeta.ReconcileRequestAnnotation
 	updateNowAnnotation      = "stages.metio.wtf/update-now"
 	reconcileStageAnnotation = "stages.metio.wtf/reconcile-stage"
+	budgetOverrideAnnotation = "stages.metio.wtf/budget-override"
 )
 
 type reconcileOptions struct {
-	name       string
-	stage      string
-	withSource bool
-	strict     bool
-	updateNow  bool
-	force      bool
-	wait       bool
-	timeout    time.Duration
+	name           string
+	stage          string
+	withSource     bool
+	strict         bool
+	updateNow      bool
+	budgetOverride bool
+	force          bool
+	wait           bool
+	timeout        time.Duration
 }
 
 func newReconcileCommand(o *options) *cobra.Command {
@@ -70,6 +72,7 @@ func newReconcileCommand(o *options) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.withSource, "with-source", false, "Also re-request the stage sources (ExternalArtifacts) before reconciling.")
 	cmd.Flags().BoolVar(&opts.strict, "strict", false, "With --with-source, exit non-zero if any source could not be re-requested (instead of warning and continuing).")
 	cmd.Flags().BoolVar(&opts.updateNow, "update-now", false, "Apply a window-held rollout immediately, bypassing update windows.")
+	cmd.Flags().BoolVar(&opts.budgetOverride, "budget-override", false, "Ship a rollout held by an error-budget freeze once (break-glass for a reliability/security fix).")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Proceed even when the StageSet is suspended.")
 	cmd.Flags().BoolVar(&opts.wait, "wait", false, "Wait until the controller reports the request handled.")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 5*time.Minute, "How long to wait with --wait.")
@@ -112,6 +115,9 @@ func runReconcile(ctx context.Context, o *options, opts reconcileOptions) error 
 	ann[requestedAtAnnotation] = token
 	if opts.updateNow {
 		ann[updateNowAnnotation] = token
+	}
+	if opts.budgetOverride {
+		ann[budgetOverrideAnnotation] = token
 	}
 	if opts.stage != "" {
 		ann[reconcileStageAnnotation] = opts.stage + "@" + token
@@ -209,6 +215,9 @@ func reconcileHandled(ss *stagesv1.StageSet, opts reconcileOptions, token string
 				if opts.updateNow && ss.Status.PendingUpdate != nil {
 					return false
 				}
+				if opts.budgetOverride && ss.Status.BudgetFreeze != nil {
+					return false
+				}
 				return true
 			}
 		}
@@ -218,6 +227,9 @@ func reconcileHandled(ss *stagesv1.StageSet, opts reconcileOptions, token string
 		return false
 	}
 	if opts.updateNow && ss.Status.PendingUpdate != nil {
+		return false
+	}
+	if opts.budgetOverride && ss.Status.BudgetFreeze != nil {
 		return false
 	}
 	return true

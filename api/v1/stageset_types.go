@@ -95,6 +95,14 @@ type StageSetSpec struct {
 	// +optional
 	WindowScope string `json:"windowScope,omitempty"`
 
+	// ErrorBudget freezes new-revision rollouts while a service is out of its SLO
+	// error budget — the Google SRE error-budget policy. It reads one scalar
+	// (budget remaining, 0..1) from a metric source and holds the rollout while
+	// the value is below freezeThreshold, resuming on its own when it recovers.
+	// ANDed with updateWindows: a rollout proceeds only if every gate allows.
+	// +optional
+	ErrorBudget *ErrorBudget `json:"errorBudget,omitempty"`
+
 	// Stages is the ordered list of stages.
 	// +kubebuilder:validation:MinItems=1
 	// +required
@@ -130,6 +138,51 @@ type UpdateWindow struct {
 	// To is the exclusive end of an absolute window.
 	// +optional
 	To *metav1.Time `json:"to,omitempty"`
+}
+
+// ErrorBudget configures a rollout-wide error-budget freeze. The source's
+// scalar is the remaining error budget (1 = full, 0 = exhausted, <0 =
+// overspent); the rollout freezes while it is below freezeThreshold and resumes
+// once it reaches resumeThreshold.
+type ErrorBudget struct {
+	// Source resolves to the remaining error budget as a scalar (typically a
+	// 0..1 ratio). The controller carries no SLO math — it reads this number and
+	// compares it to the thresholds below.
+	// +required
+	Source MetricSource `json:"source"`
+
+	// FreezeThreshold freezes new-revision rollouts when the remaining budget is
+	// strictly below this value. "0" freezes only when the budget is overspent;
+	// "0.1" keeps a 10% reserve. A decimal string.
+	// +required
+	FreezeThreshold string `json:"freezeThreshold"`
+
+	// ResumeThreshold resumes rollouts only once the remaining budget reaches
+	// this value. Set it above freezeThreshold for hysteresis (freeze at 0,
+	// resume at 0.05) so a budget hovering at the threshold doesn't flap the
+	// freeze. Defaults to freezeThreshold (no hysteresis). A decimal string.
+	// +optional
+	ResumeThreshold string `json:"resumeThreshold,omitempty"`
+
+	// OnSourceError chooses what happens when the source is unreachable or
+	// returns no usable scalar: Allow (proceed — the default, because blocking a
+	// rollout-wide freeze stops every deploy including the hotfix you need during
+	// the very outage that took the source down) or Hold (block). Either way the
+	// error is loud: a BudgetSourceUnavailable condition, a Warning event, and
+	// the metric_source_errors metric.
+	// +kubebuilder:validation:Enum=Allow;Hold
+	// +optional
+	OnSourceError string `json:"onSourceError,omitempty"`
+
+	// Interval is the re-check cadence while frozen. Defaults to the StageSet's
+	// reconcile interval.
+	// +optional
+	Interval *metav1.Duration `json:"interval,omitempty"`
+
+	// DryRun records what would freeze (status + metric) without holding the
+	// rollout, so an operator can prove a freeze rule fires before it gates.
+	// +optional
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
 // Stage is one ordered, gated unit of a StageSet.
@@ -226,6 +279,77 @@ type StagePromotion struct {
 	// Defaults to false.
 	// +optional
 	RequireManualPromotion bool `json:"requireManualPromotion,omitempty"`
+
+	// Analysis advances the stage only if metric checks against external sources
+	// keep passing. Each check reads one scalar and compares it to a threshold;
+	// a stage is promoted once its checks pass and refused after more than
+	// failureLimit failing evaluations. This sees behavior a Deployment's own
+	// .status cannot — downstream error rate, latency, SLO burn — that
+	// point-in-time ReadyChecks miss. Combine with soak to observe over a window.
+	// +optional
+	Analysis *PromotionAnalysis `json:"analysis,omitempty"`
+}
+
+// PromotionAnalysis evaluates metric checks at a stage boundary. Every check
+// must stay within its threshold; the stage is refused after more than
+// failureLimit consecutive failing evaluations.
+type PromotionAnalysis struct {
+	// Checks are the metric comparisons, all of which must pass for the stage to
+	// promote. Each is a metric source plus a threshold.
+	// +kubebuilder:validation:MinItems=1
+	// +required
+	Checks []AnalysisCheck `json:"checks"`
+
+	// Interval is the re-evaluation cadence while the analysis holds the rollout.
+	// Defaults to the StageSet's reconcile interval.
+	// +optional
+	Interval *metav1.Duration `json:"interval,omitempty"`
+
+	// FailureLimit is how many consecutive failing evaluations are tolerated
+	// before the analysis fails the promotion. The count resets on a passing
+	// evaluation. Defaults to 0 (any failing evaluation fails the promotion).
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	FailureLimit *int32 `json:"failureLimit,omitempty"`
+
+	// OnFailure chooses what happens when the analysis fails: Hold (default —
+	// leave the stage applied but not promoted, surfacing why) or Rollback
+	// (revert this stage to its last-known-good revision, reusing the
+	// rollbackOnFailure snapshot machinery; scoped to this stage only).
+	// +kubebuilder:validation:Enum=Hold;Rollback
+	// +optional
+	OnFailure string `json:"onFailure,omitempty"`
+
+	// OnSourceError chooses what happens when a check's source is unreachable:
+	// Hold (default — never advance a stage whose behavior can't be verified;
+	// safe because holding only parks the rollout at the current healthy stage)
+	// or Allow (proceed). The opposite default of the error-budget freeze, which
+	// fails open because blocking it would stop every deploy.
+	// +kubebuilder:validation:Enum=Hold;Allow
+	// +optional
+	OnSourceError string `json:"onSourceError,omitempty"`
+
+	// DryRun records what would block the promotion (status + metric) without
+	// holding the rollout, so an operator can prove an analysis rule fires before
+	// it gates.
+	// +optional
+	DryRun bool `json:"dryRun,omitempty"`
+}
+
+// AnalysisCheck is one metric comparison in a promotion analysis.
+type AnalysisCheck struct {
+	// Name identifies the check in status and events.
+	// +required
+	Name string `json:"name"`
+
+	// Source resolves to the scalar this check compares.
+	// +required
+	Source MetricSource `json:"source"`
+
+	// Threshold the scalar must stay within (min/max). At least one bound is
+	// required.
+	// +required
+	Threshold Threshold `json:"threshold"`
 }
 
 // SourceReference names either an ExternalArtifact directly (the default
@@ -826,6 +950,43 @@ type StageSetStatus struct {
 	// stages.metio.wtf/update-now annotation, so an override fires once.
 	// +optional
 	LastHandledUpdateOverride string `json:"lastHandledUpdateOverride,omitempty"`
+
+	// BudgetFreeze is set while an error-budget freeze holds new-revision
+	// rollouts (or, under dryRun, while a freeze would hold them). It surfaces the
+	// last observed remaining budget so a wrong query doesn't hide.
+	// +optional
+	BudgetFreeze *BudgetFreeze `json:"budgetFreeze,omitempty"`
+
+	// LastHandledBudgetOverride is the value of the most recently honored
+	// stages.metio.wtf/budget-override annotation, so an override fires once.
+	// +optional
+	LastHandledBudgetOverride string `json:"lastHandledBudgetOverride,omitempty"`
+}
+
+// BudgetFreeze reports an active (or, under dryRun, simulated) error-budget
+// freeze: the last observed remaining budget, the thresholds in effect, when the
+// freeze began, and whether it is a dry run.
+type BudgetFreeze struct {
+	// Remaining is the last observed remaining-budget scalar, as a decimal
+	// string, so an operator can see whether the source returns what they expect.
+	// +optional
+	Remaining string `json:"remaining,omitempty"`
+
+	// FreezeThreshold echoes the threshold the freeze tripped at.
+	// +optional
+	FreezeThreshold string `json:"freezeThreshold,omitempty"`
+
+	// ResumeThreshold echoes the threshold the freeze will resume at.
+	// +optional
+	ResumeThreshold string `json:"resumeThreshold,omitempty"`
+
+	// Since is when the freeze began.
+	// +optional
+	Since *metav1.Time `json:"since,omitempty"`
+
+	// DryRun is true when the freeze is recorded but not enforced.
+	// +optional
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
 // PendingUpdate describes a rollout held by an update window.
@@ -945,6 +1106,12 @@ const (
 	// PromotionSoaking means the stage is applied and healthy and the rollout is
 	// holding through its soak window before advancing.
 	PromotionSoaking PromotionPhase = "Soaking"
+	// PromotionAnalyzing means the soak has elapsed (or none is set) and the
+	// rollout is holding while a promotion analysis observes the stage's metrics.
+	PromotionAnalyzing PromotionPhase = "Analyzing"
+	// PromotionBlocked means a promotion analysis has failed past its
+	// failureLimit and the stage is held (onFailure=Hold).
+	PromotionBlocked PromotionPhase = "Blocked"
 	// PromotionAwaitingManual means the stage is waiting for an operator to
 	// promote it (RequireManualPromotion).
 	PromotionAwaitingManual PromotionPhase = "AwaitingManual"
@@ -968,6 +1135,60 @@ type PromotionState struct {
 	// SoakUntil is the instant the soak window closes (Soaking only).
 	// +optional
 	SoakUntil *metav1.Time `json:"soakUntil,omitempty"`
+
+	// AnalysisFailures is the running count of consecutive failing analysis
+	// evaluations; it resets to zero on a passing evaluation and trips onFailure
+	// once it exceeds failureLimit.
+	// +optional
+	AnalysisFailures int32 `json:"analysisFailures,omitempty"`
+
+	// AbortedRevision names the revision a promotion analysis with
+	// onFailure=Rollback reverted away from. While it equals the pinned revision
+	// the rollout stays reverted and the stage is not re-applied — so a failing
+	// revision isn't churned apply→fail→revert each reconcile. Cleared by a new
+	// revision or a manual promote.
+	// +optional
+	AbortedRevision string `json:"abortedRevision,omitempty"`
+
+	// LastAnalysis records the most recent promotion-analysis evaluation, so an
+	// operator sees each check's observed value and verdict.
+	// +optional
+	LastAnalysis *AnalysisResult `json:"lastAnalysis,omitempty"`
+}
+
+// AnalysisResult is the outcome of one promotion-analysis evaluation.
+type AnalysisResult struct {
+	// Time the evaluation ran.
+	// +optional
+	Time *metav1.Time `json:"time,omitempty"`
+
+	// Passed is true when every check stayed within its threshold.
+	// +optional
+	Passed bool `json:"passed,omitempty"`
+
+	// Checks reports each check's observed value and verdict.
+	// +optional
+	Checks []AnalysisCheckResult `json:"checks,omitempty"`
+}
+
+// AnalysisCheckResult is one check's observed value and verdict.
+type AnalysisCheckResult struct {
+	// Name of the check.
+	// +required
+	Name string `json:"name"`
+
+	// Value is the observed scalar, as a decimal string. Empty when the source
+	// could not be read.
+	// +optional
+	Value string `json:"value,omitempty"`
+
+	// OK is true when the value stayed within the check's threshold.
+	// +optional
+	OK bool `json:"ok,omitempty"`
+
+	// Error describes why the source could not be read, when applicable.
+	// +optional
+	Error string `json:"error,omitempty"`
 }
 
 // +kubebuilder:object:root=true

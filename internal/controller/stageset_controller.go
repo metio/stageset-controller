@@ -53,6 +53,7 @@ import (
 	"github.com/metio/stageset-controller/internal/decryptor"
 	"github.com/metio/stageset-controller/internal/inventory"
 	"github.com/metio/stageset-controller/internal/metrics"
+	"github.com/metio/stageset-controller/internal/metricsource"
 	"github.com/metio/stageset-controller/internal/observability"
 	"github.com/metio/stageset-controller/internal/stageinv"
 )
@@ -131,6 +132,15 @@ type StageSetReconciler struct {
 	// uses the production loopback/link-local/metadata denylist. Tests inject a
 	// permissive validator so httptest loopback listeners stay reachable.
 	ActionIPValidator func(net.IP) error
+	// MetricIPValidator pins each resolved metric-source address at dial time;
+	// nil uses the production loopback/link-local/metadata denylist (in-cluster
+	// private ranges stay reachable). Tests inject a permissive validator.
+	MetricIPValidator func(net.IP) error
+	// MetricQuerier resolves a MetricSource to a scalar for the error-budget
+	// freeze and promotion-analysis gates. Defaulted to a Prometheus querier in
+	// SetupWithManager; tests substitute a fake so the gate logic is exercised
+	// without a live Prometheus.
+	MetricQuerier metricsource.Querier
 	// NoCrossNamespaceRefs is the global --no-cross-namespace-refs flag.
 	NoCrossNamespaceRefs bool
 	// RequireVerifiedMigrationSources is the global
@@ -362,6 +372,24 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return res, nil
 	}
 
+	// Error-budget freeze: hold a new-revision rollout while the service is out
+	// of its SLO error budget. ANDed with the update-window gate above; both must
+	// allow. A frozen-but-deployed StageSet stays Ready with status.budgetFreeze.
+	budgetCtx, budgetSpan := observability.Tracer().Start(ctx, "stageset.gateErrorBudget")
+	budgetRes, budgetDeferred, berr := r.gateErrorBudget(budgetCtx, patchHelper, &ss, resolved)
+	if berr != nil {
+		budgetSpan.RecordError(berr)
+		budgetSpan.SetStatus(codes.Error, "error-budget gating failed")
+		budgetSpan.End()
+		return ctrl.Result{}, berr
+	}
+	budgetSpan.SetAttributes(attribute.Bool("stageset.budgetFrozen", budgetDeferred))
+	budgetSpan.End()
+	if budgetDeferred {
+		logger.Info("rollout frozen by error budget", "requeueAfter", budgetRes.RequeueAfter.String())
+		return budgetRes, nil
+	}
+
 	// Stage state machine: for each stage in order — run PRE actions, fetch +
 	// BUILD the pinned artifact, APPLY (SSA), PRUNE + RECORD (StageInventory
 	// diff), VERIFY (kstatus), then POST actions. Failures from APPLY onward run
@@ -517,6 +545,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		for i := range ss.Spec.Stages {
 			stage := &ss.Spec.Stages[i]
 			ra := resolved[i]
+
+			// A prior promotion analysis with onFailure=Rollback reverted this
+			// stage and aborted its failing revision. Stay reverted: skip
+			// re-applying (and re-failing) that revision until it changes or an
+			// operator promotes. Earlier stages already ran this pass; later stages
+			// are not reached.
+			if prior, ok := priorStages[stage.Name]; ok && rollbackAborted(&ss, stage, prior, ra.Revision) {
+				stageStatuses = append(stageStatuses, prior)
+				metrics.SetStagePromotionPending(ss.Namespace, ss.Name, stage.Name, true)
+				metrics.SetStagePromotionBlocked(ss.Namespace, ss.Name, stage.Name, true)
+				promoteHoldStage = stage.Name
+				promoteHoldState = prior.PromotionState
+				return ctrl.Result{RequeueAfter: r.retryInterval(&ss)}, errHoldForPromotion
+			}
 
 			// Idempotency ledger: carry actions already run for this pinned
 			// revision; a new revision resets it. record appends in memory and is
@@ -675,16 +717,42 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 
 			// PROMOTE-GATE: the stage is applied, verified, and its post-actions
-			// ran. Decide whether the rollout may advance past it (soak / manual).
-			// Holding parks the rollout here — the stage stays applied (drift is
-			// still corrected on the next reconcile) and later stages are never
-			// touched — so this is a hold, not a failure.
-			promoted, promoState, promoteRequeue, handledPromotion := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now())
+			// ran. Decide whether the rollout may advance past it (soak / analysis
+			// / manual). Holding parks the rollout here — the stage stays applied
+			// (drift is still corrected on the next reconcile) and later stages are
+			// never touched — so this is a hold, not a failure.
+			var verdict *analysisVerdict
+			if stage.Promotion != nil && stage.Promotion.Analysis != nil {
+				v := r.evaluatePromotionAnalysis(ctx, &ss, stage)
+				verdict = &v
+			}
+			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict)
+			appliedRevision := ra.Revision
+			if rollback {
+				// Analysis failed with onFailure=Rollback: revert THIS stage to its
+				// last-good revision (earlier promoted stages are untouched), and
+				// record the failing revision as aborted so it is not re-applied and
+				// re-failed each reconcile until the revision changes or an operator
+				// promotes.
+				reverted, ok, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, applier, fetcher, recorder)
+				if rerr != nil {
+					return ctrl.Result{}, rerr // transient revert failure: back off
+				}
+				if ok {
+					appliedRevision = reverted
+					promoState.AbortedRevision = ra.Revision
+					r.event(&ss, corev1.EventTypeWarning, ReasonPromotionBlocked,
+						fmt.Sprintf("stage %q promotion analysis failed; rolled back to revision %s", stage.Name, reverted))
+				} else {
+					r.event(&ss, corev1.EventTypeWarning, ReasonPromotionBlocked,
+						fmt.Sprintf("stage %q promotion analysis failed and onFailure=Rollback, but no last-good revision is available to roll back to (enable spec.rollbackOnFailure); holding", stage.Name))
+				}
+			}
 			applied[ra.Key()] = ra.Revision
 			stageStatuses = append(stageStatuses, stagesv1.StageStatus{
 				Name:                   stage.Name,
 				Phase:                  stagesv1.StageReady,
-				AppliedRevision:        ra.Revision,
+				AppliedRevision:        appliedRevision,
 				EntriesCount:           int64(len(newRefs)),
 				ExecutedActions:        executed,
 				LedgerRevision:         ra.Revision,
@@ -694,6 +762,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			})
 			metrics.StageAppliedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Inc()
 			metrics.SetStagePromotionPending(ss.Namespace, ss.Name, stage.Name, !promoted)
+			metrics.SetStagePromotionBlocked(ss.Namespace, ss.Name, stage.Name, promoState != nil && promoState.Phase == stagesv1.PromotionBlocked)
 			if !promoted {
 				promoteHoldStage = stage.Name
 				promoteHoldState = promoState
@@ -710,17 +779,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		ss.Status.Stages = stageStatuses
 		publishStageReady(&ss)
 		ss.Status.ObservedGeneration = ss.Generation
-		reason := ReasonSoaking
-		msg := fmt.Sprintf("stage %q is soaking before promotion", promoteHoldStage)
-		if promoteHoldState != nil && promoteHoldState.SoakUntil != nil {
-			msg = fmt.Sprintf("stage %q is soaking before promotion; soak window closes at %s",
-				promoteHoldStage, promoteHoldState.SoakUntil.Time.UTC().Format(time.RFC3339))
-		}
-		if promoteHoldState != nil && promoteHoldState.Phase == stagesv1.PromotionAwaitingManual {
-			reason = ReasonAwaitingPromotion
-			msg = fmt.Sprintf("stage %q is healthy and awaiting a manual promotion; run: stagesetctl promote %s --namespace %s --stage %s",
-				promoteHoldStage, ss.Name, ss.Namespace, promoteHoldStage)
-		}
+		reason, msg := promotionHoldCondition(&ss, promoteHoldStage, promoteHoldState)
 		prevReady := readyConditionSnapshot(&ss)
 		r.setReady(&ss, metav1.ConditionFalse, reason, msg)
 		r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, reason, msg)
@@ -1601,6 +1660,13 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.remoteConfig == nil {
 		r.remoteConfig = defaultRemoteConfigBuilder{r: r}
+	}
+	// Default the metric-source querier for the error-budget freeze and
+	// promotion-analysis gates. Its dialer pins every resolved address through
+	// MetricIPValidator (production denylist when nil), and it reads optional
+	// bearer-token Secrets through the controller's client.
+	if r.MetricQuerier == nil {
+		r.MetricQuerier = metricsource.New(r.readSecretData, r.MetricIPValidator)
 	}
 
 	// Spread interval-based requeues by +/- defaultIntervalJitterFraction so a

@@ -111,6 +111,98 @@ spec:
                   watches; this only controls how often the controller re-applies the pinned
                   state to heal drift. Leave unset to fold drift correction into Interval.
                 type: string
+              errorBudget:
+                description: |-
+                  ErrorBudget freezes new-revision rollouts while a service is out of its SLO
+                  error budget — the Google SRE error-budget policy. It reads one scalar
+                  (budget remaining, 0..1) from a metric source and holds the rollout while
+                  the value is below freezeThreshold, resuming on its own when it recovers.
+                  ANDed with updateWindows: a rollout proceeds only if every gate allows.
+                properties:
+                  dryRun:
+                    description: |-
+                      DryRun records what would freeze (status + metric) without holding the
+                      rollout, so an operator can prove a freeze rule fires before it gates.
+                    type: boolean
+                  freezeThreshold:
+                    description: |-
+                      FreezeThreshold freezes new-revision rollouts when the remaining budget is
+                      strictly below this value. "0" freezes only when the budget is overspent;
+                      "0.1" keeps a 10% reserve. A decimal string.
+                    type: string
+                  interval:
+                    description: |-
+                      Interval is the re-check cadence while frozen. Defaults to the StageSet's
+                      reconcile interval.
+                    type: string
+                  onSourceError:
+                    description: |-
+                      OnSourceError chooses what happens when the source is unreachable or
+                      returns no usable scalar: Allow (proceed — the default, because blocking a
+                      rollout-wide freeze stops every deploy including the hotfix you need during
+                      the very outage that took the source down) or Hold (block). Either way the
+                      error is loud: a BudgetSourceUnavailable condition, a Warning event, and
+                      the metric_source_errors metric.
+                    enum:
+                    - Allow
+                    - Hold
+                    type: string
+                  resumeThreshold:
+                    description: |-
+                      ResumeThreshold resumes rollouts only once the remaining budget reaches
+                      this value. Set it above freezeThreshold for hysteresis (freeze at 0,
+                      resume at 0.05) so a budget hovering at the threshold doesn't flap the
+                      freeze. Defaults to freezeThreshold (no hysteresis). A decimal string.
+                    type: string
+                  source:
+                    description: |-
+                      Source resolves to the remaining error budget as a scalar (typically a
+                      0..1 ratio). The controller carries no SLO math — it reads this number and
+                      compares it to the thresholds below.
+                    properties:
+                      prometheus:
+                        description: |-
+                          Prometheus runs an instant query that must evaluate to a single scalar.
+                          PromQL natively covers Sloth, Pyrra, Grafana, and Nobl9's Prometheus API,
+                          so the bulk of SLO installs need no per-tool code.
+                        properties:
+                          address:
+                            description: |-
+                              Address is the Prometheus base URL, e.g. http://prometheus.monitoring:9090.
+                              In-cluster private addresses are expected and allowed; only loopback,
+                              link-local (incl. cloud metadata), multicast, and unspecified addresses are
+                              refused, mirroring the http-action SSRF guard.
+                            type: string
+                          query:
+                            description: |-
+                              Query is an instant PromQL query that MUST evaluate to a single scalar (a
+                              scalar result, or an instant vector with exactly one sample). For an
+                              error-budget freeze this is typically the remaining budget as a 0..1 ratio
+                              (e.g. Sloth's slo:period_error_budget_remaining:ratio{...}).
+                            type: string
+                          secretRef:
+                            description: |-
+                              SecretRef optionally names a Secret in the StageSet's namespace holding a
+                              bearer token under the "token" key, sent as Authorization: Bearer on the
+                              query. The Secret is read with the controller's client.
+                            properties:
+                              name:
+                                description: Name of the referent.
+                                type: string
+                            required:
+                            - name
+                            type: object
+                        required:
+                        - address
+                        - query
+                        type: object
+                    required:
+                    - prometheus
+                    type: object
+                required:
+                - freezeThreshold
+                - source
+                type: object
               interval:
                 description: |-
                   Interval at which to reconcile the StageSet. Optional: when omitted, the
@@ -1613,6 +1705,134 @@ spec:
                         stage — the stage stays applied and its drift keeps being corrected — and
                         never touches later stages.
                       properties:
+                        analysis:
+                          description: |-
+                            Analysis advances the stage only if metric checks against external sources
+                            keep passing. Each check reads one scalar and compares it to a threshold;
+                            a stage is promoted once its checks pass and refused after more than
+                            failureLimit failing evaluations. This sees behavior a Deployment's own
+                            .status cannot — downstream error rate, latency, SLO burn — that
+                            point-in-time ReadyChecks miss. Combine with soak to observe over a window.
+                          properties:
+                            checks:
+                              description: |-
+                                Checks are the metric comparisons, all of which must pass for the stage to
+                                promote. Each is a metric source plus a threshold.
+                              items:
+                                description: AnalysisCheck is one metric comparison
+                                  in a promotion analysis.
+                                properties:
+                                  name:
+                                    description: Name identifies the check in status
+                                      and events.
+                                    type: string
+                                  source:
+                                    description: Source resolves to the scalar this
+                                      check compares.
+                                    properties:
+                                      prometheus:
+                                        description: |-
+                                          Prometheus runs an instant query that must evaluate to a single scalar.
+                                          PromQL natively covers Sloth, Pyrra, Grafana, and Nobl9's Prometheus API,
+                                          so the bulk of SLO installs need no per-tool code.
+                                        properties:
+                                          address:
+                                            description: |-
+                                              Address is the Prometheus base URL, e.g. http://prometheus.monitoring:9090.
+                                              In-cluster private addresses are expected and allowed; only loopback,
+                                              link-local (incl. cloud metadata), multicast, and unspecified addresses are
+                                              refused, mirroring the http-action SSRF guard.
+                                            type: string
+                                          query:
+                                            description: |-
+                                              Query is an instant PromQL query that MUST evaluate to a single scalar (a
+                                              scalar result, or an instant vector with exactly one sample). For an
+                                              error-budget freeze this is typically the remaining budget as a 0..1 ratio
+                                              (e.g. Sloth's slo:period_error_budget_remaining:ratio{...}).
+                                            type: string
+                                          secretRef:
+                                            description: |-
+                                              SecretRef optionally names a Secret in the StageSet's namespace holding a
+                                              bearer token under the "token" key, sent as Authorization: Bearer on the
+                                              query. The Secret is read with the controller's client.
+                                            properties:
+                                              name:
+                                                description: Name of the referent.
+                                                type: string
+                                            required:
+                                            - name
+                                            type: object
+                                        required:
+                                        - address
+                                        - query
+                                        type: object
+                                    required:
+                                    - prometheus
+                                    type: object
+                                  threshold:
+                                    description: |-
+                                      Threshold the scalar must stay within (min/max). At least one bound is
+                                      required.
+                                    properties:
+                                      max:
+                                        description: Max, when set, requires the scalar
+                                          to be <= this value.
+                                        type: string
+                                      min:
+                                        description: Min, when set, requires the scalar
+                                          to be >= this value.
+                                        type: string
+                                    type: object
+                                required:
+                                - name
+                                - source
+                                - threshold
+                                type: object
+                              minItems: 1
+                              type: array
+                            dryRun:
+                              description: |-
+                                DryRun records what would block the promotion (status + metric) without
+                                holding the rollout, so an operator can prove an analysis rule fires before
+                                it gates.
+                              type: boolean
+                            failureLimit:
+                              description: |-
+                                FailureLimit is how many consecutive failing evaluations are tolerated
+                                before the analysis fails the promotion. The count resets on a passing
+                                evaluation. Defaults to 0 (any failing evaluation fails the promotion).
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            interval:
+                              description: |-
+                                Interval is the re-evaluation cadence while the analysis holds the rollout.
+                                Defaults to the StageSet's reconcile interval.
+                              type: string
+                            onFailure:
+                              description: |-
+                                OnFailure chooses what happens when the analysis fails: Hold (default —
+                                leave the stage applied but not promoted, surfacing why) or Rollback
+                                (revert this stage to its last-known-good revision, reusing the
+                                rollbackOnFailure snapshot machinery; scoped to this stage only).
+                              enum:
+                              - Hold
+                              - Rollback
+                              type: string
+                            onSourceError:
+                              description: |-
+                                OnSourceError chooses what happens when a check's source is unreachable:
+                                Hold (default — never advance a stage whose behavior can't be verified;
+                                safe because holding only parks the rollout at the current healthy stage)
+                                or Allow (proceed). The opposite default of the error-budget freeze, which
+                                fails open because blocking it would stop every deploy.
+                              enum:
+                              - Hold
+                              - Allow
+                              type: string
+                          required:
+                          - checks
+                          type: object
                         requireManualPromotion:
                           description: |-
                             RequireManualPromotion holds the rollout at this stage until an operator
@@ -1882,6 +2102,34 @@ spec:
           status:
             description: StageSetStatus records the observed state of a StageSet.
             properties:
+              budgetFreeze:
+                description: |-
+                  BudgetFreeze is set while an error-budget freeze holds new-revision
+                  rollouts (or, under dryRun, while a freeze would hold them). It surfaces the
+                  last observed remaining budget so a wrong query doesn't hide.
+                properties:
+                  dryRun:
+                    description: DryRun is true when the freeze is recorded but not
+                      enforced.
+                    type: boolean
+                  freezeThreshold:
+                    description: FreezeThreshold echoes the threshold the freeze tripped
+                      at.
+                    type: string
+                  remaining:
+                    description: |-
+                      Remaining is the last observed remaining-budget scalar, as a decimal
+                      string, so an operator can see whether the source returns what they expect.
+                    type: string
+                  resumeThreshold:
+                    description: ResumeThreshold echoes the threshold the freeze will
+                      resume at.
+                    type: string
+                  since:
+                    description: Since is when the freeze began.
+                    format: date-time
+                    type: string
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -2014,6 +2262,11 @@ spec:
                   LastAttemptedRevisions pins the artifact revisions of the current or
                   last run, keyed by "namespace/name" of the ExternalArtifact.
                 type: object
+              lastHandledBudgetOverride:
+                description: |-
+                  LastHandledBudgetOverride is the value of the most recently honored
+                  stages.metio.wtf/budget-override annotation, so an override fires once.
+                type: string
               lastHandledReconcileAt:
                 description: |-
                   LastHandledReconcileAt holds the value of the most recent
@@ -2159,6 +2412,62 @@ spec:
                         PromotionState reports where this stage stands against its promotion gate
                         (soak / manual). Absent when the stage has no promotion gate.
                       properties:
+                        abortedRevision:
+                          description: |-
+                            AbortedRevision names the revision a promotion analysis with
+                            onFailure=Rollback reverted away from. While it equals the pinned revision
+                            the rollout stays reverted and the stage is not re-applied — so a failing
+                            revision isn't churned apply→fail→revert each reconcile. Cleared by a new
+                            revision or a manual promote.
+                          type: string
+                        analysisFailures:
+                          description: |-
+                            AnalysisFailures is the running count of consecutive failing analysis
+                            evaluations; it resets to zero on a passing evaluation and trips onFailure
+                            once it exceeds failureLimit.
+                          format: int32
+                          type: integer
+                        lastAnalysis:
+                          description: |-
+                            LastAnalysis records the most recent promotion-analysis evaluation, so an
+                            operator sees each check's observed value and verdict.
+                          properties:
+                            checks:
+                              description: Checks reports each check's observed value
+                                and verdict.
+                              items:
+                                description: AnalysisCheckResult is one check's observed
+                                  value and verdict.
+                                properties:
+                                  error:
+                                    description: Error describes why the source could
+                                      not be read, when applicable.
+                                    type: string
+                                  name:
+                                    description: Name of the check.
+                                    type: string
+                                  ok:
+                                    description: OK is true when the value stayed
+                                      within the check's threshold.
+                                    type: boolean
+                                  value:
+                                    description: |-
+                                      Value is the observed scalar, as a decimal string. Empty when the source
+                                      could not be read.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              type: array
+                            passed:
+                              description: Passed is true when every check stayed
+                                within its threshold.
+                              type: boolean
+                            time:
+                              description: Time the evaluation ran.
+                              format: date-time
+                              type: string
+                          type: object
                         phase:
                           description: Phase is the current promotion phase.
                           type: string

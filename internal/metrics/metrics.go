@@ -94,19 +94,65 @@ var (
 		Name: "stageset_stage_promotion_pending",
 		Help: "Whether a stage is held by its promotion gate (1) or not (0).",
 	}, []string{"namespace", "stageset", "stage"})
+
+	// StagePromotionBlocked is 1 while a stage's promotion analysis is failing
+	// (breached its thresholds past failureLimit), 0 otherwise. Distinct from
+	// StagePromotionPending (which also covers a healthy soak or manual hold):
+	// this fires only on a metric-analysis failure.
+	StagePromotionBlocked = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "stageset_stage_promotion_blocked",
+		Help: "Whether a stage's promotion analysis is failing (1) or not (0).",
+	}, []string{"namespace", "stageset", "stage"})
+
+	// BudgetRemaining reports the last observed error-budget scalar for a
+	// StageSet (typically a 0..1 ratio). A saturation/budget alert reads this; a
+	// value that never matches what the operator expects flags a wrong query.
+	BudgetRemaining = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "stageset_budget_remaining",
+		Help: "Last observed remaining error budget for a StageSet (typically a 0..1 ratio).",
+	}, []string{"namespace", "name"})
+
+	// BudgetFrozen is 1 while an error-budget freeze holds new-revision rollouts
+	// (0 under dryRun, which records but does not enforce). A sustained 1 is the
+	// alertable "deploys are frozen out of budget" signal.
+	BudgetFrozen = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "stageset_budget_frozen",
+		Help: "Whether an error-budget freeze is holding rollouts (1) or not (0).",
+	}, []string{"namespace", "name"})
+
+	// MetricSourceErrorsTotal counts metric-source query failures across both
+	// gate families (error-budget freeze and promotion analysis). Sustained
+	// non-zero values mean a gate is running blind on its onSourceError policy.
+	MetricSourceErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stageset_metric_source_errors_total",
+		Help: "Metric-source query failures across the error-budget and promotion-analysis gates.",
+	}, []string{"namespace", "name"})
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal)
 }
 
 // SetStagePromotionPending publishes the promotion-gate gauge for one stage.
 func SetStagePromotionPending(namespace, stageset, stage string, pending bool) {
-	v := 0.0
-	if pending {
-		v = 1
+	StagePromotionPending.WithLabelValues(namespace, stageset, stage).Set(boolValue(pending))
+}
+
+// SetStagePromotionBlocked publishes the analysis-failure gauge for one stage.
+func SetStagePromotionBlocked(namespace, stageset, stage string, blocked bool) {
+	StagePromotionBlocked.WithLabelValues(namespace, stageset, stage).Set(boolValue(blocked))
+}
+
+// SetBudgetFrozen publishes the error-budget freeze gauge for a StageSet.
+func SetBudgetFrozen(namespace, name string, frozen bool) {
+	BudgetFrozen.WithLabelValues(namespace, name).Set(boolValue(frozen))
+}
+
+func boolValue(b bool) float64 {
+	if b {
+		return 1
 	}
-	StagePromotionPending.WithLabelValues(namespace, stageset, stage).Set(v)
+	return 0
 }
 
 // SetStageReady publishes the readiness gauge for one stage.
@@ -123,6 +169,7 @@ func SetStageReady(namespace, stageset, stage string, ready bool) {
 func DeleteStageReady(namespace, stageset string) {
 	StageReady.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": stageset})
 	StagePromotionPending.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": stageset})
+	StagePromotionBlocked.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": stageset})
 }
 
 // DeleteStageReadyForStage removes the readiness series for a single stage. It
@@ -131,6 +178,7 @@ func DeleteStageReady(namespace, stageset string) {
 func DeleteStageReadyForStage(namespace, stageset, stage string) {
 	StageReady.DeleteLabelValues(namespace, stageset, stage)
 	StagePromotionPending.DeleteLabelValues(namespace, stageset, stage)
+	StagePromotionBlocked.DeleteLabelValues(namespace, stageset, stage)
 }
 
 // DeleteStageSetMetrics evicts every per-StageSet operational time series so a
@@ -152,4 +200,7 @@ func DeleteStageSetMetrics(namespace, name string) {
 	UpdateDeferredTotal.DeletePartialMatch(nameMatch)
 	// InventorySkippedEntriesTotal labels the StageSet as "stageset", not "name".
 	InventorySkippedEntriesTotal.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "stageset": name})
+	BudgetRemaining.DeletePartialMatch(nameMatch)
+	BudgetFrozen.DeletePartialMatch(nameMatch)
+	MetricSourceErrorsTotal.DeletePartialMatch(nameMatch)
 }
