@@ -37,14 +37,14 @@ func TestGatePromotion(t *testing.T) {
 	}
 
 	t.Run("no promotion gate advances", func(t *testing.T) {
-		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(nil), rev, stagesv1.StageStatus{}, now, nil, false)
+		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(nil), rev, stagesv1.StageStatus{}, now, nil, false, nil)
 		if !promoted || state != nil {
 			t.Fatalf("promoted=%v state=%v, want true/nil", promoted, state)
 		}
 	})
 
 	t.Run("soak holds on first sight", func(t *testing.T) {
-		promoted, state, req, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, stagesv1.StageStatus{}, now, nil, false)
+		promoted, state, req, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, stagesv1.StageStatus{}, now, nil, false, nil)
 		if promoted {
 			t.Fatal("want holding during soak")
 		}
@@ -65,7 +65,7 @@ func TestGatePromotion(t *testing.T) {
 			AppliedRevision: rev,
 			PromotionState:  &stagesv1.PromotionState{Phase: stagesv1.PromotionSoaking, Since: &metav1.Time{Time: started}},
 		}
-		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false)
+		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false, nil)
 		if promoted {
 			t.Fatal("9m into a 10m soak should still hold")
 		}
@@ -80,7 +80,7 @@ func TestGatePromotion(t *testing.T) {
 			AppliedRevision: rev,
 			PromotionState:  &stagesv1.PromotionState{Phase: stagesv1.PromotionSoaking, Since: &metav1.Time{Time: started}},
 		}
-		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false)
+		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false, nil)
 		if !promoted || state.Phase != stagesv1.PromotionPromoted {
 			t.Fatalf("promoted=%v phase=%v, want true/Promoted", promoted, state.Phase)
 		}
@@ -93,7 +93,7 @@ func TestGatePromotion(t *testing.T) {
 			AppliedRevision: "sha256:OLD",
 			PromotionState:  &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now.Add(-1 * time.Hour)}},
 		}
-		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false)
+		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false, nil)
 		if promoted {
 			t.Fatal("a new revision must re-soak")
 		}
@@ -107,21 +107,21 @@ func TestGatePromotion(t *testing.T) {
 			AppliedRevision: rev,
 			PromotionState:  &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted},
 		}
-		promoted, _, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false)
+		promoted, _, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{Soak: dur(10 * time.Minute)}), rev, prior, now, nil, false, nil)
 		if !promoted {
 			t.Fatal("a stage already promoted at this revision must not re-soak")
 		}
 	})
 
 	t.Run("manual gate awaits without a token", func(t *testing.T) {
-		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, stagesv1.StageStatus{}, now, nil, false)
+		promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, stagesv1.StageStatus{}, now, nil, false, nil)
 		if promoted || state.Phase != stagesv1.PromotionAwaitingManual {
 			t.Fatalf("promoted=%v phase=%v, want false/AwaitingManual", promoted, state.Phase)
 		}
 	})
 
 	t.Run("manual gate promotes on a fresh token", func(t *testing.T) {
-		promoted, state, _, handled, _ := r.gatePromotion(ssWith("staging@tok1"), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, stagesv1.StageStatus{}, now, nil, false)
+		promoted, state, _, handled, _ := r.gatePromotion(ssWith("staging@tok1"), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, stagesv1.StageStatus{}, now, nil, false, nil)
 		if !promoted || state.Phase != stagesv1.PromotionPromoted || handled != "tok1" {
 			t.Fatalf("promoted=%v phase=%v handled=%q, want true/Promoted/tok1", promoted, state.Phase, handled)
 		}
@@ -129,14 +129,14 @@ func TestGatePromotion(t *testing.T) {
 
 	t.Run("an already-handled token does not re-promote", func(t *testing.T) {
 		prior := stagesv1.StageStatus{AppliedRevision: rev, LastHandledPromotion: "tok1"}
-		promoted, state, _, _, _ := r.gatePromotion(ssWith("staging@tok1"), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, prior, now, nil, false)
+		promoted, state, _, _, _ := r.gatePromotion(ssWith("staging@tok1"), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, prior, now, nil, false, nil)
 		if promoted || state.Phase != stagesv1.PromotionAwaitingManual {
 			t.Fatalf("a stale token must not re-promote: promoted=%v phase=%v", promoted, state.Phase)
 		}
 	})
 
 	t.Run("a token for another stage is ignored", func(t *testing.T) {
-		promoted, _, _, _, _ := r.gatePromotion(ssWith("prod@tok1"), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, stagesv1.StageStatus{}, now, nil, false)
+		promoted, _, _, _, _ := r.gatePromotion(ssWith("prod@tok1"), promoStage(&stagesv1.StagePromotion{RequireManualPromotion: true}), rev, stagesv1.StageStatus{}, now, nil, false, nil)
 		if promoted {
 			t.Fatal("a promote token addressed to another stage must not promote this one")
 		}
@@ -147,7 +147,7 @@ func TestGatePromotion(t *testing.T) {
 			AppliedRevision: rev,
 			PromotionState:  &stagesv1.PromotionState{Phase: stagesv1.PromotionSoaking, Since: &metav1.Time{Time: now}},
 		}
-		promoted, state, _, handled, _ := r.gatePromotion(ssWith("staging@brk"), promoStage(&stagesv1.StagePromotion{Soak: dur(1 * time.Hour)}), rev, prior, now, nil, false)
+		promoted, state, _, handled, _ := r.gatePromotion(ssWith("staging@brk"), promoStage(&stagesv1.StagePromotion{Soak: dur(1 * time.Hour)}), rev, prior, now, nil, false, nil)
 		if !promoted || state.Phase != stagesv1.PromotionPromoted || handled != "brk" {
 			t.Fatalf("promote should break a soak: promoted=%v phase=%v handled=%q", promoted, state.Phase, handled)
 		}
@@ -157,12 +157,12 @@ func TestGatePromotion(t *testing.T) {
 		p := &stagesv1.StagePromotion{Soak: dur(10 * time.Minute), RequireManualPromotion: true}
 		// Mid-soak → Soaking.
 		prior := stagesv1.StageStatus{AppliedRevision: rev, PromotionState: &stagesv1.PromotionState{Phase: stagesv1.PromotionSoaking, Since: &metav1.Time{Time: now.Add(-1 * time.Minute)}}}
-		if _, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(p), rev, prior, now, nil, false); state.Phase != stagesv1.PromotionSoaking {
+		if _, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(p), rev, prior, now, nil, false, nil); state.Phase != stagesv1.PromotionSoaking {
 			t.Fatalf("phase=%s, want Soaking", state.Phase)
 		}
 		// Soak elapsed, no token → AwaitingManual.
 		prior.PromotionState.Since = &metav1.Time{Time: now.Add(-11 * time.Minute)}
-		if promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(p), rev, prior, now, nil, false); promoted || state.Phase != stagesv1.PromotionAwaitingManual {
+		if promoted, state, _, _, _ := r.gatePromotion(ssWith(""), promoStage(p), rev, prior, now, nil, false, nil); promoted || state.Phase != stagesv1.PromotionAwaitingManual {
 			t.Fatalf("after soak: promoted=%v phase=%v, want false/AwaitingManual", promoted, state.Phase)
 		}
 	})
@@ -190,7 +190,7 @@ func TestGatePromotion_Analysis(t *testing.T) {
 	srcErr := &analysisVerdict{result: &stagesv1.AnalysisResult{}, sourceErr: true}
 
 	t.Run("passing analysis promotes", func(t *testing.T) {
-		promoted, state, _, _, rb := r.gatePromotion(ss, withAnalysis(baseAnalysis()), rev, stagesv1.StageStatus{}, now, pass, false)
+		promoted, state, _, _, rb := r.gatePromotion(ss, withAnalysis(baseAnalysis()), rev, stagesv1.StageStatus{}, now, pass, false, nil)
 		if !promoted || rb || state.Phase != stagesv1.PromotionPromoted {
 			t.Fatalf("promoted=%v rollback=%v phase=%v, want promoted", promoted, rb, state.Phase)
 		}
@@ -198,7 +198,7 @@ func TestGatePromotion_Analysis(t *testing.T) {
 
 	t.Run("breach beyond failureLimit blocks", func(t *testing.T) {
 		// failureLimit 0 → the first breach exceeds it.
-		promoted, state, _, _, rb := r.gatePromotion(ss, withAnalysis(baseAnalysis()), rev, stagesv1.StageStatus{}, now, breach, false)
+		promoted, state, _, _, rb := r.gatePromotion(ss, withAnalysis(baseAnalysis()), rev, stagesv1.StageStatus{}, now, breach, false, nil)
 		if promoted || rb || state.Phase != stagesv1.PromotionBlocked || state.AnalysisFailures != 1 {
 			t.Fatalf("promoted=%v rollback=%v phase=%v failures=%d, want Blocked/1", promoted, rb, state.Phase, state.AnalysisFailures)
 		}
@@ -207,14 +207,14 @@ func TestGatePromotion_Analysis(t *testing.T) {
 	t.Run("breach within failureLimit holds Analyzing and counts up", func(t *testing.T) {
 		an := baseAnalysis()
 		an.FailureLimit = func() *int32 { v := int32(2); return &v }()
-		promoted, state, _, _, _ := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, breach, false)
+		promoted, state, _, _, _ := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, breach, false, nil)
 		if promoted || state.Phase != stagesv1.PromotionAnalyzing || state.AnalysisFailures != 1 {
 			t.Fatalf("phase=%v failures=%d, want Analyzing/1", state.Phase, state.AnalysisFailures)
 		}
 		// A second consecutive breach (prior count 1) reaches 2 — still within
 		// the limit of 2 — so it keeps holding; a third would exceed it.
 		prior := stagesv1.StageStatus{AppliedRevision: rev, PromotionState: &stagesv1.PromotionState{Phase: stagesv1.PromotionAnalyzing, AnalysisFailures: 2}}
-		_, state, _, _, _ = r.gatePromotion(ss, withAnalysis(an), rev, prior, now, breach, false)
+		_, state, _, _, _ = r.gatePromotion(ss, withAnalysis(an), rev, prior, now, breach, false, nil)
 		if state.Phase != stagesv1.PromotionBlocked || state.AnalysisFailures != 3 {
 			t.Fatalf("phase=%v failures=%d, want Blocked/3", state.Phase, state.AnalysisFailures)
 		}
@@ -223,7 +223,7 @@ func TestGatePromotion_Analysis(t *testing.T) {
 	t.Run("onFailure=Rollback signals rollback", func(t *testing.T) {
 		an := baseAnalysis()
 		an.OnFailure = "Rollback"
-		_, state, _, _, rb := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, breach, false)
+		_, state, _, _, rb := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, breach, false, nil)
 		if !rb || state.Phase != stagesv1.PromotionBlocked {
 			t.Fatalf("rollback=%v phase=%v, want rollback/Blocked", rb, state.Phase)
 		}
@@ -232,7 +232,7 @@ func TestGatePromotion_Analysis(t *testing.T) {
 	t.Run("dryRun never holds", func(t *testing.T) {
 		an := baseAnalysis()
 		an.DryRun = true
-		promoted, state, _, _, rb := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, breach, false)
+		promoted, state, _, _, rb := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, breach, false, nil)
 		if !promoted || rb || state.Phase != stagesv1.PromotionPromoted {
 			t.Fatalf("dryRun: promoted=%v rollback=%v phase=%v, want promoted", promoted, rb, state.Phase)
 		}
@@ -242,7 +242,7 @@ func TestGatePromotion_Analysis(t *testing.T) {
 	})
 
 	t.Run("source error holds by default (onSourceError=Hold)", func(t *testing.T) {
-		promoted, state, _, _, _ := r.gatePromotion(ss, withAnalysis(baseAnalysis()), rev, stagesv1.StageStatus{}, now, srcErr, false)
+		promoted, state, _, _, _ := r.gatePromotion(ss, withAnalysis(baseAnalysis()), rev, stagesv1.StageStatus{}, now, srcErr, false, nil)
 		if promoted || state.Phase != stagesv1.PromotionBlocked {
 			t.Fatalf("source error default: promoted=%v phase=%v, want Blocked", promoted, state.Phase)
 		}
@@ -251,7 +251,7 @@ func TestGatePromotion_Analysis(t *testing.T) {
 	t.Run("source error with onSourceError=Allow promotes", func(t *testing.T) {
 		an := baseAnalysis()
 		an.OnSourceError = "Allow"
-		promoted, _, _, _, _ := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, srcErr, false)
+		promoted, _, _, _, _ := r.gatePromotion(ss, withAnalysis(an), rev, stagesv1.StageStatus{}, now, srcErr, false, nil)
 		if !promoted {
 			t.Fatal("onSourceError=Allow should promote despite a source error")
 		}
@@ -261,7 +261,7 @@ func TestGatePromotion_Analysis(t *testing.T) {
 		an := baseAnalysis()
 		p := &stagesv1.StagePromotion{Soak: dur(10 * time.Minute), Analysis: an}
 		prior := stagesv1.StageStatus{AppliedRevision: rev, PromotionState: &stagesv1.PromotionState{Phase: stagesv1.PromotionSoaking, Since: &metav1.Time{Time: now.Add(-1 * time.Minute)}}}
-		promoted, state, _, _, _ := r.gatePromotion(ss, promoStage(p), rev, prior, now, pass, false)
+		promoted, state, _, _, _ := r.gatePromotion(ss, promoStage(p), rev, prior, now, pass, false, nil)
 		if promoted || state.Phase != stagesv1.PromotionSoaking {
 			t.Fatalf("mid-soak with passing analysis: phase=%v, want Soaking", state.Phase)
 		}
@@ -286,27 +286,79 @@ func TestGatePromotion_FastTrack(t *testing.T) {
 	}
 
 	t.Run("healthy after minimum soak promotes early", func(t *testing.T) {
-		promoted, state, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-3*time.Minute), now, nil, true)
+		promoted, state, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-3*time.Minute), now, nil, true, nil)
 		if !promoted || state.Phase != stagesv1.PromotionPromoted {
 			t.Fatalf("promoted=%v phase=%v, want early promotion", promoted, state.Phase)
 		}
 	})
 	t.Run("healthy but before minimum soak keeps soaking", func(t *testing.T) {
-		promoted, state, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-1*time.Minute), now, nil, true)
+		promoted, state, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-1*time.Minute), now, nil, true, nil)
 		if promoted || state.Phase != stagesv1.PromotionSoaking {
 			t.Fatalf("promoted=%v phase=%v, want still Soaking (before `after`)", promoted, state.Phase)
 		}
 	})
 	t.Run("unhealthy metric waits out the full soak", func(t *testing.T) {
-		promoted, state, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-3*time.Minute), now, nil, false)
+		promoted, state, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-3*time.Minute), now, nil, false, nil)
 		if promoted || state.Phase != stagesv1.PromotionSoaking {
 			t.Fatalf("promoted=%v phase=%v, want Soaking (fastTrackOK=false)", promoted, state.Phase)
 		}
 	})
 	t.Run("full soak elapsed promotes regardless", func(t *testing.T) {
-		promoted, _, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-11*time.Minute), now, nil, false)
+		promoted, _, _, _, _ := r.gatePromotion(ss, stage, rev, soakingSince(-11*time.Minute), now, nil, false, nil)
 		if !promoted {
 			t.Fatal("a fully-elapsed soak promotes even without fast-track")
+		}
+	})
+}
+
+// TestGatePromotionRestartGate covers the restart gate: a breach holds the
+// stage (PromotionBlocked, naming the check), a nil verdict advances, and a
+// manual promote is break-glass over a breach.
+func TestGatePromotionRestartGate(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	r := &StageSetReconciler{Now: func() time.Time { return now }}
+	const rev = "sha256:abc"
+	ss := func(promoteAnn string) *stagesv1.StageSet {
+		s := &stagesv1.StageSet{}
+		s.Spec.Interval = metav1.Duration{Duration: time.Minute}
+		if promoteAnn != "" {
+			s.Annotations = map[string]string{promoteAnnotation: promoteAnn}
+		}
+		return s
+	}
+	stage := promoStage(&stagesv1.StagePromotion{})
+
+	t.Run("restart breach blocks promotion", func(t *testing.T) {
+		rv := &restartVerdict{check: "api", observed: 3}
+		promoted, state, _, _, _ := r.gatePromotion(ss(""), stage, rev, stagesv1.StageStatus{}, now, nil, false, rv)
+		if promoted {
+			t.Fatal("promoted despite restart breach")
+		}
+		if state == nil || state.Phase != stagesv1.PromotionBlocked || state.RestartCheck != "api" || state.ObservedRestarts != 3 {
+			t.Fatalf("state=%+v, want Blocked api/3", state)
+		}
+	})
+	t.Run("no breach advances", func(t *testing.T) {
+		promoted, _, _, _, _ := r.gatePromotion(ss(""), stage, rev, stagesv1.StageStatus{}, now, nil, false, nil)
+		if !promoted {
+			t.Fatal("should promote with no restart breach and no other gate")
+		}
+	})
+	t.Run("manual promote overrides a restart breach", func(t *testing.T) {
+		rv := &restartVerdict{check: "api", observed: 3}
+		promoted, state, _, _, _ := r.gatePromotion(ss("staging@tok"), stage, rev, stagesv1.StageStatus{}, now, nil, false, rv)
+		if !promoted || state == nil || state.Phase != stagesv1.PromotionPromoted {
+			t.Fatalf("promoted=%v state=%+v, want promoted (break-glass)", promoted, state)
+		}
+	})
+	t.Run("onFailure=Rollback signals a rollback", func(t *testing.T) {
+		rv := &restartVerdict{check: "api", observed: 3, rollback: true}
+		promoted, state, _, _, rollback := r.gatePromotion(ss(""), stage, rev, stagesv1.StageStatus{}, now, nil, false, rv)
+		if promoted || !rollback {
+			t.Fatalf("promoted=%v rollback=%v, want held + rollback", promoted, rollback)
+		}
+		if state == nil || state.Phase != stagesv1.PromotionBlocked || state.RestartCheck != "api" {
+			t.Fatalf("state=%+v, want Blocked/api", state)
 		}
 	})
 }

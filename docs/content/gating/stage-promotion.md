@@ -46,6 +46,62 @@ controller requeues at that instant and advances on its own once the window
 elapses. There is no default soak — omit `soak` (or set it to `0`) for no hold;
 soaks are a per-stage trade-off, so use a long window for prod and none for dev.
 
+## Block on pod restarts
+
+A soak waits, but a bare soak only re-checks readiness — and a Deployment can stay
+`Available` while individual pods crash-loop and restart behind it. A `restartGate`
+closes that gap with no external dependency: each check watches a group of pods by
+label and blocks the promotion if their container restarts exceed `maxRestarts`.
+
+```yaml
+    - name: staging
+      sourceRef:
+        name: web-staging
+      promotion:
+        soak: 10m
+        restartGate:
+          onFailure: Hold        # default for every check below (Hold | Rollback)
+          checks:
+            - name: api
+              selector:
+                matchLabels:
+                  app: web-api
+              maxRestarts: 0     # no restarts tolerated (the default)
+            - name: workers
+              selector:
+                matchLabels:
+                  app: web-worker
+              maxRestarts: 2     # tolerate a couple of blips
+              onFailure: Rollback  # override the gate default for this group
+    - name: prod
+      sourceRef:
+        name: web-prod
+```
+
+Each check sums the restart counts across the init and regular containers of every
+pod matching its `selector`, in the StageSet's namespace, and fails once the total
+exceeds `maxRestarts` (`0` by default — no restarts allowed). Pods are matched by
+label, not by a workload reference, so a group can span any source — a Deployment,
+StatefulSet, DaemonSet, Job, or a custom controller. Pair it with a `soak` so the
+window gives a crash time to surface; it catches the OOM-after-warm-up or
+crashloop-after-N-minutes that point-in-time
+[`readyChecks`](/defining-a-release/ready-checks/) miss.
+
+`onFailure` decides what a breach does — set it once on the gate and override it
+per check:
+
+- `Hold` (default) parks the rollout at this stage and surfaces why.
+- `Rollback` reverts the stage to its last-good revision (needs
+  [`spec.rollbackOnFailure`](/gating/rollback/) so a snapshot exists; with none it
+  degrades to a hold) and parks the failing revision so it isn't re-applied each
+  reconcile. Scoped to this stage — earlier promoted stages are untouched.
+
+While a check is breached the StageSet reports `Ready=False` with reason
+`PromotionBlocked`, naming the failing check and the restart total on
+`status.stages[].promotionState`. A manual promotion is break-glass over it. The
+watched pods must be readable by the apply identity (the tenant `ServiceAccount`,
+or the cluster the stage's `kubeConfig` targets), so grant it `pods` `list`.
+
 ## Require a manual promotion
 
 Hold at a stage until an operator promotes it — the "confirm before prod" gate.

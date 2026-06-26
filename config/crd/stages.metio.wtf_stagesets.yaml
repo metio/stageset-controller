@@ -2135,6 +2135,120 @@ spec:
                             RequireApproval (which gates a version transition, not a stage advance).
                             Defaults to false.
                           type: boolean
+                        restartGate:
+                          description: |-
+                            RestartGate blocks promotion when a watched group of pods restarts too often
+                            while the stage soaks. It catches a crashloop or an OOM-after-warm-up that
+                            leaves the workload Ready (so ReadyChecks pass) while individual pods keep
+                            restarting — the dependency-free companion to a soak.
+                          properties:
+                            checks:
+                              description: |-
+                                Checks are the pod groups to watch; a breach in any one blocks promotion.
+                                Set several (e.g. an API and a worker) with independent tolerances.
+                              items:
+                                description: |-
+                                  RestartCheck blocks a stage's promotion when one group of pods restarts more
+                                  than maxRestarts times. Pods are selected by label (in the StageSet's
+                                  namespace), so the group is not tied to a single workload kind — it can span
+                                  Deployments, StatefulSets, DaemonSets, Jobs, or a custom controller. The pods
+                                  must be observable by the controller (the same cluster, or the one the stage's
+                                  kubeConfig targets).
+                                properties:
+                                  maxRestarts:
+                                    description: |-
+                                      MaxRestarts is the total container restarts — summed across the selected
+                                      pods' init and regular containers — tolerated before the check fails.
+                                      Defaults to 0: no restarts allowed.
+                                    format: int32
+                                    minimum: 0
+                                    type: integer
+                                  name:
+                                    description: |-
+                                      Name identifies the check in status, events, and the Ready message. Unique
+                                      within a stage's promotion.
+                                    type: string
+                                  onFailure:
+                                    description: |-
+                                      OnFailure overrides the gate's default action for this check (Hold or
+                                      Rollback). Defaults to the RestartGate's onFailure.
+                                    enum:
+                                    - Hold
+                                    - Rollback
+                                    type: string
+                                  selector:
+                                    description: |-
+                                      Selector chooses the pods this check watches, in the StageSet's namespace.
+                                      It must match at least one label; an empty selector (which would match every
+                                      pod) is rejected.
+                                    properties:
+                                      matchExpressions:
+                                        description: matchExpressions is a list of
+                                          label selector requirements. The requirements
+                                          are ANDed.
+                                        items:
+                                          description: |-
+                                            A label selector requirement is a selector that contains values, a key, and an operator that
+                                            relates the key and values.
+                                          properties:
+                                            key:
+                                              description: key is the label key that
+                                                the selector applies to.
+                                              type: string
+                                            operator:
+                                              description: |-
+                                                operator represents a key's relationship to a set of values.
+                                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                                              type: string
+                                            values:
+                                              description: |-
+                                                values is an array of string values. If the operator is In or NotIn,
+                                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                                the values array must be empty. This array is replaced during a strategic
+                                                merge patch.
+                                              items:
+                                                type: string
+                                              type: array
+                                              x-kubernetes-list-type: atomic
+                                          required:
+                                          - key
+                                          - operator
+                                          type: object
+                                        type: array
+                                        x-kubernetes-list-type: atomic
+                                      matchLabels:
+                                        additionalProperties:
+                                          type: string
+                                        description: |-
+                                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                        type: object
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                required:
+                                - name
+                                - selector
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
+                            onFailure:
+                              description: |-
+                                OnFailure is the default action when a check breaches: Hold (the default)
+                                parks the rollout at this stage and surfaces why; Rollback reverts the stage
+                                to its last-good revision — reusing spec.rollbackOnFailure's snapshots,
+                                scoped to this stage — and parks the failing revision so it isn't re-applied
+                                each reconcile. With no snapshot available a rollback degrades to a hold. A
+                                check may override this with its own onFailure.
+                              enum:
+                              - Hold
+                              - Rollback
+                              type: string
+                          required:
+                          - checks
+                          type: object
                         soak:
                           description: |-
                             Soak holds the rollout at this stage for the given duration after it
@@ -2789,8 +2903,18 @@ spec:
                               format: date-time
                               type: string
                           type: object
+                        observedRestarts:
+                          description: ObservedRestarts is the restart total the breaching
+                            RestartCheck observed.
+                          format: int32
+                          type: integer
                         phase:
                           description: Phase is the current promotion phase.
+                          type: string
+                        restartCheck:
+                          description: |-
+                            RestartCheck names the promotion.restartChecks entry whose pods exceeded
+                            their maxRestarts, when a restart breach is what blocks the rollout.
                           type: string
                         since:
                           description: |-
