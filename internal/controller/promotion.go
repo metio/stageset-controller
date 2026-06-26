@@ -86,7 +86,7 @@ func (promoteRequestedPredicate) Update(e event.UpdateEvent) bool {
 // design's self-review): if status is lost the soak restarts, which is
 // acceptable. verdict carries the metric-analysis evaluation for this reconcile,
 // or nil when the stage has no analysis.
-func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
+func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict, fastTrackOK bool) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
 	p := stage.Promotion
 	if p == nil {
 		return true, nil, 0, prior.LastHandledPromotion, false
@@ -160,7 +160,11 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 			since = priorState.Since.Time
 		}
 		soakUntil := since.Add(p.Soak.Duration)
-		if now.Before(soakUntil) {
+		// Fast-track: once the minimum soak has elapsed and the burn-rate gate is
+		// healthy, skip the rest of the soak and fall through to the remaining
+		// gates (analysis/manual). Never extends the soak — only shortens it.
+		fastTracked := p.FastTrack != nil && fastTrackOK && !now.Before(since.Add(fastTrackAfter(p.FastTrack)))
+		if now.Before(soakUntil) && !fastTracked {
 			s := withAnalysis(&stagesv1.PromotionState{
 				Phase:     stagesv1.PromotionSoaking,
 				Since:     &metav1.Time{Time: since},

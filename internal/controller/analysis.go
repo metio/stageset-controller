@@ -71,6 +71,31 @@ func (r *StageSetReconciler) evaluatePromotionAnalysis(ctx context.Context, ss *
 	return v
 }
 
+// fastTrackAfter is the minimum soak before early promotion is considered.
+func fastTrackAfter(ft *stagesv1.FastTrack) time.Duration {
+	if ft.After != nil {
+		return ft.After.Duration
+	}
+	return 0
+}
+
+// evaluateFastTrack reports whether a stage's fast-track metric currently allows
+// early promotion (value <= max). It is best-effort acceleration: a source error
+// or a missing/over-threshold value simply means "don't fast-track" (fall back to
+// the full soak), never a hold — so the gate stays fail-safe toward the soak.
+func (r *StageSetReconciler) evaluateFastTrack(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage) bool {
+	ft := stage.Promotion.FastTrack
+	max, err := metricsource.ParseScalar(ft.Max)
+	if err != nil {
+		return false
+	}
+	value, err := r.MetricQuerier.Query(ctx, ss.Namespace, ft.Source)
+	if err != nil {
+		return false
+	}
+	return value <= max
+}
+
 // analysisInterval is the re-evaluation cadence while an analysis holds.
 func (r *StageSetReconciler) analysisInterval(ss *stagesv1.StageSet, an *stagesv1.PromotionAnalysis) time.Duration {
 	if an != nil && an.Interval != nil && an.Interval.Duration > 0 {

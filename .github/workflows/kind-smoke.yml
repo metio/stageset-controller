@@ -560,6 +560,53 @@ jobs:
           kubectl get stageset -A || true
           kubectl -n default get events || true
 
+  rollout-gates:
+    name: Rollout gates (error-budget freeze via webhook metric)
+    needs: discover
+    if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Git Repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Build container image
+        run: docker build -t ghcr.io/metio/stageset-controller:smoke .
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          version: ${{ needs.discover.outputs.kind_latest }}
+          cluster_name: stageset-rollout-gates
+          node_image: kindest/node:${{ needs.discover.outputs.k8s_latest }}
+          wait: 180s
+      - name: Load image into kind
+        run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-rollout-gates
+      - name: Cluster prereqs (Flux source CRDs)
+        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+      - name: Install the released chart with the dev image
+        run: |
+          helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
+            --version "${{ needs.discover.outputs.chart_version }}" \
+            --namespace stageset-system --create-namespace \
+            --set-string image.tag=smoke \
+            --set webhook.enabled=false \
+            --wait --timeout 5m
+          kubectl apply --server-side --force-conflicts -f config/crd/
+          kubectl create clusterrolebinding stageset-smoke-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=stageset-system:stageset-controller
+      - name: Scenario — error-budget freeze then resume
+        run: hack/smoke/scenario-errorbudget.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n stageset-system get all || true
+          kubectl -n stageset-system logs deploy/stageset-controller --tail=300 || true
+          kubectl get stageset -A || true
+          kubectl -n default get events || true
+
   # Real NetworkPolicy ENFORCEMENT — what scenario-networkpolicy.sh cannot test,
   # because kind's default kindnet treats NetworkPolicy as a no-op. This job
   # creates a no-default-CNI kind cluster (kind-calico.yaml / kind-cilium.yaml),
@@ -730,7 +777,7 @@ jobs:
 
   system-tests:
     name: System Tests
-    needs: [discover, smoke, s3, s3-seaweedfs, ha, selfsigned, scale-smoke, new-fields, networkpolicy-enforcement, servicemesh]
+    needs: [discover, smoke, s3, s3-seaweedfs, ha, selfsigned, scale-smoke, new-fields, rollout-gates, networkpolicy-enforcement, servicemesh]
     if: always()
     runs-on: ubuntu-latest
     steps:

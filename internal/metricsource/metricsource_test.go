@@ -34,8 +34,8 @@ func promServer(t *testing.T, body string, status int) *httptest.Server {
 	return srv
 }
 
-func querierFor(srv *httptest.Server) *PrometheusQuerier {
-	return &PrometheusQuerier{IPValidator: PermissiveIP, HTTPClient: srv.Client()}
+func querierFor(srv *httptest.Server) *HTTPQuerier {
+	return &HTTPQuerier{IPValidator: PermissiveIP, HTTPClient: srv.Client()}
 }
 
 func srcFor(srv *httptest.Server, query string) stagesv1.MetricSource {
@@ -111,7 +111,7 @@ func TestQuery_BearerTokenSent(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"scalar","result":[0,"1"]}}`))
 	}))
 	t.Cleanup(srv.Close)
-	q := &PrometheusQuerier{
+	q := &HTTPQuerier{
 		IPValidator: PermissiveIP,
 		HTTPClient:  srv.Client(),
 		Secrets: func(_ context.Context, ns, name string) (map[string][]byte, error) {
@@ -146,14 +146,14 @@ func TestQuery_SecretMissingTokenKey(t *testing.T) {
 }
 
 func TestQuery_NoProvider(t *testing.T) {
-	q := &PrometheusQuerier{IPValidator: PermissiveIP}
+	q := &HTTPQuerier{IPValidator: PermissiveIP}
 	if _, err := q.Query(context.Background(), "ns", stagesv1.MetricSource{}); !errors.Is(err, ErrNoSource) {
 		t.Fatalf("err = %v, want ErrNoSource", err)
 	}
 }
 
 func TestQuery_BadAddress(t *testing.T) {
-	q := &PrometheusQuerier{IPValidator: PermissiveIP}
+	q := &HTTPQuerier{IPValidator: PermissiveIP}
 	src := stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: "://nope", Query: "up"}}
 	if _, err := q.Query(context.Background(), "ns", src); !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
@@ -223,5 +223,104 @@ func TestForbiddenIP(t *testing.T) {
 		if got := ForbiddenIP(net.ParseIP(tc.ip)); got != tc.want {
 			t.Errorf("ForbiddenIP(%s) = %v, want %v", tc.ip, got, tc.want)
 		}
+	}
+}
+
+func webhookServer(t *testing.T, body string, status int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func webhookSrc(srv *httptest.Server, jsonPath string) stagesv1.MetricSource {
+	return stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: srv.URL, JSONPath: jsonPath}}
+}
+
+func TestQuery_WebhookNumber(t *testing.T) {
+	srv := webhookServer(t, `{"objectives":[{"errorBudgetRemaining":0.73}]}`, 200)
+	got, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.objectives[0].errorBudgetRemaining}"))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if got != 0.73 {
+		t.Errorf("value = %v, want 0.73", got)
+	}
+}
+
+func TestQuery_WebhookNumericString(t *testing.T) {
+	srv := webhookServer(t, `{"remaining":"0.5"}`, 200)
+	got, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.remaining}"))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if got != 0.5 {
+		t.Errorf("value = %v, want 0.5", got)
+	}
+}
+
+func TestQuery_WebhookNoMatchIsUnavailable(t *testing.T) {
+	srv := webhookServer(t, `{"other":1}`, 200)
+	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.missing}"))
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+	}
+}
+
+func TestQuery_WebhookMultiMatchIsUnavailable(t *testing.T) {
+	srv := webhookServer(t, `{"vals":[1,2,3]}`, 200)
+	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.vals[*]}"))
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+	}
+}
+
+func TestQuery_WebhookNonNumericIsUnavailable(t *testing.T) {
+	srv := webhookServer(t, `{"obj":{"a":1}}`, 200)
+	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.obj}"))
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable (an object is not a scalar)", err)
+	}
+}
+
+func TestQuery_WebhookHTTP500IsUnavailable(t *testing.T) {
+	srv := webhookServer(t, `boom`, 500)
+	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.x}"))
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+	}
+}
+
+func TestQuery_WebhookBearerTokenSent(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"v":1}`))
+	}))
+	t.Cleanup(srv.Close)
+	q := &HTTPQuerier{
+		IPValidator: PermissiveIP,
+		HTTPClient:  srv.Client(),
+		Secrets: func(context.Context, string, string) (map[string][]byte, error) {
+			return map[string][]byte{"token": []byte("hook-tok")}, nil
+		},
+	}
+	src := stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: srv.URL, JSONPath: "{.v}", SecretRef: &meta.LocalObjectReference{Name: "nobl9"}}}
+	if _, err := q.Query(context.Background(), "ns", src); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if gotAuth != "Bearer hook-tok" {
+		t.Errorf("Authorization = %q, want Bearer hook-tok", gotAuth)
+	}
+}
+
+func TestQuery_WebhookBadURL(t *testing.T) {
+	q := &HTTPQuerier{IPValidator: PermissiveIP}
+	src := stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: "://nope", JSONPath: "{.v}"}}
+	if _, err := q.Query(context.Background(), "ns", src); !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
 }

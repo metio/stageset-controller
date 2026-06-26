@@ -13,12 +13,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/fluxcd/pkg/apis/meta"
+	"k8s.io/client-go/util/jsonpath"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
@@ -43,10 +49,11 @@ type Querier interface {
 	Query(ctx context.Context, namespace string, src stagesv1.MetricSource) (float64, error)
 }
 
-// PrometheusQuerier runs instant PromQL queries over HTTP. Its HTTP client pins
-// every dialed address through IPValidator, closing the DNS-rebinding window so
-// a metric address can't be used to reach loopback/link-local/metadata services.
-type PrometheusQuerier struct {
+// HTTPQuerier resolves a MetricSource (Prometheus instant query or a JSON
+// webhook) to a scalar over HTTP. Its HTTP client pins every dialed address
+// through IPValidator, closing the DNS-rebinding window so a metric address
+// can't be used to reach loopback/link-local/metadata services.
+type HTTPQuerier struct {
 	// HTTPClient is used for the query; nil builds a 30s client whose dialer
 	// rejects forbidden addresses.
 	HTTPClient *http.Client
@@ -60,25 +67,31 @@ type PrometheusQuerier struct {
 	client *http.Client
 }
 
-// New builds a PrometheusQuerier with a secret reader and optional IP validator.
-func New(secrets SecretReader, ipValidator func(net.IP) error) *PrometheusQuerier {
-	return &PrometheusQuerier{Secrets: secrets, IPValidator: ipValidator}
+// New builds an HTTPQuerier with a secret reader and optional IP validator.
+func New(secrets SecretReader, ipValidator func(net.IP) error) *HTTPQuerier {
+	return &HTTPQuerier{Secrets: secrets, IPValidator: ipValidator}
 }
 
-// Query resolves src to a single scalar. Every failure path wraps
-// ErrSourceUnavailable so callers route it through their onSourceError policy
-// rather than treating it as a normal numeric result.
-func (q *PrometheusQuerier) Query(ctx context.Context, namespace string, src stagesv1.MetricSource) (float64, error) {
-	if src.Prometheus == nil {
+// Query resolves src to a single scalar, dispatching on its provider. Every
+// failure path wraps ErrSourceUnavailable so callers route it through their
+// onSourceError policy rather than treating it as a normal numeric result.
+func (q *HTTPQuerier) Query(ctx context.Context, namespace string, src stagesv1.MetricSource) (float64, error) {
+	switch {
+	case src.Prometheus != nil:
+		return q.queryPrometheus(ctx, namespace, src.Prometheus)
+	case src.Webhook != nil:
+		return q.queryWebhook(ctx, namespace, src.Webhook)
+	default:
 		return 0, ErrNoSource
 	}
-	p := src.Prometheus
+}
 
+func (q *HTTPQuerier) queryPrometheus(ctx context.Context, namespace string, p *stagesv1.PrometheusSource) (float64, error) {
 	endpoint, err := url.Parse(p.Address)
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
 		return 0, fmt.Errorf("%w: invalid prometheus address %q", ErrSourceUnavailable, p.Address)
 	}
-	endpoint.Path = endpoint.Path + "/api/v1/query"
+	endpoint.Path += "/api/v1/query"
 	qv := url.Values{}
 	qv.Set("query", p.Query)
 	endpoint.RawQuery = qv.Encode()
@@ -88,35 +101,16 @@ func (q *PrometheusQuerier) Query(ctx context.Context, namespace string, src sta
 		return 0, fmt.Errorf("%w: %v", ErrSourceUnavailable, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if p.SecretRef != nil && p.SecretRef.Name != "" {
-		if q.Secrets == nil {
-			return 0, fmt.Errorf("%w: secretRef set but no secret reader configured", ErrSourceUnavailable)
-		}
-		data, serr := q.Secrets(ctx, namespace, p.SecretRef.Name)
-		if serr != nil {
-			return 0, fmt.Errorf("%w: reading secret %q: %v", ErrSourceUnavailable, p.SecretRef.Name, serr)
-		}
-		token, ok := data["token"]
-		if !ok || len(token) == 0 {
-			return 0, fmt.Errorf("%w: secret %q has no non-empty \"token\" key", ErrSourceUnavailable, p.SecretRef.Name)
-		}
-		req.Header.Set("Authorization", "Bearer "+string(token))
+	if err := q.applyBearer(ctx, req, namespace, p.SecretRef); err != nil {
+		return 0, err
 	}
 
-	resp, err := q.httpClient().Do(req)
+	body, err := q.fetch(req)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrSourceUnavailable, err)
+		return 0, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return 0, fmt.Errorf("%w: prometheus returned HTTP %d", ErrSourceUnavailable, resp.StatusCode)
-	}
-
-	// Cap the body: a single-scalar response is tiny, so a multi-MiB body is a
-	// wrong endpoint, not a real result. Avoids buffering an arbitrary response.
 	var pr promResponse
-	dec := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 1<<20))
-	if err := dec.Decode(&pr); err != nil {
+	if err := json.Unmarshal(body, &pr); err != nil {
 		return 0, fmt.Errorf("%w: decoding response: %v", ErrSourceUnavailable, err)
 	}
 	if pr.Status != "success" {
@@ -125,7 +119,71 @@ func (q *PrometheusQuerier) Query(ctx context.Context, namespace string, src sta
 	return scalarFromResult(pr.Data)
 }
 
-func (q *PrometheusQuerier) httpClient() *http.Client {
+func (q *HTTPQuerier) queryWebhook(ctx context.Context, namespace string, w *stagesv1.WebhookSource) (float64, error) {
+	endpoint, err := url.Parse(w.URL)
+	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return 0, fmt.Errorf("%w: invalid webhook url %q", ErrSourceUnavailable, w.URL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrSourceUnavailable, err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if err := q.applyBearer(ctx, req, namespace, w.SecretRef); err != nil {
+		return 0, err
+	}
+	body, err := q.fetch(req)
+	if err != nil {
+		return 0, err
+	}
+	var doc any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return 0, fmt.Errorf("%w: decoding webhook JSON: %v", ErrSourceUnavailable, err)
+	}
+	return scalarFromJSONPath(doc, w.JSONPath)
+}
+
+// applyBearer reads an optional bearer-token Secret and stamps the
+// Authorization header.
+func (q *HTTPQuerier) applyBearer(ctx context.Context, req *http.Request, namespace string, ref *meta.LocalObjectReference) error {
+	if ref == nil || ref.Name == "" {
+		return nil
+	}
+	if q.Secrets == nil {
+		return fmt.Errorf("%w: secretRef set but no secret reader configured", ErrSourceUnavailable)
+	}
+	data, err := q.Secrets(ctx, namespace, ref.Name)
+	if err != nil {
+		return fmt.Errorf("%w: reading secret %q: %v", ErrSourceUnavailable, ref.Name, err)
+	}
+	token, ok := data["token"]
+	if !ok || len(token) == 0 {
+		return fmt.Errorf("%w: secret %q has no non-empty \"token\" key", ErrSourceUnavailable, ref.Name)
+	}
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	return nil
+}
+
+// fetch performs the request and returns the (capped) body. A single-scalar
+// response is tiny, so the 1 MiB cap turns a wrong, huge endpoint into an error
+// rather than an unbounded read.
+func (q *HTTPQuerier) fetch(req *http.Request) ([]byte, error) {
+	resp, err := q.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSourceUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%w: source returned HTTP %d", ErrSourceUnavailable, resp.StatusCode)
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("%w: reading response: %v", ErrSourceUnavailable, err)
+	}
+	return body, nil
+}
+
+func (q *HTTPQuerier) httpClient() *http.Client {
 	if q.HTTPClient != nil {
 		return q.HTTPClient
 	}
@@ -141,7 +199,7 @@ func (q *PrometheusQuerier) httpClient() *http.Client {
 // safeDialContext resolves the host once, refuses the connection if any resolved
 // IP is forbidden, then dials a validated address — so a name that passes a
 // string check but resolves to a forbidden address never connects.
-func (q *PrometheusQuerier) safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+func (q *HTTPQuerier) safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -171,7 +229,7 @@ func (q *PrometheusQuerier) safeDialContext(ctx context.Context, network, addr s
 	return nil, lastErr
 }
 
-func (q *PrometheusQuerier) ipValidator() func(net.IP) error {
+func (q *HTTPQuerier) ipValidator() func(net.IP) error {
 	if q.IPValidator != nil {
 		return q.IPValidator
 	}
@@ -254,6 +312,59 @@ func sampleValue(raw json.RawMessage) (float64, error) {
 		return 0, fmt.Errorf("%w: sample value is %v (a misconfigured query returns NaN/Inf)", ErrSourceUnavailable, v)
 	}
 	return v, nil
+}
+
+// scalarFromJSONPath evaluates a kubectl-style JSONPath against a decoded JSON
+// document and reduces the result to a single float. The expression must match
+// exactly one numeric (or numeric-string) value.
+func scalarFromJSONPath(doc any, expr string) (float64, error) {
+	jp := jsonpath.New("metric").AllowMissingKeys(false)
+	if err := jp.Parse(expr); err != nil {
+		return 0, fmt.Errorf("%w: invalid jsonPath %q: %v", ErrSourceUnavailable, expr, err)
+	}
+	results, err := jp.FindResults(doc)
+	if err != nil {
+		return 0, fmt.Errorf("%w: jsonPath %q matched nothing: %v", ErrSourceUnavailable, expr, err)
+	}
+	var vals []reflect.Value
+	for _, group := range results {
+		vals = append(vals, group...)
+	}
+	if len(vals) != 1 {
+		return 0, fmt.Errorf("%w: jsonPath %q resolved to %d values, want exactly 1 (it must select a single scalar)", ErrSourceUnavailable, expr, len(vals))
+	}
+	return toScalar(vals[0].Interface())
+}
+
+// toScalar coerces a JSON-decoded value to a float. encoding/json decodes
+// numbers as float64 and quoted numbers as strings, so both are accepted; NaN /
+// Inf and non-numeric types are rejected (a wrong path that lands on an object
+// or a NaN must not silently disable the gate).
+func toScalar(v any) (float64, error) {
+	switch x := v.(type) {
+	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return 0, fmt.Errorf("%w: value is %v", ErrSourceUnavailable, x)
+		}
+		return x, nil
+	case json.Number:
+		return parseFloatScalar(x.String())
+	case string:
+		return parseFloatScalar(x)
+	default:
+		return 0, fmt.Errorf("%w: value %v (%T) is not a number", ErrSourceUnavailable, v, v)
+	}
+}
+
+func parseFloatScalar(s string) (float64, error) {
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0, fmt.Errorf("%w: unparseable value %q: %v", ErrSourceUnavailable, s, err)
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, fmt.Errorf("%w: value is %v", ErrSourceUnavailable, f)
+	}
+	return f, nil
 }
 
 // ParseScalar parses a decimal threshold string (freezeThreshold,
