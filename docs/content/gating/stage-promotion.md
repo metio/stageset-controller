@@ -98,9 +98,14 @@ per check:
 
 While a check is breached the StageSet reports `Ready=False` with reason
 `PromotionBlocked`, naming the failing check and the restart total on
-`status.stages[].promotionState`. A manual promotion is break-glass over it. The
-watched pods must be readable by the apply identity (the tenant `ServiceAccount`,
-or the cluster the stage's `kubeConfig` targets), so grant it `pods` `list`.
+`status.stages[].promotionState`. A manual promotion is break-glass over it.
+
+The watched pods are read under the same identity that applies the stage. In the
+default single-tenant setup — a StageSet with no `serviceAccountName` or
+`kubeConfig` — that is the controller, and the Helm chart grants it `pods` read
+out of the box. A StageSet that sets `serviceAccountName` reads under that
+ServiceAccount, so grant it `pods` `list`; a `kubeConfig` target reads under that
+kubeconfig's identity.
 
 ## Block on bad events
 
@@ -145,7 +150,10 @@ events don't carry over.
 gate default overridable per check, and `Rollback` reverting the stage to its
 last-good revision. While a check is breached the StageSet reports `Ready=False`
 with reason `PromotionBlocked`, naming the failing check and the event total. The
-apply identity needs `events` `list` (alongside `pods` `list`).
+apply identity reads events under the same rules as the
+[restart gate](#block-on-pod-restarts) — the chart grants the controller `events`
+read out of the box; a `serviceAccountName` or `kubeConfig` target needs `events`
+`list` (alongside `pods` `list`) on that identity.
 
 ## Require a manual promotion
 
