@@ -179,6 +179,42 @@ func validatePromotion(ss *stagesv1.StageSet) error {
 				}
 			}
 		}
+		if eg := st.Promotion.EventGate; eg != nil {
+			switch eg.OnFailure {
+			case "", "Hold", "Rollback":
+			default:
+				return fmt.Errorf("stage %q promotion.eventGate.onFailure must be Hold or Rollback, got %q", st.Name, eg.OnFailure)
+			}
+			if len(eg.Checks) == 0 {
+				return fmt.Errorf("stage %q promotion.eventGate must declare at least one check", st.Name)
+			}
+			ecNames := map[string]bool{}
+			for j := range eg.Checks {
+				c := &eg.Checks[j]
+				if c.Name == "" {
+					return fmt.Errorf("stage %q promotion.eventGate has a check with an empty name", st.Name)
+				}
+				if ecNames[c.Name] {
+					return fmt.Errorf("stage %q promotion.eventGate has duplicate check name %q", st.Name, c.Name)
+				}
+				ecNames[c.Name] = true
+				sel, err := metav1.LabelSelectorAsSelector(&c.Selector)
+				if err != nil {
+					return fmt.Errorf("stage %q promotion.eventGate check %q has an invalid selector: %w", st.Name, c.Name, err)
+				}
+				if sel.Empty() {
+					return fmt.Errorf("stage %q promotion.eventGate check %q selector must match at least one label", st.Name, c.Name)
+				}
+				if len(c.Reasons) == 0 {
+					return fmt.Errorf("stage %q promotion.eventGate check %q must name at least one event reason", st.Name, c.Name)
+				}
+				switch c.OnFailure {
+				case "", "Hold", "Rollback":
+				default:
+					return fmt.Errorf("stage %q promotion.eventGate check %q onFailure must be Hold or Rollback, got %q", st.Name, c.Name, c.OnFailure)
+				}
+			}
+		}
 		if st.Promotion.Analysis == nil {
 			continue
 		}

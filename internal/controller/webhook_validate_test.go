@@ -227,6 +227,45 @@ func TestValidatePromotion_RestartGate(t *testing.T) {
 	}
 }
 
+// TestValidatePromotion_EventGate covers event-gate shape: known onFailure (gate
+// and per-check), at least one check, and each check a unique name with a
+// non-empty selector and at least one reason.
+func TestValidatePromotion_EventGate(t *testing.T) {
+	t.Parallel()
+	sel := metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}}
+	check := func(name string, s metav1.LabelSelector, reasons ...string) stagesv1.EventCheck {
+		return stagesv1.EventCheck{Name: name, Selector: s, Reasons: reasons}
+	}
+	gate := func(onFailure string, checks ...stagesv1.EventCheck) *stagesv1.EventGate {
+		return &stagesv1.EventGate{OnFailure: onFailure, Checks: checks}
+	}
+	tests := []struct {
+		name    string
+		gate    *stagesv1.EventGate
+		wantErr bool
+	}{
+		{"valid", gate("", check("api", sel, "FailedScheduling")), false},
+		{"valid with gate onFailure", gate("Rollback", check("api", sel, "OOMKilling")), false},
+		{"empty name", gate("", check("", sel, "OOMKilling")), true},
+		{"empty selector", gate("", check("api", metav1.LabelSelector{}, "OOMKilling")), true},
+		{"no reasons", gate("", check("api", sel)), true},
+		{"duplicate name", gate("", check("api", sel, "OOMKilling"), check("api", sel, "OOMKilling")), true},
+		{"no checks", gate("Hold"), true},
+		{"bad gate onFailure", gate("Nope", check("api", sel, "OOMKilling")), true},
+		{"bad check onFailure", &stagesv1.EventGate{Checks: []stagesv1.EventCheck{{Name: "api", Selector: sel, Reasons: []string{"OOMKilling"}, OnFailure: "Nope"}}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{}
+			ss.Spec.Stages = []stagesv1.Stage{{Name: "s", Promotion: &stagesv1.StagePromotion{EventGate: tc.gate}}}
+			if err := validatePromotion(ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validatePromotion err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestValidateErrorBudget_PerStage covers that a stage's own errorBudget is
 // validated like the rollout-wide one.
 func TestValidateErrorBudget_PerStage(t *testing.T) {
