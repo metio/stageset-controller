@@ -231,6 +231,20 @@ func (r *StageSetReconciler) targetCluster(ctx context.Context, ns, sa string, k
 	return c, mapper, nil
 }
 
+// gateReader picks the reader the promotion restart/event gates use for their
+// pod/event reads. When targetCluster returned the controller's own cached client
+// (the local single-tenant and skip-impersonation paths), reading through it
+// would back the List with a cluster-wide informer; the uncached APIReader avoids
+// that. Impersonated and remote targets are already uncached (client.New), so
+// they read through the target directly. A nil APIReader (tests) falls back to
+// the target.
+func (r *StageSetReconciler) gateReader(target client.Client) client.Reader {
+	if target == r.Client && r.APIReader != nil {
+		return r.APIReader
+	}
+	return target
+}
+
 // tenantRestConfig assembles the rest.Config for a local-cluster tenant client:
 // a clone of the controller's connection whose ONLY credential is the minted
 // bearer token. Stripping Impersonate, BearerTokenFile, and the controller's

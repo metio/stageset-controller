@@ -92,6 +92,13 @@ const permanentRetryInterval = 1 * time.Minute
 type StageSetReconciler struct {
 	client.Client
 
+	// APIReader is an uncached reader against the controller's own cluster, used
+	// for the promotion restart/event gates' pod and event reads. Going direct to
+	// the apiserver avoids spinning up cluster-wide pod/event informers behind the
+	// cached client. Set from mgr.GetAPIReader() in SetupWithManager; tests may
+	// leave it nil to fall back to the (fake) cached client.
+	APIReader client.Reader
+
 	// Config is the manager's rest config, cloned per tenant to build the
 	// tenant-scoped clients spec.serviceAccountName requires. Set in
 	// SetupWithManager; leaving it nil disables local-cluster identity
@@ -782,7 +789,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			var restart *restartVerdict
 			if stage.Promotion != nil && stage.Promotion.RestartGate != nil {
-				rv, rerr := r.evaluateRestartChecks(ctx, target, &ss, stage)
+				rv, rerr := r.evaluateRestartChecks(ctx, r.gateReader(target), &ss, stage)
 				if rerr != nil {
 					// Can't read the watched pods (RBAC/API hiccup): never advance
 					// blind. Back off and retry rather than promote past an unverified
@@ -793,7 +800,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			var event *eventVerdict
 			if stage.Promotion != nil && stage.Promotion.EventGate != nil {
-				ev, eerr := r.evaluateEventChecks(ctx, target, &ss, stage)
+				ev, eerr := r.evaluateEventChecks(ctx, r.gateReader(target), &ss, stage)
 				if eerr != nil {
 					return ctrl.Result{}, eerr // can't read events: fail closed, retry
 				}
@@ -1734,6 +1741,9 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.Config == nil {
 		r.Config = mgr.GetConfig()
+	}
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
 	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("stageset-controller")

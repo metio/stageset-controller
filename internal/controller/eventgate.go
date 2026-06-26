@@ -30,7 +30,7 @@ type eventVerdict struct {
 // than maxEvents matching Warning events, or nil if all are within tolerance. A
 // list error is returned so the caller can treat it as transient and retry rather
 // than promote or block blind.
-func (r *StageSetReconciler) evaluateEventChecks(ctx context.Context, target client.Client, ss *stagesv1.StageSet, stage *stagesv1.Stage) (*eventVerdict, error) {
+func (r *StageSetReconciler) evaluateEventChecks(ctx context.Context, target client.Reader, ss *stagesv1.StageSet, stage *stagesv1.Stage) (*eventVerdict, error) {
 	if stage.Promotion == nil || stage.Promotion.EventGate == nil {
 		return nil, nil
 	}
@@ -57,7 +57,7 @@ func (r *StageSetReconciler) evaluateEventChecks(ctx context.Context, target cli
 // the target cluster. Events are scoped to the exact current pod incarnations by
 // involvedObject UID, so a previous revision's pods (different UID) don't count —
 // which keeps the tally to this revision's behaviour without tracking soak start.
-func podWarningEventTotal(ctx context.Context, target client.Client, namespace string, ls *metav1.LabelSelector, reasons []string) (int32, error) {
+func podWarningEventTotal(ctx context.Context, target client.Reader, namespace string, ls *metav1.LabelSelector, reasons []string) (int32, error) {
 	sel, err := metav1.LabelSelectorAsSelector(ls)
 	if err != nil {
 		return 0, fmt.Errorf("invalid selector: %w", err)
