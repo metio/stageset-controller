@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -70,7 +71,132 @@ func ValidateSpec(ss *stagesv1.StageSet) error {
 	if err := validateKubeConfig(ss); err != nil {
 		return err
 	}
+	if err := validateErrorBudget(ss); err != nil {
+		return err
+	}
+	if err := validatePromotion(ss); err != nil {
+		return err
+	}
 	return window.Validate(ss.Spec.UpdateWindows)
+}
+
+// validateErrorBudget enforces spec.errorBudget's shape: a usable metric source,
+// numeric thresholds, a resumeThreshold not below freezeThreshold (so hysteresis
+// can't invert), and a known onSourceError value.
+func validateErrorBudget(ss *stagesv1.StageSet) error {
+	eb := ss.Spec.ErrorBudget
+	if eb == nil {
+		return nil
+	}
+	if err := validateMetricSource("spec.errorBudget.source", eb.Source); err != nil {
+		return err
+	}
+	freeze, err := parseThresholdValue("spec.errorBudget.freezeThreshold", eb.FreezeThreshold)
+	if err != nil {
+		return err
+	}
+	if eb.ResumeThreshold != "" {
+		resume, err := parseThresholdValue("spec.errorBudget.resumeThreshold", eb.ResumeThreshold)
+		if err != nil {
+			return err
+		}
+		if resume < freeze {
+			return fmt.Errorf("spec.errorBudget.resumeThreshold (%s) must be >= freezeThreshold (%s)", eb.ResumeThreshold, eb.FreezeThreshold)
+		}
+	}
+	switch eb.OnSourceError {
+	case "", "Allow", "Hold":
+	default:
+		return fmt.Errorf("spec.errorBudget.onSourceError must be Allow or Hold, got %q", eb.OnSourceError)
+	}
+	return nil
+}
+
+// validatePromotion enforces stage.promotion.analysis shape across all stages:
+// each analysis check needs a name, a usable source, and well-formed thresholds;
+// onFailure/onSourceError must be known values.
+func validatePromotion(ss *stagesv1.StageSet) error {
+	for i := range ss.Spec.Stages {
+		st := &ss.Spec.Stages[i]
+		if st.Promotion == nil || st.Promotion.Analysis == nil {
+			continue
+		}
+		an := st.Promotion.Analysis
+		if len(an.Checks) == 0 {
+			return fmt.Errorf("stage %q promotion.analysis must declare at least one check", st.Name)
+		}
+		names := map[string]bool{}
+		for j := range an.Checks {
+			c := &an.Checks[j]
+			if c.Name == "" {
+				return fmt.Errorf("stage %q promotion.analysis has a check with an empty name", st.Name)
+			}
+			if names[c.Name] {
+				return fmt.Errorf("stage %q promotion.analysis has duplicate check name %q", st.Name, c.Name)
+			}
+			names[c.Name] = true
+			where := fmt.Sprintf("stage %q promotion.analysis check %q source", st.Name, c.Name)
+			if err := validateMetricSource(where, c.Source); err != nil {
+				return err
+			}
+			if err := validateThresholdBounds(st.Name, c); err != nil {
+				return err
+			}
+		}
+		switch an.OnFailure {
+		case "", "Hold", "Rollback":
+		default:
+			return fmt.Errorf("stage %q promotion.analysis.onFailure must be Hold or Rollback, got %q", st.Name, an.OnFailure)
+		}
+		switch an.OnSourceError {
+		case "", "Hold", "Allow":
+		default:
+			return fmt.Errorf("stage %q promotion.analysis.onSourceError must be Hold or Allow, got %q", st.Name, an.OnSourceError)
+		}
+	}
+	return nil
+}
+
+func validateThresholdBounds(stage string, c *stagesv1.AnalysisCheck) error {
+	if c.Threshold.Min == nil && c.Threshold.Max == nil {
+		return fmt.Errorf("stage %q promotion.analysis check %q must set at least one of threshold.min or threshold.max", stage, c.Name)
+	}
+	if c.Threshold.Min != nil {
+		if _, err := parseThresholdValue(fmt.Sprintf("stage %q check %q threshold.min", stage, c.Name), *c.Threshold.Min); err != nil {
+			return err
+		}
+	}
+	if c.Threshold.Max != nil {
+		if _, err := parseThresholdValue(fmt.Sprintf("stage %q check %q threshold.max", stage, c.Name), *c.Threshold.Max); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateMetricSource enforces that a MetricSource names a usable provider.
+func validateMetricSource(where string, src stagesv1.MetricSource) error {
+	if src.Prometheus == nil {
+		return fmt.Errorf("%s must set prometheus", where)
+	}
+	if src.Prometheus.Address == "" {
+		return fmt.Errorf("%s.prometheus.address must be set", where)
+	}
+	if src.Prometheus.Query == "" {
+		return fmt.Errorf("%s.prometheus.query must be set", where)
+	}
+	if src.Prometheus.SecretRef != nil && src.Prometheus.SecretRef.Name == "" {
+		return fmt.Errorf("%s.prometheus.secretRef.name must be set when secretRef is given", where)
+	}
+	return nil
+}
+
+func parseThresholdValue(where, s string) (float64, error) {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s %q is not a number", where, s)
+	}
+	return v, nil
 }
 
 // validateKubeConfig checks spec.kubeConfig at the level admission can see. A

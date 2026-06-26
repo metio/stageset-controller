@@ -73,6 +73,67 @@ the stage's behavior before promoting. `requireManualPromotion` defaults to
 `false`, and is distinct from a migration's [`requireApproval`](/usage/versioned-migrations/),
 which gates a destructive version transition rather than a stage advance.
 
+## Advance only if metrics stay healthy
+
+An analysis advances the stage only while metric checks against an external
+source keep passing — error rate, latency, an SLO burn rate, anything Prometheus
+can answer. This sees behavior a Deployment's own `.status` cannot, and is the
+difference between "did it become Ready" ([`readyChecks`](/usage/ready-checks/))
+and "is it behaving" (analysis).
+
+```yaml
+    - name: staging
+      sourceRef:
+        name: web-staging
+      promotion:
+        soak: 10m            # observe across this window
+        analysis:
+          interval: 1m       # re-evaluate this often while holding; defaults to spec.interval
+          failureLimit: 3    # consecutive failing evaluations tolerated; defaults to 0
+          checks:
+            - name: error-rate
+              source:
+                prometheus:
+                  address: http://prometheus.monitoring:9090
+                  query: sum(rate(http_requests_total{stage="staging",code=~"5.."}[1m]))/sum(rate(http_requests_total{stage="staging"}[1m]))
+              threshold:
+                max: "0.01"  # ≤1% 5xx
+            - name: latency-p99
+              source:
+                prometheus:
+                  address: http://prometheus.monitoring:9090
+                  query: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{stage="staging"}[5m])) by (le))
+              threshold:
+                max: "0.5"   # ≤500ms p99
+```
+
+Every check must stay within its [`threshold`](/usage/error-budget/) (`min`
+and/or `max`, inclusive). A breach increments a failure counter; the counter
+resets on a passing evaluation and fails the promotion once it exceeds
+`failureLimit`. While analysis is holding, the StageSet reports `Ready=False` with
+reason `Soaking` (during the soak) or, once a check has failed past the limit,
+`PromotionBlocked`. Each check's last observed value and verdict are on
+`status.stages[].promotionState.lastAnalysis`. The analysis shares the metric
+source contract with the [error-budget freeze](/usage/error-budget/), including
+its SSRF guard and `secretRef` bearer-token support.
+
+`onFailure` decides what a failed analysis does:
+
+- `Hold` (default) — leave the stage applied but not promoted, surfacing why.
+- `Rollback` — revert this stage to its last-known-good revision (requires
+  [`spec.rollbackOnFailure`](/usage/rollback/) so a snapshot exists) and park the
+  failing revision so it isn't re-applied each reconcile. Scoped to this stage:
+  earlier promoted stages are untouched.
+
+`onSourceError` decides what an unreadable source does, defaulting to `Hold` —
+never advance a stage whose behavior can't be verified. (This is the opposite of
+the error-budget freeze's `Allow` default, because holding a promotion only parks
+the rollout at the current healthy stage.) See the
+[PromotionBlocked](/runbooks/promotionblocked/) and
+[BudgetSourceUnavailable](/runbooks/budgetsourceunavailable/) runbooks. While
+tuning a new analysis, set `dryRun: true` to record what *would* block without
+holding or rolling back anything.
+
 ## Combine soak and a manual gate
 
 With both set, the stage soaks first, then awaits a manual promotion:

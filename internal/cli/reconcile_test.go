@@ -79,6 +79,25 @@ func TestReconcile_UpdateNow(t *testing.T) {
 	}
 }
 
+func TestReconcile_BudgetOverride(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "recbudget")
+	makeStageSet(t, c, ns, "app")
+
+	_, _, code := runCLI(t, cfg, "reconcile", "app", "-n", ns, "--budget-override")
+	if code != exitOK {
+		t.Fatalf("reconcile --budget-override exit = %d", code)
+	}
+	ann := getAnnotations(t, c, ns, "app")
+	if ann[budgetOverrideAnnotation] == "" {
+		t.Errorf("budget-override annotation not set: %v", ann)
+	}
+	if ann[budgetOverrideAnnotation] != ann[requestedAtAnnotation] {
+		t.Errorf("budget-override token should match requestedAt token")
+	}
+}
+
 func TestReconcile_UnknownStageIsError(t *testing.T) {
 	cfg := envtestConfig(t)
 	c := testClient(t, cfg)

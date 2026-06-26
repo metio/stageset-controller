@@ -5,6 +5,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -71,68 +72,192 @@ func (promoteRequestedPredicate) Update(e event.UpdateEvent) bool {
 }
 
 // gatePromotion decides whether a just-applied, healthy stage may advance the
-// rollout. It evaluates the soak window first (stay healthy for the duration),
-// then the manual gate (await an operator promote). It returns whether the
-// stage is promoted, the promotion state to record on its status, how long to
-// requeue while holding, and the promote token to record as handled.
+// rollout. It evaluates, in order: a manual break-glass promote, an analysis
+// hard-failure (onFailure), the soak window, an in-progress analysis (must
+// currently pass after the soak), and finally the manual gate. It returns
+// whether the stage is promoted, the promotion state to record on its status,
+// how long to requeue while holding, the promote token to record as handled, and
+// whether an analysis failure with onFailure=Rollback wants the stage reverted.
 //
 // State is keyed to the stage's applied revision: a new revision restarts the
-// soak from scratch, and a stage already Promoted at this revision short-
-// circuits so a drift reconcile never re-soaks it. The hold is status-only and
-// re-evaluated from scratch each reconcile (see the design's self-review): if
-// status is lost the soak restarts, which is acceptable.
-func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string) {
+// soak and the analysis failure count from scratch, and a stage already Promoted
+// at this revision short-circuits so a drift reconcile never re-gates it. The
+// hold is status-only and re-evaluated from scratch each reconcile (see the
+// design's self-review): if status is lost the soak restarts, which is
+// acceptable. verdict carries the metric-analysis evaluation for this reconcile,
+// or nil when the stage has no analysis.
+func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
 	p := stage.Promotion
 	if p == nil {
-		return true, nil, 0, prior.LastHandledPromotion
+		return true, nil, 0, prior.LastHandledPromotion, false
 	}
 
 	sameRevision := prior.AppliedRevision == revision
+	priorState := prior.PromotionState
 
-	// Already cleared the gate for this revision — don't re-soak a promoted
-	// stage on every drift-correction reconcile.
-	if sameRevision && prior.PromotionState != nil && prior.PromotionState.Phase == stagesv1.PromotionPromoted {
-		return true, prior.PromotionState, 0, prior.LastHandledPromotion
+	// Already cleared the gate for this revision — don't re-gate a promoted stage
+	// on every drift-correction reconcile.
+	if sameRevision && priorState != nil && priorState.Phase == stagesv1.PromotionPromoted {
+		return true, priorState, 0, prior.LastHandledPromotion, false
 	}
 
 	// Manual promote (break-glass): a fresh token addressed to this stage
-	// advances it immediately, ending a soak early or satisfying a manual gate.
-	// Checked before the soak so `stagesetctl promote` is a universal "advance
-	// this stage now," whatever is currently holding it.
+	// advances it immediately, ending a soak early, satisfying a manual gate, or
+	// overriding a blocked analysis. Checked first so `stagesetctl promote` is a
+	// universal "advance this stage now," whatever is currently holding it.
 	if tok := promoteTokenFor(ss, stage.Name); tok != "" && tok != prior.LastHandledPromotion {
-		return true, &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}, 0, tok
+		return true, &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}, 0, tok, false
 	}
 
-	// (a) Soak — hold until the stage has stayed healthy for the whole window.
-	if p.Soak != nil && p.Soak.Duration > 0 {
+	// Analysis bookkeeping: count consecutive failing evaluations for this
+	// revision; a failure is a threshold breach, or an unreadable source unless
+	// onSourceError=Allow.
+	var (
+		result   *stagesv1.AnalysisResult
+		failures int32
+		passing  = true
+		failed   bool
+	)
+	if verdict != nil {
+		an := p.Analysis
+		result = verdict.result
+		failingNow := verdict.breached || (verdict.sourceErr && an.OnSourceError != "Allow")
+		passing = !failingNow
+		prevFailures := int32(0)
+		if sameRevision && priorState != nil {
+			prevFailures = priorState.AnalysisFailures
+		}
+		if failingNow {
+			failures = prevFailures + 1
+		}
+		limit := int32(0)
+		if an.FailureLimit != nil {
+			limit = *an.FailureLimit
+		}
+		if failures > limit && !an.DryRun {
+			failed = true
+		}
+	}
+	withAnalysis := func(s *stagesv1.PromotionState) *stagesv1.PromotionState {
+		s.AnalysisFailures = failures
+		s.LastAnalysis = result
+		return s
+	}
+
+	// Analysis hard-failure → onFailure (Hold leaves the stage applied-but-held;
+	// Rollback signals the caller to revert this stage).
+	if failed {
+		s := withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionBlocked, Since: phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now)})
+		return false, s, r.analysisInterval(ss, p.Analysis), prior.LastHandledPromotion, p.Analysis.OnFailure == "Rollback"
+	}
+
+	// Soak — hold until the stage has stayed healthy for the whole window. Skip
+	// once a post-soak phase has been reached at this revision so a later hold
+	// (analysis/manual) does not restart the soak clock.
+	if p.Soak != nil && p.Soak.Duration > 0 && !(sameRevision && priorState != nil && pastSoak(priorState.Phase)) {
 		since := now
-		if sameRevision && prior.PromotionState != nil && prior.PromotionState.Since != nil {
-			since = prior.PromotionState.Since.Time
+		if sameRevision && priorState != nil && priorState.Phase == stagesv1.PromotionSoaking && priorState.Since != nil {
+			since = priorState.Since.Time
 		}
 		soakUntil := since.Add(p.Soak.Duration)
 		if now.Before(soakUntil) {
-			state = &stagesv1.PromotionState{
+			s := withAnalysis(&stagesv1.PromotionState{
 				Phase:     stagesv1.PromotionSoaking,
 				Since:     &metav1.Time{Time: since},
 				SoakUntil: &metav1.Time{Time: soakUntil},
-			}
-			return false, state, requeueForWindow(soakUntil, now, r.retryInterval(ss)), prior.LastHandledPromotion
+			})
+			return false, s, requeueForWindow(soakUntil, now, r.retryInterval(ss)), prior.LastHandledPromotion, false
 		}
 	}
 
-	// (b) Manual gate — hold until an operator promotes the stage. A fresh
-	// promote token was already consumed above, so reaching here means none is
-	// pending.
+	// After the soak: a present analysis must currently pass before advancing —
+	// never promote on a momentarily-failing check still within failureLimit.
+	if verdict != nil && !passing && !p.Analysis.DryRun {
+		s := withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionAnalyzing, Since: phaseSince(priorState, sameRevision, stagesv1.PromotionAnalyzing, now)})
+		return false, s, r.analysisInterval(ss, p.Analysis), prior.LastHandledPromotion, false
+	}
+
+	// Manual gate — hold until an operator promotes the stage. A fresh promote
+	// token was already consumed above, so reaching here means none is pending.
 	if p.RequireManualPromotion {
 		since := now
-		if sameRevision && prior.PromotionState != nil &&
-			prior.PromotionState.Phase == stagesv1.PromotionAwaitingManual && prior.PromotionState.Since != nil {
-			since = prior.PromotionState.Since.Time
+		if sameRevision && priorState != nil &&
+			priorState.Phase == stagesv1.PromotionAwaitingManual && priorState.Since != nil {
+			since = priorState.Since.Time
 		}
-		state = &stagesv1.PromotionState{Phase: stagesv1.PromotionAwaitingManual, Since: &metav1.Time{Time: since}}
-		return false, state, r.retryInterval(ss), prior.LastHandledPromotion
+		s := withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionAwaitingManual, Since: &metav1.Time{Time: since}})
+		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, false
 	}
 
-	// Soak elapsed (or none) and no manual gate — promote.
-	return true, &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}, 0, prior.LastHandledPromotion
+	// Soak elapsed (or none), analysis passing (or none), no manual gate —
+	// promote.
+	return true, withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}), 0, prior.LastHandledPromotion, false
+}
+
+// promotionHoldCondition maps a held promotion phase to the Ready reason and
+// message surfaced on the StageSet. Soaking and an in-progress analysis are
+// healthy holds (ReasonSoaking); a failed analysis is ReasonPromotionBlocked; a
+// manual gate is ReasonAwaitingPromotion.
+func promotionHoldCondition(ss *stagesv1.StageSet, stage string, state *stagesv1.PromotionState) (reason, msg string) {
+	phase := stagesv1.PromotionSoaking
+	if state != nil {
+		phase = state.Phase
+	}
+	switch phase {
+	case stagesv1.PromotionAwaitingManual:
+		return ReasonAwaitingPromotion, fmt.Sprintf(
+			"stage %q is healthy and awaiting a manual promotion; run: stagesetctl promote %s --namespace %s --stage %s",
+			stage, ss.Name, ss.Namespace, stage,
+		)
+	case stagesv1.PromotionBlocked:
+		if state != nil && state.AbortedRevision != "" {
+			return ReasonPromotionBlocked, fmt.Sprintf(
+				"stage %q promotion analysis failed (%d failure(s)); rolled back to its last-good revision",
+				stage, state.AnalysisFailures,
+			)
+		}
+		return ReasonPromotionBlocked, fmt.Sprintf(
+			"stage %q promotion analysis is failing (%d failure(s)); the rollout will not advance past it",
+			stage, analysisFailureCount(state),
+		)
+	case stagesv1.PromotionAnalyzing:
+		return ReasonSoaking, fmt.Sprintf(
+			"stage %q is running promotion analysis before advancing", stage,
+		)
+	default: // Soaking
+		if state != nil && state.SoakUntil != nil {
+			return ReasonSoaking, fmt.Sprintf(
+				"stage %q is soaking before promotion; soak window closes at %s",
+				stage, state.SoakUntil.Time.UTC().Format(time.RFC3339),
+			)
+		}
+		return ReasonSoaking, fmt.Sprintf("stage %q is soaking before promotion", stage)
+	}
+}
+
+func analysisFailureCount(state *stagesv1.PromotionState) int32 {
+	if state == nil {
+		return 0
+	}
+	return state.AnalysisFailures
+}
+
+// pastSoak reports whether a promotion phase is one the gate only reaches after
+// the soak window has elapsed, so the soak clock isn't restarted on a later hold.
+func pastSoak(phase stagesv1.PromotionPhase) bool {
+	switch phase {
+	case stagesv1.PromotionAnalyzing, stagesv1.PromotionBlocked, stagesv1.PromotionAwaitingManual, stagesv1.PromotionPromoted:
+		return true
+	default:
+		return false
+	}
+}
+
+// phaseSince preserves a phase's start instant across reconciles that stay in
+// the same phase at the same revision, and stamps now otherwise.
+func phaseSince(priorState *stagesv1.PromotionState, sameRevision bool, phase stagesv1.PromotionPhase, now time.Time) *metav1.Time {
+	if sameRevision && priorState != nil && priorState.Phase == phase && priorState.Since != nil {
+		return priorState.Since
+	}
+	return &metav1.Time{Time: now}
 }

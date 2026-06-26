@@ -57,6 +57,78 @@ func TestValidateDecryption(t *testing.T) {
 	}
 }
 
+func okSource() stagesv1.MetricSource {
+	return stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: "http://p:9090", Query: "q"}}
+}
+
+// TestValidateErrorBudget covers spec.errorBudget shape: a usable source,
+// numeric thresholds, resume not below freeze, and a known onSourceError.
+func TestValidateErrorBudget(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		eb      *stagesv1.ErrorBudget
+		wantErr bool
+	}{
+		{name: "nil is fine"},
+		{name: "minimal valid", eb: &stagesv1.ErrorBudget{Source: okSource(), FreezeThreshold: "0"}},
+		{name: "with hysteresis + onSourceError", eb: &stagesv1.ErrorBudget{Source: okSource(), FreezeThreshold: "0", ResumeThreshold: "0.05", OnSourceError: "Hold"}},
+		{name: "missing source", eb: &stagesv1.ErrorBudget{FreezeThreshold: "0"}, wantErr: true},
+		{name: "missing address", eb: &stagesv1.ErrorBudget{Source: stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Query: "q"}}, FreezeThreshold: "0"}, wantErr: true},
+		{name: "missing query", eb: &stagesv1.ErrorBudget{Source: stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: "http://p:9090"}}, FreezeThreshold: "0"}, wantErr: true},
+		{name: "bad freezeThreshold", eb: &stagesv1.ErrorBudget{Source: okSource(), FreezeThreshold: "x"}, wantErr: true},
+		{name: "bad resumeThreshold", eb: &stagesv1.ErrorBudget{Source: okSource(), FreezeThreshold: "0", ResumeThreshold: "y"}, wantErr: true},
+		{name: "resume below freeze", eb: &stagesv1.ErrorBudget{Source: okSource(), FreezeThreshold: "0.1", ResumeThreshold: "0.05"}, wantErr: true},
+		{name: "unknown onSourceError", eb: &stagesv1.ErrorBudget{Source: okSource(), FreezeThreshold: "0", OnSourceError: "Maybe"}, wantErr: true},
+		{name: "secretRef without name", eb: &stagesv1.ErrorBudget{Source: stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: "http://p:9090", Query: "q", SecretRef: &meta.LocalObjectReference{}}}, FreezeThreshold: "0"}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{}
+			ss.Spec.ErrorBudget = tc.eb
+			if err := validateErrorBudget(ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validateErrorBudget err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidatePromotion covers stage.promotion.analysis shape: at least one
+// check, named unique checks, a usable source, a threshold bound, and known
+// onFailure/onSourceError values.
+func TestValidatePromotion(t *testing.T) {
+	t.Parallel()
+	max := "0.01"
+	okCheck := stagesv1.AnalysisCheck{Name: "err", Source: okSource(), Threshold: stagesv1.Threshold{Max: &max}}
+	tests := []struct {
+		name    string
+		an      *stagesv1.PromotionAnalysis
+		wantErr bool
+	}{
+		{name: "nil analysis is fine"},
+		{name: "minimal valid", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{okCheck}}},
+		{name: "valid with policies", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{okCheck}, OnFailure: "Rollback", OnSourceError: "Allow"}},
+		{name: "no checks", an: &stagesv1.PromotionAnalysis{}, wantErr: true},
+		{name: "empty check name", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{{Source: okSource(), Threshold: stagesv1.Threshold{Max: &max}}}}, wantErr: true},
+		{name: "duplicate check name", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{okCheck, okCheck}}, wantErr: true},
+		{name: "check missing source", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{{Name: "x", Threshold: stagesv1.Threshold{Max: &max}}}}, wantErr: true},
+		{name: "check with no threshold bound", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{{Name: "x", Source: okSource()}}}, wantErr: true},
+		{name: "bad onFailure", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{okCheck}, OnFailure: "Nuke"}, wantErr: true},
+		{name: "bad onSourceError", an: &stagesv1.PromotionAnalysis{Checks: []stagesv1.AnalysisCheck{okCheck}, OnSourceError: "Maybe"}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{}
+			ss.Spec.Stages = []stagesv1.Stage{{Name: "staging", Promotion: &stagesv1.StagePromotion{Analysis: tc.an}}}
+			if err := validatePromotion(ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validatePromotion err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestValidateKubeConfig covers the kubeConfig validator's shape checks:
 // exactly one of secretRef / configMapRef, each carrying a name. configMapRef
 // (cloud-provider auth) is now accepted at admission — its ConfigMap contents
