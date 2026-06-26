@@ -30,7 +30,7 @@ type restartVerdict struct {
 // exceed their maxRestarts, or nil if all are within tolerance. A list error is
 // returned so the caller can treat it as a transient and retry rather than
 // promote or block blind.
-func (r *StageSetReconciler) evaluateRestartChecks(ctx context.Context, target client.Client, ss *stagesv1.StageSet, stage *stagesv1.Stage) (*restartVerdict, error) {
+func (r *StageSetReconciler) evaluateRestartChecks(ctx context.Context, target client.Reader, ss *stagesv1.StageSet, stage *stagesv1.Stage) (*restartVerdict, error) {
 	if stage.Promotion == nil || stage.Promotion.RestartGate == nil {
 		return nil, nil
 	}
@@ -57,7 +57,7 @@ func (r *StageSetReconciler) evaluateRestartChecks(ctx context.Context, target c
 // label — rather than walking owner kinds — keeps the check source-agnostic:
 // pods from Deployments, StatefulSets, Jobs, or a custom controller all count.
 // Init- and regular-container restarts are both included.
-func podRestartTotal(ctx context.Context, target client.Client, namespace string, ls *metav1.LabelSelector) (int32, error) {
+func podRestartTotal(ctx context.Context, target client.Reader, namespace string, ls *metav1.LabelSelector) (int32, error) {
 	sel, err := metav1.LabelSelectorAsSelector(ls)
 	if err != nil {
 		return 0, fmt.Errorf("invalid selector: %w", err)
