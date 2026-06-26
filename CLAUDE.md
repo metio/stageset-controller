@@ -382,6 +382,23 @@ ilo --no-rc @dev/website   # one-shot build into docs/public/
 ilo --no-rc @dev/serve     # live server on :1313
 ```
 
+`@dev/serve` is configured so the live server never shares state with the prod
+`@dev/website` build and so its pages work from any browser host:
+
+- `HUGO_RESOURCEDIR=/tmp/hugo-resources-dev` and `HUGO_PUBLISHDIR=/tmp/hugo-public-dev`
+  keep the server's fingerprint/SRI asset cache and its rendered output inside the
+  (ephemeral) container, so it never touches `docs/resources/_gen` or `docs/public`.
+  The prod build owns those. Sharing either across the two different base URLs
+  would let whichever ran second serve the other's prod-URL'd, hashed CSS —
+  breaking the page via cross-origin subresource-integrity blocks. Isolated, the
+  prod build and the live server can run at the same time without interfering.
+- `--baseURL / --appendPort=false` makes the server emit root-relative asset and
+  link URLs (`/css/…`, `/usage/…`). The container's `localhost` is usually not the
+  host the browser uses, so absolute `http://localhost:1313/…` asset URLs would be
+  cross-origin from the browser and the SRI `integrity` attributes would block the
+  CSS. Root-relative URLs resolve against whatever host loaded the page, so they
+  are always same-origin and SRI passes.
+
 Two website linters are pre-staged in the Go `dev/Containerfile` (alongside markdownlint), so they run in the default `ilo bash` shell — no `--no-rc`. Build the site first, then:
 
 ```shell
