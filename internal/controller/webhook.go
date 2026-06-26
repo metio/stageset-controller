@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -143,6 +144,39 @@ func validatePromotion(ss *stagesv1.StageSet) error {
 			}
 			if _, err := parseThresholdValue(fmt.Sprintf("stage %q promotion.fastTrack.max", st.Name), ft.Max); err != nil {
 				return err
+			}
+		}
+		if rg := st.Promotion.RestartGate; rg != nil {
+			switch rg.OnFailure {
+			case "", "Hold", "Rollback":
+			default:
+				return fmt.Errorf("stage %q promotion.restartGate.onFailure must be Hold or Rollback, got %q", st.Name, rg.OnFailure)
+			}
+			if len(rg.Checks) == 0 {
+				return fmt.Errorf("stage %q promotion.restartGate must declare at least one check", st.Name)
+			}
+			rcNames := map[string]bool{}
+			for j := range rg.Checks {
+				c := &rg.Checks[j]
+				if c.Name == "" {
+					return fmt.Errorf("stage %q promotion.restartGate has a check with an empty name", st.Name)
+				}
+				if rcNames[c.Name] {
+					return fmt.Errorf("stage %q promotion.restartGate has duplicate check name %q", st.Name, c.Name)
+				}
+				rcNames[c.Name] = true
+				sel, err := metav1.LabelSelectorAsSelector(&c.Selector)
+				if err != nil {
+					return fmt.Errorf("stage %q promotion.restartGate check %q has an invalid selector: %w", st.Name, c.Name, err)
+				}
+				if sel.Empty() {
+					return fmt.Errorf("stage %q promotion.restartGate check %q selector must match at least one label", st.Name, c.Name)
+				}
+				switch c.OnFailure {
+				case "", "Hold", "Rollback":
+				default:
+					return fmt.Errorf("stage %q promotion.restartGate check %q onFailure must be Hold or Rollback, got %q", st.Name, c.Name, c.OnFailure)
+				}
 			}
 		}
 		if st.Promotion.Analysis == nil {

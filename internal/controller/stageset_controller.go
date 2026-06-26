@@ -780,14 +780,29 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if stage.Promotion != nil && stage.Promotion.FastTrack != nil {
 				fastTrackOK = r.evaluateFastTrack(ctx, &ss, stage)
 			}
-			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK)
+			var restart *restartVerdict
+			if stage.Promotion != nil && stage.Promotion.RestartGate != nil {
+				rv, rerr := r.evaluateRestartChecks(ctx, target, &ss, stage)
+				if rerr != nil {
+					// Can't read the watched pods (RBAC/API hiccup): never advance
+					// blind. Back off and retry rather than promote past an unverified
+					// stage — the gate fails closed, like a promotion source error.
+					return ctrl.Result{}, rerr
+				}
+				restart = rv
+			}
+			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK, restart)
 			appliedRevision := ra.Revision
 			if rollback {
-				// Analysis failed with onFailure=Rollback: revert THIS stage to its
-				// last-good revision (earlier promoted stages are untouched), and
-				// record the failing revision as aborted so it is not re-applied and
-				// re-failed each reconcile until the revision changes or an operator
-				// promotes.
+				// A promotion gate with onFailure=Rollback (analysis or a restart
+				// check) reverts THIS stage to its last-good revision — earlier
+				// promoted stages are untouched — and records the failing revision as
+				// aborted so it is not re-applied and re-failed each reconcile until
+				// the revision changes or an operator promotes.
+				cause := "promotion analysis"
+				if promoState != nil && promoState.RestartCheck != "" {
+					cause = fmt.Sprintf("restart check %q", promoState.RestartCheck)
+				}
 				reverted, ok, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, applier, fetcher, recorder)
 				if rerr != nil {
 					return ctrl.Result{}, rerr // transient revert failure: back off
@@ -796,10 +811,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					appliedRevision = reverted
 					promoState.AbortedRevision = ra.Revision
 					r.event(&ss, corev1.EventTypeWarning, ReasonPromotionBlocked,
-						fmt.Sprintf("stage %q promotion analysis failed; rolled back to revision %s", stage.Name, reverted))
+						fmt.Sprintf("stage %q %s failed; rolled back to revision %s", stage.Name, cause, reverted))
 				} else {
 					r.event(&ss, corev1.EventTypeWarning, ReasonPromotionBlocked,
-						fmt.Sprintf("stage %q promotion analysis failed and onFailure=Rollback, but no last-good revision is available to roll back to (enable spec.rollbackOnFailure); holding", stage.Name))
+						fmt.Sprintf("stage %q %s failed and onFailure=Rollback, but no last-good revision is available to roll back to (enable spec.rollbackOnFailure); holding", stage.Name, cause))
 				}
 			}
 			applied[ra.Key()] = ra.Revision

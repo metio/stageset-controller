@@ -189,6 +189,44 @@ func TestValidatePromotion_FastTrack(t *testing.T) {
 	}
 }
 
+// TestValidatePromotion_RestartGate covers restart-gate shape: a known onFailure
+// (gate and per-check), at least one check, and each check a unique name with a
+// non-empty selector.
+func TestValidatePromotion_RestartGate(t *testing.T) {
+	t.Parallel()
+	sel := metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}}
+	check := func(name string, s metav1.LabelSelector) stagesv1.RestartCheck {
+		return stagesv1.RestartCheck{Name: name, Selector: s}
+	}
+	gate := func(onFailure string, checks ...stagesv1.RestartCheck) *stagesv1.RestartGate {
+		return &stagesv1.RestartGate{OnFailure: onFailure, Checks: checks}
+	}
+	tests := []struct {
+		name    string
+		gate    *stagesv1.RestartGate
+		wantErr bool
+	}{
+		{"valid", gate("", check("api", sel)), false},
+		{"valid with gate onFailure", gate("Rollback", check("api", sel)), false},
+		{"empty name", gate("", check("", sel)), true},
+		{"empty selector", gate("", check("api", metav1.LabelSelector{})), true},
+		{"duplicate name", gate("", check("api", sel), check("api", sel)), true},
+		{"no checks", gate("Hold"), true},
+		{"bad gate onFailure", gate("Nope", check("api", sel)), true},
+		{"bad check onFailure", &stagesv1.RestartGate{Checks: []stagesv1.RestartCheck{{Name: "api", Selector: sel, OnFailure: "Nope"}}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{}
+			ss.Spec.Stages = []stagesv1.Stage{{Name: "s", Promotion: &stagesv1.StagePromotion{RestartGate: tc.gate}}}
+			if err := validatePromotion(ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validatePromotion err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestValidateErrorBudget_PerStage covers that a stage's own errorBudget is
 // validated like the rollout-wide one.
 func TestValidateErrorBudget_PerStage(t *testing.T) {

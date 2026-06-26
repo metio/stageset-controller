@@ -86,7 +86,7 @@ func (promoteRequestedPredicate) Update(e event.UpdateEvent) bool {
 // design's self-review): if status is lost the soak restarts, which is
 // acceptable. verdict carries the metric-analysis evaluation for this reconcile,
 // or nil when the stage has no analysis.
-func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict, fastTrackOK bool) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
+func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict, fastTrackOK bool, restart *restartVerdict) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
 	p := stage.Promotion
 	if p == nil {
 		return true, nil, 0, prior.LastHandledPromotion, false
@@ -107,6 +107,20 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 	// universal "advance this stage now," whatever is currently holding it.
 	if tok := promoteTokenFor(ss, stage.Name); tok != "" && tok != prior.LastHandledPromotion {
 		return true, &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}, 0, tok, false
+	}
+
+	// Restart gate: a watched pod group has restarted more than its check allows.
+	// Block the advance — a crashlooping stage must not promote even if its
+	// workload still reports Ready. The manual promote above overrides this, and
+	// drift on the current stage keeps being corrected.
+	if restart != nil {
+		s := &stagesv1.PromotionState{
+			Phase:            stagesv1.PromotionBlocked,
+			Since:            phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now),
+			RestartCheck:     restart.check,
+			ObservedRestarts: restart.observed,
+		}
+		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, restart.rollback
 	}
 
 	// Analysis bookkeeping: count consecutive failing evaluations for this
@@ -214,6 +228,18 @@ func promotionHoldCondition(ss *stagesv1.StageSet, stage string, state *stagesv1
 			stage, ss.Name, ss.Namespace, stage,
 		)
 	case stagesv1.PromotionBlocked:
+		if state != nil && state.RestartCheck != "" {
+			if state.AbortedRevision != "" {
+				return ReasonPromotionBlocked, fmt.Sprintf(
+					"stage %q restart check %q observed %d pod restart(s) over its limit; rolled back to its last-good revision",
+					stage, state.RestartCheck, state.ObservedRestarts,
+				)
+			}
+			return ReasonPromotionBlocked, fmt.Sprintf(
+				"stage %q restart check %q observed %d pod restart(s) over its limit; the rollout will not advance past it",
+				stage, state.RestartCheck, state.ObservedRestarts,
+			)
+		}
 		if state != nil && state.AbortedRevision != "" {
 			return ReasonPromotionBlocked, fmt.Sprintf(
 				"stage %q promotion analysis failed (%d failure(s)); rolled back to its last-good revision",

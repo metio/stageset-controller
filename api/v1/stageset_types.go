@@ -307,6 +307,66 @@ type StagePromotion struct {
 	// on a metric is promotion.analysis's job). Requires soak.
 	// +optional
 	FastTrack *FastTrack `json:"fastTrack,omitempty"`
+
+	// RestartGate blocks promotion when a watched group of pods restarts too often
+	// while the stage soaks. It catches a crashloop or an OOM-after-warm-up that
+	// leaves the workload Ready (so ReadyChecks pass) while individual pods keep
+	// restarting — the dependency-free companion to a soak.
+	// +optional
+	RestartGate *RestartGate `json:"restartGate,omitempty"`
+}
+
+// RestartGate watches one or more pod groups for restarts during a stage's soak;
+// a breach in any check blocks the stage's promotion.
+type RestartGate struct {
+	// OnFailure is the default action when a check breaches: Hold (the default)
+	// parks the rollout at this stage and surfaces why; Rollback reverts the stage
+	// to its last-good revision — reusing spec.rollbackOnFailure's snapshots,
+	// scoped to this stage — and parks the failing revision so it isn't re-applied
+	// each reconcile. With no snapshot available a rollback degrades to a hold. A
+	// check may override this with its own onFailure.
+	// +optional
+	// +kubebuilder:validation:Enum=Hold;Rollback
+	OnFailure string `json:"onFailure,omitempty"`
+
+	// Checks are the pod groups to watch; a breach in any one blocks promotion.
+	// Set several (e.g. an API and a worker) with independent tolerances.
+	// +required
+	// +listType=map
+	// +listMapKey=name
+	Checks []RestartCheck `json:"checks"`
+}
+
+// RestartCheck blocks a stage's promotion when one group of pods restarts more
+// than maxRestarts times. Pods are selected by label (in the StageSet's
+// namespace), so the group is not tied to a single workload kind — it can span
+// Deployments, StatefulSets, DaemonSets, Jobs, or a custom controller. The pods
+// must be observable by the controller (the same cluster, or the one the stage's
+// kubeConfig targets).
+type RestartCheck struct {
+	// Name identifies the check in status, events, and the Ready message. Unique
+	// within a stage's promotion.
+	// +required
+	Name string `json:"name"`
+
+	// Selector chooses the pods this check watches, in the StageSet's namespace.
+	// It must match at least one label; an empty selector (which would match every
+	// pod) is rejected.
+	// +required
+	Selector metav1.LabelSelector `json:"selector"`
+
+	// MaxRestarts is the total container restarts — summed across the selected
+	// pods' init and regular containers — tolerated before the check fails.
+	// Defaults to 0: no restarts allowed.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxRestarts int32 `json:"maxRestarts,omitempty"`
+
+	// OnFailure overrides the gate's default action for this check (Hold or
+	// Rollback). Defaults to the RestartGate's onFailure.
+	// +optional
+	// +kubebuilder:validation:Enum=Hold;Rollback
+	OnFailure string `json:"onFailure,omitempty"`
 }
 
 // FastTrack accelerates a soak based on a metric. After the minimum soak, if the
@@ -1185,6 +1245,15 @@ type PromotionState struct {
 	// once it exceeds failureLimit.
 	// +optional
 	AnalysisFailures int32 `json:"analysisFailures,omitempty"`
+
+	// RestartCheck names the promotion.restartChecks entry whose pods exceeded
+	// their maxRestarts, when a restart breach is what blocks the rollout.
+	// +optional
+	RestartCheck string `json:"restartCheck,omitempty"`
+
+	// ObservedRestarts is the restart total the breaching RestartCheck observed.
+	// +optional
+	ObservedRestarts int32 `json:"observedRestarts,omitempty"`
 
 	// AbortedRevision names the revision a promotion analysis with
 	// onFailure=Rollback reverted away from. While it equals the pinned revision
