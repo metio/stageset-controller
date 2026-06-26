@@ -232,7 +232,7 @@ func TestDiff_Idempotent(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		entries, err := a.Diff(ctx, "ss", "default",
 			[]*unstructured.Unstructured{configMap("cfg-idem", map[string]any{"k": "v"})}, apply.ConflictHandling{})
 		if err != nil {

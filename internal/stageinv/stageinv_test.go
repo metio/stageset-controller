@@ -56,7 +56,7 @@ func stageSet(name, namespace string) *stagesv1.StageSet {
 // refs builds n distinct ConfigMap refs with stable, sortable names.
 func refs(n int) []inventory.ObjectRef {
 	out := make([]inventory.ObjectRef, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out = append(out, ref(fmt.Sprintf("cm-%03d", i)))
 	}
 	return out

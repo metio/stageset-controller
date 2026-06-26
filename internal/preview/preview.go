@@ -11,6 +11,7 @@ package preview
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -200,9 +201,7 @@ func resolvePostBuildVars(ctx context.Context, c client.Client, ns string, pb *s
 				}
 				return nil, fmt.Errorf("substituteFrom ConfigMap %q: %w", ref.Name, err)
 			}
-			for k, v := range cm.Data {
-				vars[k] = v
-			}
+			maps.Copy(vars, cm.Data)
 		case "Secret":
 			var sec corev1.Secret
 			if err := c.Get(ctx, key, &sec); err != nil {
@@ -216,8 +215,6 @@ func resolvePostBuildVars(ctx context.Context, c client.Client, ns string, pb *s
 			}
 		}
 	}
-	for k, v := range pb.Substitute {
-		vars[k] = v
-	}
+	maps.Copy(vars, pb.Substitute)
 	return vars, nil
 }

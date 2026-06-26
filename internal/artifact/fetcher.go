@@ -247,7 +247,7 @@ func normaliseEntry(rawName, prefix string) (string, bool) {
 		return "", false
 	}
 	cleaned := path.Clean(rawName)
-	for _, part := range strings.Split(cleaned, "/") {
+	for part := range strings.SplitSeq(cleaned, "/") {
 		if part == ".." || strings.HasPrefix(part, ".") {
 			return "", false
 		}

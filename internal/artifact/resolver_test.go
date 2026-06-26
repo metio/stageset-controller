@@ -350,12 +350,12 @@ func TestPinnedState(t *testing.T) {
 		obj  *unstructured.Unstructured
 		want *bool
 	}{
-		{"oci digest is pinned", mk("OCIRepository", "digest", "sha256:abc"), boolp(true)},
-		{"oci tag is not pinned", mk("OCIRepository", "tag", "latest"), boolp(false)},
-		{"oci no ref is not pinned", mk("OCIRepository", "", ""), boolp(false)},
-		{"git commit is pinned", mk("GitRepository", "commit", "deadbeef"), boolp(true)},
-		{"git branch is not pinned", mk("GitRepository", "branch", "main"), boolp(false)},
-		{"bucket is never pinned", mk("Bucket", "", ""), boolp(false)},
+		{"oci digest is pinned", mk("OCIRepository", "digest", "sha256:abc"), new(true)},
+		{"oci tag is not pinned", mk("OCIRepository", "tag", "latest"), new(false)},
+		{"oci no ref is not pinned", mk("OCIRepository", "", ""), new(false)},
+		{"git commit is pinned", mk("GitRepository", "commit", "deadbeef"), new(true)},
+		{"git branch is not pinned", mk("GitRepository", "branch", "main"), new(false)},
+		{"bucket is never pinned", mk("Bucket", "", ""), new(false)},
 		{"external artifact is exempt", mk("ExternalArtifact", "", ""), nil},
 	}
 	for _, c := range cases {
@@ -370,5 +370,3 @@ func TestPinnedState(t *testing.T) {
 		})
 	}
 }
-
-func boolp(b bool) *bool { return &b }

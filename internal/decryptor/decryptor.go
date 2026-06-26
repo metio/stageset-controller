@@ -353,7 +353,6 @@ func kmsContext(in map[string]string) map[string]*string {
 	}
 	out := make(map[string]*string, len(in))
 	for k, v := range in {
-		v := v
 		out[k] = &v
 	}
 	return out

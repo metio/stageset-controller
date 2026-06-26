@@ -451,7 +451,7 @@ func parseWatchNamespaces(flagValue string, env []string) []string {
 		return nil
 	}
 	var out []string
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if p := strings.TrimSpace(part); p != "" {
 			out = append(out, p)
 		}

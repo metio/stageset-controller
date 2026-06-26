@@ -127,8 +127,7 @@ func run(ctx context.Context, o *options, args []string) int {
 		return exitOK
 	}
 
-	var ee *exitErr
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exitErr](err); ok {
 		// exitDiff is a clean outcome, not an error: stay quiet.
 		if ee.code != exitDiff && ee.err != nil {
 			fmt.Fprintf(o.streams.ErrOut, "Error: %v\n", ee.err)
