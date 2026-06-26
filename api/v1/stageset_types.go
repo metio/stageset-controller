@@ -99,7 +99,8 @@ type StageSetSpec struct {
 	// error budget — the Google SRE error-budget policy. It reads one scalar
 	// (budget remaining, 0..1) from a metric source and holds the rollout while
 	// the value is below freezeThreshold, resuming on its own when it recovers.
-	// ANDed with updateWindows: a rollout proceeds only if every gate allows.
+	// Combined with updateWindows under a logical AND: a rollout proceeds only if
+	// every gate allows.
 	// +optional
 	ErrorBudget *ErrorBudget `json:"errorBudget,omitempty"`
 

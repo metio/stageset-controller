@@ -373,8 +373,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Error-budget freeze: hold a new-revision rollout while the service is out
-	// of its SLO error budget. ANDed with the update-window gate above; both must
-	// allow. A frozen-but-deployed StageSet stays Ready with status.budgetFreeze.
+	// of its SLO error budget. Combined with the update-window gate above; both
+	// must allow. A frozen-but-deployed StageSet stays Ready with status.budgetFreeze.
 	budgetCtx, budgetSpan := observability.Tracer().Start(ctx, "stageset.gateErrorBudget")
 	budgetRes, budgetDeferred, berr := r.gateErrorBudget(budgetCtx, patchHelper, &ss, resolved)
 	if berr != nil {

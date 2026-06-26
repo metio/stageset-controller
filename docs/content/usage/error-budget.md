@@ -55,8 +55,8 @@ interval.
 
 ## It composes with update windows
 
-`spec.errorBudget` and [`spec.updateWindows`](/usage/update-windows/) are ANDed: a
-new revision rolls out only if the update window is open **and** the budget is
+`spec.errorBudget` and [`spec.updateWindows`](/usage/update-windows/) are combined
+under a logical AND: a new revision rolls out only if the update window is open **and** the budget is
 healthy. A closed window holds the rollout even when the budget is fine (and the
 budget source isn't even queried), and an exhausted budget holds it even inside
 an open window. Use both to deploy only during a maintenance window *and* only

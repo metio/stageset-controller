@@ -123,7 +123,7 @@ func TestReconcile_ErrorBudget_AllowsWhenHealthy(t *testing.T) {
 }
 
 // A closed update window holds the rollout even when the budget is healthy — the
-// two gates are ANDed — and the budget source is not even queried.
+// two gates are combined under AND — and the budget source is not even queried.
 func TestReconcile_ErrorBudget_RespectsClosedUpdateWindow(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
