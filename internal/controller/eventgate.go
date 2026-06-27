@@ -77,6 +77,11 @@ func podWarningEventTotal(ctx context.Context, target client.Reader, namespace s
 	}
 	uids := make(map[types.UID]struct{}, len(pods.Items))
 	for i := range pods.Items {
+		// A terminating pod is draining from the prior revision; its events must
+		// not gate the revision replacing it.
+		if pods.Items[i].DeletionTimestamp != nil {
+			continue
+		}
 		uids[pods.Items[i].UID] = struct{}{}
 	}
 	allowed := make(map[string]struct{}, len(reasons))
