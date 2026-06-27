@@ -220,7 +220,15 @@ func (e *Executor) deleteObject(ctx context.Context, ns string, d *stagesv1.Dele
 	}
 	obj.SetNamespace(tns)
 	obj.SetName(d.Target.Name)
-	if err := e.Client.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+	var opts []client.DeleteOption
+	switch d.Cascade {
+	case "Foreground":
+		opts = append(opts, client.PropagationPolicy(metav1.DeletePropagationForeground))
+	case "Orphan":
+		opts = append(opts, client.PropagationPolicy(metav1.DeletePropagationOrphan))
+	}
+	// Empty or "Background" keeps the apiserver default (background GC).
+	if err := e.Client.Delete(ctx, obj, opts...); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete %s %q: %w", d.Target.Kind, d.Target.Name, err)
 	}
 	return nil
