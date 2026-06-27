@@ -640,7 +640,7 @@ func TestPatch_JSON6902TypeMapping(t *testing.T) {
 	e := &Executor{Client: c}
 
 	act := stagesv1.Action{Name: "flip", Patch: &stagesv1.PatchAction{
-		Target: meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "web"},
+		Target: stagesv1.PatchTarget{APIVersion: "v1", Kind: "ConfigMap", Name: "web"},
 		Type:   "json6902",
 		Patch:  `[{"op":"replace","path":"/data/k","value":"patched"}]`,
 	}}

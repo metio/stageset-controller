@@ -235,24 +235,54 @@ func (e *Executor) deleteObject(ctx context.Context, ns string, d *stagesv1.Dele
 }
 
 func (e *Executor) patch(ctx context.Context, ns string, p *stagesv1.PatchAction) error {
+	if p.Target.Selector != nil && p.Target.Name != "" {
+		return errors.New("patch target sets both name and selector")
+	}
+	if p.Target.Selector == nil && p.Target.Name == "" {
+		return errors.New("patch target sets neither name nor selector")
+	}
 	gv, err := schema.ParseGroupVersion(p.Target.APIVersion)
 	if err != nil {
 		return fmt.Errorf("target apiVersion %q: %w", p.Target.APIVersion, err)
 	}
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(gv.WithKind(p.Target.Kind))
+	gvk := gv.WithKind(p.Target.Kind)
 	tns := p.Target.Namespace
 	if tns == "" {
 		tns = ns
 	}
-	obj.SetNamespace(tns)
-	obj.SetName(p.Target.Name)
-
 	patchType := apitypes.StrategicMergePatchType
 	if p.Type == "json6902" {
 		patchType = apitypes.JSONPatchType
 	}
-	return e.Client.Patch(ctx, obj, client.RawPatch(patchType, []byte(p.Patch)))
+	raw := client.RawPatch(patchType, []byte(p.Patch))
+
+	if p.Target.Selector != nil {
+		sel, err := metav1.LabelSelectorAsSelector(p.Target.Selector)
+		if err != nil {
+			return fmt.Errorf("patch selector: %w", err)
+		}
+		if sel.Empty() {
+			return errors.New("patch selector must match at least one label")
+		}
+		var list unstructured.UnstructuredList
+		list.SetGroupVersionKind(gv.WithKind(p.Target.Kind + "List"))
+		if err := e.Client.List(ctx, &list, client.InNamespace(tns), client.MatchingLabelsSelector{Selector: sel}); err != nil {
+			return fmt.Errorf("list %s for patch: %w", p.Target.Kind, err)
+		}
+		for i := range list.Items {
+			o := &list.Items[i]
+			if err := e.Client.Patch(ctx, o, raw); err != nil {
+				return fmt.Errorf("patch %s %q: %w", p.Target.Kind, o.GetName(), err)
+			}
+		}
+		return nil
+	}
+
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	obj.SetNamespace(tns)
+	obj.SetName(p.Target.Name)
+	return e.Client.Patch(ctx, obj, raw)
 }
 
 func (e *Executor) httpCall(ctx context.Context, ns string, h *stagesv1.HTTPAction) error {

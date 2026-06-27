@@ -667,9 +667,10 @@ func (a *Action) VerbCount() int {
 // PatchAction patches an existing in-cluster object under the impersonated
 // ServiceAccount.
 type PatchAction struct {
-	// Target object to patch.
+	// Target selects what to patch: a single named object, or every object of a
+	// kind matching a label selector.
 	// +required
-	Target meta.NamespacedObjectKindReference `json:"target"`
+	Target PatchTarget `json:"target"`
 
 	// Type of the patch: merge or json6902. Defaults to merge.
 	// +kubebuilder:validation:Enum=merge;json6902
@@ -679,6 +680,34 @@ type PatchAction struct {
 	// Patch content.
 	// +required
 	Patch string `json:"patch"`
+}
+
+// PatchTarget selects what a patch action patches: a single named object, or
+// every object of a kind whose labels match a selector. Exactly one of name or
+// selector is set.
+type PatchTarget struct {
+	// APIVersion of the object(s); empty uses the API server's preferred version.
+	// +optional
+	APIVersion string `json:"apiVersion,omitempty"`
+
+	// Kind of the object(s).
+	// +required
+	Kind string `json:"kind"`
+
+	// Namespace of the object(s); defaults to the StageSet's namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// Name of a single object to patch. Mutually exclusive with selector.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// Selector patches every object of Kind in the namespace whose labels match.
+	// Mutually exclusive with name; an empty selector is rejected. Use it to patch
+	// a set in one step — e.g. every PVC of a StatefulSet to grow its storage
+	// request.
+	// +optional
+	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 }
 
 // HTTPAction calls an HTTP endpoint.

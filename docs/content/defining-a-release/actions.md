@@ -119,6 +119,32 @@ is `merge` (default) for a strategic-merge patch, or `json6902` for a JSON Patch
       { "spec": { "selector": { "release": "green" } } }
 ```
 
+Instead of a single `name`, the target can carry a `selector` to patch **every**
+object of that kind whose labels match — applied to each in the namespace. Exactly
+one of `name` or `selector` is set.
+
+```yaml
+- name: grow-data-volumes
+  patch:
+    target:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      selector:
+        matchLabels:
+          app: web            # label your StatefulSet's volumeClaimTemplates so its PVCs carry this
+    patch: |
+      { "spec": { "resources": { "requests": { "storage": "100Gi" } } } }
+```
+
+This is the missing half of resizing a StatefulSet's storage: the
+`volumeClaimTemplates` are immutable and its existing per-ordinal PVCs aren't
+touched by the StatefulSet, so a selector patch grows the existing volumes (the
+StorageClass needs `allowVolumeExpansion: true`; storage can only grow, never
+shrink), while a [`delete`](#delete) with `cascade: Orphan` plus a re-apply
+recreates the StatefulSet so new ordinals pick up the larger template. Some CSI
+drivers expand the filesystem only on pod restart, so this isn't always
+zero-downtime.
+
 ### `delete`
 
 Remove an existing object; a missing object counts as success.

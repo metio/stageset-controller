@@ -13,8 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/fluxcd/pkg/apis/meta"
-
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
@@ -65,7 +63,7 @@ func TestCRDEnum_PatchActionType(t *testing.T) {
 		ss.Spec.Stages[0].Actions = &stagesv1.StageActions{Pre: []stagesv1.Action{{
 			Name: "p",
 			Patch: &stagesv1.PatchAction{
-				Target: meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "cm"},
+				Target: stagesv1.PatchTarget{APIVersion: "v1", Kind: "ConfigMap", Name: "cm"},
 				Type:   typ,
 				Patch:  "{}",
 			},

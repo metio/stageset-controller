@@ -83,7 +83,7 @@ func TestReconcile_PreActionPatch(t *testing.T) {
 				Actions: &stagesv1.StageActions{Pre: []stagesv1.Action{{
 					Name: "maintenance-on",
 					Patch: &stagesv1.PatchAction{
-						Target: meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "maintenance", Namespace: ns},
+						Target: stagesv1.PatchTarget{APIVersion: "v1", Kind: "ConfigMap", Name: "maintenance", Namespace: ns},
 						Patch:  `{"data":{"state":"on"}}`,
 					},
 				}}},

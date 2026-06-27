@@ -98,7 +98,7 @@ func TestDescribeAction_Table(t *testing.T) {
 	}{
 		{
 			name:       "patch",
-			action:     stagesv1.Action{Patch: &stagesv1.PatchAction{Target: ref("Deployment", "web")}},
+			action:     stagesv1.Action{Patch: &stagesv1.PatchAction{Target: stagesv1.PatchTarget{Kind: "Deployment", Name: "web"}}},
 			wantKind:   "patch",
 			wantDetail: "Deployment/web",
 		},
