@@ -205,6 +205,9 @@ func describeAction(a *stagesv1.Action) (kind, detail string) {
 	switch {
 	case a.Patch != nil:
 		t := a.Patch.Target
+		if t.Name == "" && t.Selector != nil {
+			return "patch", fmt.Sprintf("%s (selector)", t.Kind)
+		}
 		return "patch", fmt.Sprintf("%s/%s", t.Kind, t.Name)
 	case a.HTTP != nil:
 		method := a.HTTP.Method

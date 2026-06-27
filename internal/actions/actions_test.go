@@ -545,7 +545,7 @@ func TestRun_PatchAction(t *testing.T) {
 	e := &Executor{Client: c}
 
 	patch := stagesv1.Action{Name: "flip", Patch: &stagesv1.PatchAction{
-		Target: meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "web"},
+		Target: stagesv1.PatchTarget{APIVersion: "v1", Kind: "ConfigMap", Name: "web"},
 		Type:   "merge",
 		Patch:  `{"data":{"k":"patched"}}`,
 	}}
@@ -561,11 +561,70 @@ func TestRun_PatchAction(t *testing.T) {
 	}
 }
 
+// TestRun_PatchAction_Selector patches every object of a kind matching a label
+// selector, leaving non-matching objects untouched.
+func TestRun_PatchAction_Selector(t *testing.T) {
+	t.Parallel()
+	cm := func(name, app string) *corev1.ConfigMap {
+		return &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name, Labels: map[string]string{"app": app}},
+			Data:       map[string]string{"k": "old"},
+		}
+	}
+	c := fake.NewClientBuilder().WithScheme(dynScheme(t)).
+		WithObjects(cm("a", "web"), cm("b", "web"), cm("other", "db")).Build()
+	e := &Executor{Client: c}
+
+	patch := stagesv1.Action{Name: "bump", Patch: &stagesv1.PatchAction{
+		Target: stagesv1.PatchTarget{APIVersion: "v1", Kind: "ConfigMap", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}},
+		Patch:  `{"data":{"k":"new"}}`,
+	}}
+	if err := e.Run(context.Background(), "ns", []stagesv1.Action{patch}, nil, nil); err != nil {
+		t.Fatalf("selector patch: %v", err)
+	}
+	get := func(name string) string {
+		var got corev1.ConfigMap
+		if err := c.Get(context.Background(), apitypes.NamespacedName{Namespace: "ns", Name: name}, &got); err != nil {
+			t.Fatalf("re-get %s: %v", name, err)
+		}
+		return got.Data["k"]
+	}
+	if get("a") != "new" || get("b") != "new" {
+		t.Fatalf("matching configmaps not patched: a=%q b=%q", get("a"), get("b"))
+	}
+	if get("other") != "old" {
+		t.Fatalf("non-matching configmap was patched: %q", get("other"))
+	}
+}
+
+// TestRun_PatchAction_TargetValidation rejects a target that sets neither or both
+// of name and selector.
+func TestRun_PatchAction_TargetValidation(t *testing.T) {
+	t.Parallel()
+	e := &Executor{Client: fake.NewClientBuilder().WithScheme(dynScheme(t)).Build()}
+	cases := []struct {
+		name   string
+		target stagesv1.PatchTarget
+	}{
+		{"neither", stagesv1.PatchTarget{APIVersion: "v1", Kind: "ConfigMap"}},
+		{"both", stagesv1.PatchTarget{APIVersion: "v1", Kind: "ConfigMap", Name: "x", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			act := stagesv1.Action{Name: "p", Patch: &stagesv1.PatchAction{Target: tc.target, Patch: "{}"}}
+			if err := e.Run(context.Background(), "ns", []stagesv1.Action{act}, nil, nil); err == nil {
+				t.Fatal("want error for ambiguous/empty patch target")
+			}
+		})
+	}
+}
+
 func TestRun_PatchAction_BadAPIVersion(t *testing.T) {
 	t.Parallel()
 	e := &Executor{Client: fake.NewClientBuilder().WithScheme(dynScheme(t)).Build()}
 	patch := stagesv1.Action{Name: "flip", Patch: &stagesv1.PatchAction{
-		Target: meta.NamespacedObjectKindReference{APIVersion: "a/b/c", Kind: "ConfigMap", Name: "x"},
+		Target: stagesv1.PatchTarget{APIVersion: "a/b/c", Kind: "ConfigMap", Name: "x"},
 		Patch:  `{}`,
 	}}
 	if err := e.Run(context.Background(), "ns", []stagesv1.Action{patch}, nil, nil); err == nil {
