@@ -59,6 +59,21 @@ func TestEvaluateRestartChecks(t *testing.T) {
 		}
 	})
 
+	t.Run("terminating pods are ignored", func(t *testing.T) {
+		now := metav1.Now()
+		old := pod("api-old", map[string]string{"app": "api"}, 9) // prior revision draining out
+		old.DeletionTimestamp = &now
+		old.Finalizers = []string{"stages.metio.wtf/test"} // fake client keeps DeletionTimestamp only with a finalizer
+		c := build(old, pod("api-1", map[string]string{"app": "api"}, 0))
+		v, err := r.evaluateRestartChecks(context.Background(), c, ss, stageWith(apiCheck(0)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != nil {
+			t.Fatalf("verdict=%+v, want nil (terminating pod's restarts must not gate)", v)
+		}
+	})
+
 	t.Run("breach sums restarts across selected pods", func(t *testing.T) {
 		c := build(
 			pod("api-1", map[string]string{"app": "api"}, 2),

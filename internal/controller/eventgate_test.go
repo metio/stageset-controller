@@ -87,6 +87,21 @@ func TestEvaluateEventChecks(t *testing.T) {
 		}
 	})
 
+	t.Run("events on a terminating pod are ignored", func(t *testing.T) {
+		now := metav1.Now()
+		old := pod("api-old", "uid-old", map[string]string{"app": "api"})
+		old.DeletionTimestamp = &now
+		old.Finalizers = []string{"stages.metio.wtf/test"} // fake client keeps DeletionTimestamp only with a finalizer
+		c := build(old, evt("e1", "uid-old", "FailedScheduling", "Warning", 9))
+		v, err := r.evaluateEventChecks(context.Background(), c, ss, gateStage(&stagesv1.EventGate{Checks: []stagesv1.EventCheck{apiCheck(0, "FailedScheduling")}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != nil {
+			t.Fatalf("verdict=%+v, want nil (terminating pod's events must not gate)", v)
+		}
+	})
+
 	t.Run("at the limit is not a breach", func(t *testing.T) {
 		c := build(apiPod, evt("e1", "uid-api", "FailedScheduling", "Warning", 2))
 		v, err := r.evaluateEventChecks(context.Background(), c, ss, gateStage(&stagesv1.EventGate{Checks: []stagesv1.EventCheck{apiCheck(2, "FailedScheduling")}}))

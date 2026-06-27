@@ -80,9 +80,11 @@ label and blocks the promotion if their container restarts exceed `maxRestarts`.
 
 Each check sums the restart counts across the init and regular containers of every
 pod matching its `selector`, in the StageSet's namespace, and fails once the total
-exceeds `maxRestarts` (`0` by default — no restarts allowed). Pods are matched by
-label, not by a workload reference, so a group can span any source — a Deployment,
-StatefulSet, DaemonSet, Job, or a custom controller. Pair it with a `soak` so the
+exceeds `maxRestarts` (`0` by default — no restarts allowed). Pods being terminated
+are skipped, so a prior revision draining out during the rollout doesn't gate the
+revision replacing it. Pods are matched by label, not by a workload reference, so a
+group can span any source — a Deployment, StatefulSet, DaemonSet, Job, or a custom
+controller. Pair it with a `soak` so the
 window gives a crash time to surface; it catches the OOM-after-warm-up or
 crashloop-after-N-minutes that point-in-time
 [`readyChecks`](/defining-a-release/ready-checks/) miss.

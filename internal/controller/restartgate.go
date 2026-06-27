@@ -75,11 +75,19 @@ func podRestartTotal(ctx context.Context, target client.Reader, namespace string
 
 	var total int32
 	for i := range pods.Items {
-		st := pods.Items[i].Status
-		for _, cs := range st.InitContainerStatuses {
+		pod := &pods.Items[i]
+		// A terminating pod is draining from the prior revision (or a scale-down);
+		// its accumulated RestartCount must not gate the revision replacing it.
+		// RestartCount is cumulative over a pod's life, so without this skip an
+		// old-revision pod's lifetime restarts would falsely trip the gate during
+		// the rollout overlap.
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		for _, cs := range pod.Status.InitContainerStatuses {
 			total += cs.RestartCount
 		}
-		for _, cs := range st.ContainerStatuses {
+		for _, cs := range pod.Status.ContainerStatuses {
 			total += cs.RestartCount
 		}
 	}
