@@ -132,6 +132,44 @@ Remove an existing object; a missing object counts as success.
       name: legacy-migration
 ```
 
+`cascade` controls the target's dependents, mirroring `kubectl delete --cascade`:
+
+- `Background` (default) — delete the object; garbage-collect dependents asynchronously.
+- `Foreground` — delete dependents first, then the object.
+- `Orphan` — delete the object but leave its dependents running (their controller `ownerReferences` are removed).
+
+**Recreating an object whose immutable fields changed, without downtime.** Some
+fields can't be `apply`d in place — a StatefulSet's `serviceName` or
+`podManagementPolicy`, a Service's `clusterIP`, a Job's `template`. `cascade: Orphan`
+is the building block: orphan-delete the object so its pods keep running, then let
+the stage re-apply the new spec, which **adopts** the still-running pods by selector.
+
+```yaml
+stages:
+  - name: app
+    sourceRef:
+      name: my-app          # carries the new StatefulSet spec
+    preActions:
+      - name: orphan-old-sts
+        delete:
+          target:
+            apiVersion: apps/v1
+            kind: StatefulSet
+            name: web
+          cascade: Orphan     # keep the pods; the apply below re-adopts them
+```
+
+Doing it in `preActions` of the same stage that re-applies keeps the orphan window
+tight — the pods are ownerless only between the delete and the stage's apply in the
+same reconcile. (A delete in one stage and the re-apply in a later stage works too,
+but the pods stay ownerless across the gate between them.)
+
+Caveats: adoption needs the new object's selector to still match the running pods,
+so this can't help when the **selector itself** is the immutable change. And
+`Orphan` keeps existing PVCs — changing a StatefulSet's `volumeClaimTemplates`
+this way leaves the old volumes in place for existing ordinals (it doesn't resize
+storage).
+
 ### `apply`
 
 Apply transient, rollout-scoped manifests that are **not** inventory-tracked and

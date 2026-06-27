@@ -748,6 +748,18 @@ type DeleteAction struct {
 	// Target object to delete.
 	// +required
 	Target meta.NamespacedObjectKindReference `json:"target"`
+
+	// Cascade controls what happens to the target's dependents, mirroring
+	// kubectl's --cascade. Background (the default) deletes the target and
+	// garbage-collects dependents asynchronously; Foreground deletes dependents
+	// before the target; Orphan deletes the target but leaves dependents running
+	// (their controller ownerReferences are removed). Orphan is the building block
+	// for recreating an object whose immutable fields changed without downtime:
+	// orphan-delete it, then re-apply the new spec, which adopts the still-running
+	// dependents by selector.
+	// +kubebuilder:validation:Enum=Background;Foreground;Orphan
+	// +optional
+	Cascade string `json:"cascade,omitempty"`
 }
 
 // ApplyAction applies the manifests built from an ExternalArtifact path under

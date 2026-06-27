@@ -25,6 +25,7 @@ import (
 	apitypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
@@ -485,6 +486,53 @@ func TestRun_DeleteAction_BadAPIVersion(t *testing.T) {
 	}}
 	if err := e.Run(context.Background(), "ns", []stagesv1.Action{del}, nil, nil); err == nil {
 		t.Fatal("a malformed apiVersion must error")
+	}
+}
+
+// TestRun_DeleteAction_Cascade asserts the delete propagation policy carried by
+// the action's cascade field reaches the client: empty keeps the apiserver
+// default (unset), Orphan/Foreground map to their DeletePropagation policies.
+func TestRun_DeleteAction_Cascade(t *testing.T) {
+	t.Parallel()
+	ptr := func(p metav1.DeletionPropagation) *metav1.DeletionPropagation { return &p }
+	cases := []struct {
+		name    string
+		cascade string
+		want    *metav1.DeletionPropagation
+	}{
+		{"empty keeps apiserver default", "", nil},
+		{"orphan", "Orphan", ptr(metav1.DeletePropagationOrphan)},
+		{"foreground", "Foreground", ptr(metav1.DeletePropagationForeground)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cm := configMap(t, "ns", "legacy")
+			var got *metav1.DeletionPropagation
+			c := fake.NewClientBuilder().WithScheme(dynScheme(t)).WithObjects(cm).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+						do := &client.DeleteOptions{}
+						do.ApplyOptions(opts)
+						got = do.PropagationPolicy
+						return cl.Delete(ctx, obj, opts...)
+					},
+				}).Build()
+			e := &Executor{Client: c}
+			del := stagesv1.Action{Name: "drop", Delete: &stagesv1.DeleteAction{
+				Target:  meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "legacy"},
+				Cascade: tc.cascade,
+			}}
+			if err := e.Run(context.Background(), "ns", []stagesv1.Action{del}, nil, nil); err != nil {
+				t.Fatalf("delete: %v", err)
+			}
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("propagationPolicy = %q, want unset", *got)
+			case tc.want != nil && (got == nil || *got != *tc.want):
+				t.Fatalf("propagationPolicy = %v, want %q", got, *tc.want)
+			}
+		})
 	}
 }
 
