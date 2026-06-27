@@ -370,28 +370,47 @@ func (r *StageSetReconciler) versionFromArtifact(ctx context.Context, ss *stages
 // versionFromObject builds a stage's manifests and reads the version from a
 // field of one rendered object — by default the app.kubernetes.io/version
 // label, so the version travels inside the manifests regardless of source kind.
-func (r *StageSetReconciler) versionFromObject(ctx context.Context, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact, fetcher *artifact.Fetcher, ref *stagesv1.ObjectVersionRef) (string, error) {
-	idx := stageIndex(ss, ref.Stage)
-	if idx < 0 {
-		return "", fmt.Errorf("%w: spec.version.fromObject.stage %q is not a stage", errInvalidVersion, ref.Stage)
+// versionStageIndex resolves which stage's rendered output carries the version.
+// A StageSet has one version that all its stages converge on, so an empty
+// stageRef defaults to the first stage — the leading stage carries the new
+// version first.
+func versionStageIndex(ss *stagesv1.StageSet, stageRef string) (int, error) {
+	if stageRef == "" {
+		if len(ss.Spec.Stages) == 0 {
+			return -1, fmt.Errorf("%w: spec.version.fromObject has no stage and the StageSet declares none", errInvalidVersion)
+		}
+		return 0, nil
 	}
+	idx := stageIndex(ss, stageRef)
+	if idx < 0 {
+		return -1, fmt.Errorf("%w: spec.version.fromObject.stage %q is not a stage", errInvalidVersion, stageRef)
+	}
+	return idx, nil
+}
+
+func (r *StageSetReconciler) versionFromObject(ctx context.Context, ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact, fetcher *artifact.Fetcher, ref *stagesv1.ObjectVersionRef) (string, error) {
+	idx, err := versionStageIndex(ss, ref.Stage)
+	if err != nil {
+		return "", err
+	}
+	stageName := ss.Spec.Stages[idx].Name
 	ra := resolved[idx]
 	files, err := fetcher.Fetch(ctx, ra.URL, ra.Digest, "")
 	if err != nil {
-		return "", fmt.Errorf("fetch version artifact for stage %q: %w", ref.Stage, err)
+		return "", fmt.Errorf("fetch version artifact for stage %q: %w", stageName, err)
 	}
 	stage := &ss.Spec.Stages[idx]
 	vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
 	if err != nil {
-		return "", fmt.Errorf("resolve postBuild variables for version stage %q: %w", ref.Stage, err)
+		return "", fmt.Errorf("resolve postBuild variables for version stage %q: %w", stageName, err)
 	}
 	objects, err := build.Build(files, build.Options{Path: stage.Path, Patches: stage.Patches}, vars)
 	if err != nil {
-		return "", fmt.Errorf("%w: building stage %q to read its version failed: %v", errInvalidVersion, ref.Stage, err)
+		return "", fmt.Errorf("%w: building stage %q to read its version failed: %v", errInvalidVersion, stageName, err)
 	}
 	obj := findVersionObject(objects, ref)
 	if obj == nil {
-		return "", fmt.Errorf("%w: version object %s %q not found in stage %q manifests", errInvalidVersion, ref.Kind, ref.Name, ref.Stage)
+		return "", fmt.Errorf("%w: version object %s %q not found in stage %q manifests", errInvalidVersion, ref.Kind, ref.Name, stageName)
 	}
 	ver, err := extractVersionField(obj, ref.FieldPath)
 	if err != nil {
@@ -399,7 +418,7 @@ func (r *StageSetReconciler) versionFromObject(ctx context.Context, ss *stagesv1
 	}
 	ver = strings.TrimSpace(ver)
 	if ver == "" {
-		return "", fmt.Errorf("%w: version field on %s %q in stage %q resolved to empty", errInvalidVersion, ref.Kind, ref.Name, ref.Stage)
+		return "", fmt.Errorf("%w: version field on %s %q in stage %q resolved to empty", errInvalidVersion, ref.Kind, ref.Name, stageName)
 	}
 	return ver, nil
 }

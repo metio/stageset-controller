@@ -103,11 +103,12 @@ Versioning is off unless `spec.version` is set. Set **exactly one** of
 ```yaml
 spec:
   version:
-    # fromObject reads the version from a rendered object — by default the
-    # app.kubernetes.io/version label, so it travels in the manifests (works for
-    # every source kind, including JaaS). The recommended default.
+    # A StageSet has ONE version that all its stages converge on. fromObject reads
+    # it from a rendered object — by default the app.kubernetes.io/version label,
+    # so it travels in the manifests (works for every source kind, including
+    # JaaS). The recommended default.
     fromObject:
-      stage: app
+      # stage: app                     # optional; which stage's output to read the version from — defaults to the first stage (the leading stage carries the new version first)
       kind: Deployment
       name: web
       # apiVersion: apps/v1            # optional; narrows an ambiguous Kind+Name

@@ -833,9 +833,12 @@ type VersionSource struct {
 // ObjectVersionRef reads the version from a field of one rendered object in a
 // stage's built manifests, so the version travels with the content it versions.
 type ObjectVersionRef struct {
-	// Stage whose rendered manifests carry the version.
-	// +required
-	Stage string `json:"stage"`
+	// Stage whose rendered manifests carry the version. A StageSet has one
+	// version that all its stages converge on, so this only names which stage's
+	// output to read it from — normally the leading stage, which carries the new
+	// version first. Empty defaults to the first stage.
+	// +optional
+	Stage string `json:"stage,omitempty"`
 
 	// Kind of the object to read (e.g. Deployment).
 	// +required

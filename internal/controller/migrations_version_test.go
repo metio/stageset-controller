@@ -86,6 +86,32 @@ func TestExtractVersionField(t *testing.T) {
 	})
 }
 
+func TestVersionStageIndex(t *testing.T) {
+	ss := &stagesv1.StageSet{}
+	ss.Spec.Stages = []stagesv1.Stage{{Name: "staging"}, {Name: "prod"}}
+	tests := []struct {
+		name    string
+		ref     string
+		wantIdx int
+		wantErr bool
+	}{
+		{"empty defaults to the first stage", "", 0, false},
+		{"named stage resolves to its index", "prod", 1, false},
+		{"unknown stage errors", "nope", -1, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			idx, err := versionStageIndex(ss, tc.ref)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("versionStageIndex err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if idx != tc.wantIdx {
+				t.Fatalf("idx = %d, want %d", idx, tc.wantIdx)
+			}
+		})
+	}
+}
+
 func TestValidateVersion(t *testing.T) {
 	tests := []struct {
 		name    string
