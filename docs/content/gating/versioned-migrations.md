@@ -51,11 +51,16 @@ set it, so the version is already inside the manifests — `fromObject` reads it
 This works for every source kind, including a single-document renderer like
 [JaaS](https://jaas.projects.metio.wtf/) that has no room for a separate file.
 
+A StageSet has **one** version that all its stages converge on; `fromObject` only
+chooses *which* stage's rendered output to read it from. That stage is optional —
+omit it to read from the first (leading) stage, which carries the new version
+first.
+
 ```yaml
 spec:
   version:
     fromObject:
-      stage: app            # which stage's rendered manifests carry it
+      # stage omitted → defaults to the first stage (here, app)
       kind: Deployment      # the object to read
       name: web
       # fieldPath omitted → reads metadata.labels['app.kubernetes.io/version']
