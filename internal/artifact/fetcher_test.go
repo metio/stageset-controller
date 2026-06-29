@@ -17,6 +17,23 @@ import (
 	"testing"
 )
 
+// New must build its transport from DefaultTransport (so it inherits
+// TLSHandshakeTimeout and friends) with the proxy cleared (so a configured
+// HTTP(S)_PROXY can't route the dial around the IP-pinning defence).
+func TestNew_TransportClonedWithoutProxy(t *testing.T) {
+	f := New()
+	tr, ok := f.HTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", f.HTTPClient.Transport)
+	}
+	if tr.Proxy != nil {
+		t.Error("transport.Proxy must be nil so dialing isn't routed through a proxy")
+	}
+	if tr.TLSHandshakeTimeout == 0 {
+		t.Error("transport should inherit DefaultTransport's TLSHandshakeTimeout (zero means a fresh, untuned transport)")
+	}
+}
+
 func makeTarGz(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer

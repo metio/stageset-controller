@@ -72,11 +72,20 @@ func New() *Fetcher {
 		URLValidator:         validateHTTPURL,
 		IPValidator:          forbiddenIP,
 	}
+	// Clone DefaultTransport for its tuned defaults (TLSHandshakeTimeout,
+	// IdleConnTimeout, connection pooling, HTTP/2) rather than a zero-value
+	// transport — without TLSHandshakeTimeout a slow TLS peer at a validated
+	// IP could stall a fetch for the full client timeout. Clear the inherited
+	// ProxyFromEnvironment: a configured HTTP(S)_PROXY would dial the proxy, so
+	// safeDialContext would pin the proxy's IP instead of the resolved artifact
+	// host, defeating the dial-time rebinding defence. The controller fetches
+	// in-cluster source-controller artifacts directly and needs no proxy.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = f.safeDialContext
 	f.HTTPClient = &http.Client{
-		Timeout: 5 * time.Minute,
-		Transport: &http.Transport{
-			DialContext: f.safeDialContext,
-		},
+		Timeout:   5 * time.Minute,
+		Transport: transport,
 	}
 	return f
 }
