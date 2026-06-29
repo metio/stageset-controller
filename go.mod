@@ -21,7 +21,7 @@ require (
 	github.com/getsops/sops/v3 v3.13.1
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.28.1
-	github.com/minio/minio-go/v7 v7.2.0
+	github.com/minio/minio-go/v7 v7.2.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/prometheus/client_golang v1.23.2
