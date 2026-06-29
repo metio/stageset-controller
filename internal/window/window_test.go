@@ -12,6 +12,55 @@ import (
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
+// withinTimeout runs fn and fails if it does not return before d — a regression
+// guard against the never-firing-schedule infinite loop and the deeply
+// overlapping-window runaway walk, both of which would otherwise hang.
+func withinTimeout(t *testing.T, d time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	select {
+	case <-done:
+	case <-time.After(d):
+		t.Fatalf("call did not return within %s (suspected hang)", d)
+	}
+}
+
+// A syntactically valid cron that matches no real date (April 31) never fires.
+// The window must resolve as permanently inactive without hanging.
+func TestDecision_NeverFiringScheduleIsInactiveNotHang(t *testing.T) {
+	w := stagesv1.UpdateWindow{Type: TypeAllow, Schedule: "0 0 31 4 *", Duration: dur(time.Hour)}
+	withinTimeout(t, 3*time.Second, func() {
+		allowed, next, err := Decision([]stagesv1.UpdateWindow{w}, at("2026-06-13T02:30:00Z"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// A declared-but-never-active Allow window blocks updates (fail-closed).
+		if allowed {
+			t.Error("never-firing Allow window must block updates")
+		}
+		if !next.IsZero() {
+			t.Errorf("never-firing window has no future boundary, got %v", next)
+		}
+	})
+}
+
+// A tight schedule held open by a very long duration covers "now" with a huge
+// number of starts. The covering-starts walk must stay bounded, not iterate once
+// per minute across the whole span.
+func TestDecision_DeeplyOverlappingWindowIsBounded(t *testing.T) {
+	w := stagesv1.UpdateWindow{Type: TypeAllow, Schedule: "* * * * *", Duration: dur(1_000_000 * time.Hour)}
+	withinTimeout(t, 3*time.Second, func() {
+		allowed, _, err := Decision([]stagesv1.UpdateWindow{w}, at("2026-06-13T02:30:00Z"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !allowed {
+			t.Error("a minutely window open for that long must cover now")
+		}
+	})
+}
+
 func at(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {

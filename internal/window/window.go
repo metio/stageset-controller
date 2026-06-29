@@ -22,6 +22,15 @@ const (
 	TypeDeny  = "Deny"
 )
 
+// maxCoveringStarts bounds the forward walk over the schedule starts that cover
+// "now" when a window's duration spans many schedule intervals. It is generous
+// enough for any realistic overlap (e.g. an every-minute schedule held open for
+// several days) while capping the work a pathological duration could otherwise
+// impose — the walk runs once per covering start, and Decision evaluates each
+// window several times per call, both on every reconcile and in the admission
+// webhook.
+const maxCoveringStarts = 10_000
+
 // Decision reports whether updates are allowed at now and the next time the
 // decision could change (zero when nothing further changes). No windows means
 // always allowed.
@@ -157,6 +166,15 @@ func evalRecurring(w *stagesv1.UpdateWindow, now time.Time) (bool, time.Time, er
 	// Any window start that covers now began in (now-dur, now]. cron's Next is
 	// strictly-after, so Next(now-dur) is the FIRST such start.
 	candidate := sched.Next(nowL.Add(-dur))
+	// robfig/cron returns the zero time when a syntactically valid schedule
+	// matches no real instant within five years (e.g. "0 0 31 4 *" — April 31).
+	// Such a schedule never fires, so the window is permanently inactive. Without
+	// this guard the zero candidate is not After(now), so control would fall into
+	// the walk below where Next(zero) keeps returning zero and the loop spins
+	// forever — a denial of service reachable from both the webhook and reconcile.
+	if candidate.IsZero() {
+		return false, time.Time{}, nil
+	}
 	if candidate.After(nowL) {
 		return false, candidate, nil // inactive; boundary = next start
 	}
@@ -164,11 +182,16 @@ func evalRecurring(w *stagesv1.UpdateWindow, now time.Time) (bool, time.Time, er
 	// cover now; the window stays open until the LATEST covering start's end, not
 	// the earliest. Walk forward to the latest start still <= now so the reported
 	// boundary is the furthest covering window end (for non-overlapping windows
-	// there is only one covering start and the loop doesn't advance).
+	// there is only one covering start and the loop doesn't advance). Bounded so a
+	// deeply overlapping window (a tight schedule under a very long duration)
+	// can't burn unbounded CPU per evaluation; on the cap we report the
+	// latest-found start's end, a harmless early re-check (the active decision was
+	// already settled above). The IsZero / non-advance guards also stop the walk
+	// defensively if cron ever yields a stuck value.
 	latest := candidate
-	for {
+	for range maxCoveringStarts {
 		next := sched.Next(latest)
-		if next.After(nowL) {
+		if next.IsZero() || !next.After(latest) || next.After(nowL) {
 			break
 		}
 		latest = next
