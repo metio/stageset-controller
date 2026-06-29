@@ -309,13 +309,22 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 // is exercised directly in tests to pin that the configured --metrics-bind-address
 // reaches metricsserver.Options and that --watch-namespaces lands in
 // Cache.DefaultNamespaces as exactly the listed namespaces.
+// gracefulShutdownTimeout bounds how long the manager waits for in-flight
+// runnables (reconcilers, the cache, the gate/MCP/webhook servers) to drain
+// after its context is cancelled. Set explicitly rather than tracking
+// controller-runtime's default; the self-signed renewer await in run() runs
+// only after Start returns, so it is a separate, later window and never races
+// this one.
+const gracefulShutdownTimeout = 30 * time.Second
+
 func buildManagerOptions(c *cliflags.Flags, env []string) ctrl.Options {
 	mgrOpts := ctrl.Options{
-		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: *c.MetricsAddr},
-		HealthProbeBindAddress: *c.ProbeAddr,
-		LeaderElection:         *c.EnableLeaderElection,
-		LeaderElectionID:       "stageset-controller.stages.metio.wtf",
+		Scheme:                  scheme,
+		Metrics:                 metricsserver.Options{BindAddress: *c.MetricsAddr},
+		HealthProbeBindAddress:  *c.ProbeAddr,
+		LeaderElection:          *c.EnableLeaderElection,
+		LeaderElectionID:        "stageset-controller.stages.metio.wtf",
+		GracefulShutdownTimeout: new(gracefulShutdownTimeout),
 		// Webhook serves on every replica (admission must, even non-leaders);
 		// only reconcilers are leader-gated.
 		WebhookServer: webhook.NewServer(webhook.Options{Port: *c.WebhookPort, CertDir: *c.WebhookCertDir}),

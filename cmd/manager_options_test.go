@@ -50,6 +50,18 @@ func TestBuildManagerOptions_PropagatesMetricsBindAddress(t *testing.T) {
 	}
 }
 
+// The manager's graceful-shutdown timeout must be set explicitly so it doesn't
+// silently track controller-runtime's default.
+func TestBuildManagerOptions_SetsGracefulShutdownTimeout(t *testing.T) {
+	opts := buildManagerOptions(flagsFor(t, nil), nil)
+	if opts.GracefulShutdownTimeout == nil {
+		t.Fatal("GracefulShutdownTimeout is nil; want it set explicitly")
+	}
+	if *opts.GracefulShutdownTimeout != gracefulShutdownTimeout {
+		t.Errorf("GracefulShutdownTimeout = %s, want %s", *opts.GracefulShutdownTimeout, gracefulShutdownTimeout)
+	}
+}
+
 // TestBuildManagerOptions_PropagatesWatchNamespaces proves the watch-scope
 // behavior at the options layer: the listed namespaces — and only those — land
 // in Cache.DefaultNamespaces, the map controller-runtime uses to restrict every
