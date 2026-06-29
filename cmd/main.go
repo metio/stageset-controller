@@ -216,7 +216,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 
 	if *c.GateAddr != "" {
 		gateLog := logger.With("logger", "gate")
-		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		if err := mgr.Add(nonLeaderRunnable(func(ctx context.Context) error {
 			mux := http.NewServeMux()
 			mux.Handle("/gate/", &gate.Handler{Client: mgr.GetClient(), Logger: gateLog})
 			srv := &http.Server{Addr: *c.GateAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -245,7 +245,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 
 	if *c.EnableMCP {
 		mcpLog := logger.With("logger", "mcp")
-		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		if err := mgr.Add(nonLeaderRunnable(func(ctx context.Context) error {
 			handler := mcp.NewHTTPHandler(mcp.Config{
 				KubeClient:     mgr.GetClient(),
 				RunbookBaseURL: controller.RunbookBaseURL,
@@ -458,3 +458,21 @@ func parseWatchNamespaces(flagValue string, env []string) []string {
 	}
 	return out
 }
+
+// nonLeaderRunnable adapts a function into a manager.Runnable that runs on every
+// replica regardless of leader election. A bare manager.RunnableFunc is not a
+// LeaderElectionRunnable, so controller-runtime defaults it into the leader-only
+// group — which would bind the gate and MCP HTTP endpoints only on the elected
+// leader while the readiness probe routes Service traffic to every pod, so
+// requests landing on a non-leader would be refused. These endpoints depend only
+// on the cache-backed client (available on every replica), so they must not be
+// leader-gated.
+type nonLeaderRunnable func(context.Context) error
+
+func (r nonLeaderRunnable) Start(ctx context.Context) error { return r(ctx) }
+func (r nonLeaderRunnable) NeedLeaderElection() bool        { return false }
+
+var (
+	_ manager.Runnable               = nonLeaderRunnable(nil)
+	_ manager.LeaderElectionRunnable = nonLeaderRunnable(nil)
+)

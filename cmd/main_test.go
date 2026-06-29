@@ -4,9 +4,27 @@
 package main
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
+
+// The gate and MCP HTTP servers must run on every replica, not only the leader,
+// so their runnable must opt out of leader election and still invoke the wrapped
+// function.
+func TestNonLeaderRunnable(t *testing.T) {
+	if nonLeaderRunnable(nil).NeedLeaderElection() {
+		t.Error("nonLeaderRunnable must report NeedLeaderElection()==false so it starts on every replica")
+	}
+	called := false
+	r := nonLeaderRunnable(func(context.Context) error { called = true; return nil })
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !called {
+		t.Error("Start must invoke the wrapped function")
+	}
+}
 
 // TestInClusterNamespace covers the not-in-cluster path: with no mounted
 // ServiceAccount namespace file present, the lookup returns the empty string
