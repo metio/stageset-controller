@@ -232,6 +232,12 @@ type StageSetReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
+// The controller's own cache-backed client reads Secrets and ConfigMaps for
+// postBuild substituteFrom, the metric-source bearer token, and remote
+// spec.kubeConfig (secretRef/configMapRef) — a cached read needs list+watch to
+// start the informer, not just get. (Decryption key Secrets are read via the
+// tenant-impersonated client, so they are covered by tenant RBAC, not here.)
+// +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;watch
 
 // Reconcile drives one StageSet through the design's state machine: resolve +
 // pin artifacts, then BUILD -> APPLY -> PRUNE + RECORD -> VERIFY each stage in
@@ -757,11 +763,24 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "record inventory", werr, stageStatuses, ra.Revision, executed)
 			}
 
+			// Verify readiness. The kstatus wait covers the stage's applied
+			// objects (unless DisableWait) plus any explicit ReadyChecks.Checks;
+			// CEL ReadyChecks.Exprs then gate on the live state of matching
+			// applied objects. All three share the stage's verify timeout.
+			verifyTimeout := stageTimeout(&ss, stage)
+			waitSet := readyCheckObjects(&ss, stage)
 			if !disableWait(stage) {
-				if err := applier.Wait(ctx, changeSet.ToObjMetadataSet(), stageTimeout(&ss, stage)); err != nil {
+				waitSet = append(changeSet.ToObjMetadataSet(), waitSet...)
+			}
+			if len(waitSet) > 0 {
+				if err := applier.Wait(ctx, waitSet, verifyTimeout); err != nil {
 					r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
 					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
 				}
+			}
+			if err := evalReadyExprs(ctx, target, &ss, stage, objects, verifyTimeout); err != nil {
+				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
 			}
 
 			// POST actions: the stage (and any downstream gate) is Ready only once

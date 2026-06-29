@@ -78,7 +78,32 @@ func ValidateSpec(ss *stagesv1.StageSet) error {
 	if err := validatePromotion(ss); err != nil {
 		return err
 	}
+	if err := validateReadyChecks(ss); err != nil {
+		return err
+	}
 	return window.Validate(ss.Spec.UpdateWindows)
+}
+
+// validateReadyChecks rejects malformed stage readiness checks at admission: a
+// CEL ReadyChecks.Exprs that doesn't compile, and a ReadyChecks.Checks
+// reference missing its kind or name. Without this the reconciler would accept
+// them and then fail (or silently no-op) only at apply time.
+func validateReadyChecks(ss *stagesv1.StageSet) error {
+	for i := range ss.Spec.Stages {
+		stage := &ss.Spec.Stages[i]
+		if stage.ReadyChecks == nil {
+			continue
+		}
+		for j, ref := range stage.ReadyChecks.Checks {
+			if ref.Kind == "" || ref.Name == "" {
+				return fmt.Errorf("stage %q readyChecks.checks[%d]: kind and name are required", stage.Name, j)
+			}
+		}
+		if _, err := compileReadyExprs(stage); err != nil {
+			return fmt.Errorf("stage %q %w", stage.Name, err)
+		}
+	}
+	return nil
 }
 
 // validateErrorBudget enforces the shape of the rollout-wide spec.errorBudget
