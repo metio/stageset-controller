@@ -16,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
 // FieldManager is the server-side-apply field manager every StageSet write is
@@ -76,8 +78,13 @@ func (a *Applier) Wait(ctx context.Context, set object.ObjMetadataSet, timeout t
 // object and skips any object that no longer carries them — an object adopted or
 // relabeled by another manager between reconciles is left untouched rather than
 // deleted out from under its new owner.
+//
+// Exclusions honors the per-object prune opt-out: a live object annotated
+// stages.metio.wtf/prune=disabled is left in place, matching the preview/prune
+// path so `stageset diff` and the real teardown agree.
 func (a *Applier) Delete(ctx context.Context, name, namespace string, objects []*unstructured.Unstructured) (*ssa.ChangeSet, error) {
 	opts := ssa.DefaultDeleteOptions()
 	opts.Inclusions = a.rm.GetOwnerLabels(name, namespace)
+	opts.Exclusions = map[string]string{stagesv1.PruneAnnotation: "disabled"}
 	return a.rm.DeleteAll(ctx, objects, opts)
 }
