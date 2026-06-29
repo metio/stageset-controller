@@ -140,6 +140,7 @@ func TestValidateLadder(t *testing.T) {
 		{name: "non-semver to", ladder: []stagesv1.Migration{{Name: "a", To: "not-a-version"}}, wantErr: true},
 		{name: "invalid from constraint", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: ">>bad"}}, wantErr: true},
 		{name: "bare from rejected", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: "1.0.0"}}, wantErr: true},
+		{name: "v-prefixed bare from rejected", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: "v1.0.0"}}, wantErr: true},
 		{name: "explicit >= from allowed", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: ">=1.0.0"}}},
 		{name: "explicit = from allowed", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: "=1.0.0"}}},
 		{name: "wildcard from allowed", ladder: []stagesv1.Migration{{Name: "a", To: "2.0.0", From: "1.x"}}},

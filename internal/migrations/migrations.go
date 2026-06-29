@@ -143,7 +143,14 @@ func ValidateMigration(m *stagesv1.Migration) error {
 // semverIsBare reports whether s is a plain X.Y.Z version with no constraint
 // operator (>=, =, ~, ^, a wildcard, or a range). As a `from` such a value
 // matches only the exact version, which is rarely what an author intends.
+//
+// A leading "v" is stripped first: Masterminds/semver accepts "v1.0.0" as a
+// constraint (an exact match, the same foot-gun as the bare form), but
+// StrictNewVersion rejects the "v" — so without this the v-prefixed spelling
+// would slip past the guard.
 func semverIsBare(s string) bool {
+	s = strings.TrimPrefix(s, "v")
+	s = strings.TrimPrefix(s, "V")
 	_, err := semver.StrictNewVersion(s)
 	return err == nil
 }
