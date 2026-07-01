@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Tls on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/tls/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/tls/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/tls/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/tls/</id><entry><title type="html">Admission webhook</title><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/security/network-policy/?utm_source=atom_feed" rel="related" type="text/html" title="Network policy"/><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="related" type="text/html" title="Production"/><link href="https://stageset.projects.metio.wtf/security/encryption/?utm_source=atom_feed" rel="related" type="text/html" title="Secrets encryption"/><id>https://stageset.projects.metio.wtf/security/admission-webhook/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The validating webhook for StageSet — the invariants it enforces, why it exists instead of CEL, the failure-policy trade-off, and the two TLS provisioning modes.</blockquote><p>A StageSet&rsquo;s spec carries invariants the CRD&rsquo;s structural schema cannot enforce
+cheaply, so the controller ships a <strong>validating admission webhook</strong> that rejects a
+bad StageSet at <code>kubectl apply</code> time — on <code>create</code> and <code>update</code> of
+<code>stages.metio.wtf/v1</code> StageSets — before it ever reaches a reconcile.</p>
+<h2 id="why-a-webhook-and-not-cel">Why a webhook and not CEL</h2>
+<p>The natural home for these rules is a CRD CEL validation. The catch: CEL cost is
+multiplied by the size of every enclosing array, and a StageSet&rsquo;s <code>spec.stages</code> and
+each stage&rsquo;s action lists are deliberately <strong>unbounded</strong>. A CEL rule over them
+makes the apiserver reject the CRD on cost grounds. Moving the checks into a webhook
+keeps the lists unbounded while still validating them.</p>
+<h2 id="what-it-validates">What it validates</h2>
+<p>A single <code>ValidateSpec</code> routine is the source of truth. It enforces:</p>
+<ul>
+<li><strong>One operation per action</strong> — every entry in <code>actions.pre</code>/<code>post</code>/<code>onFailure</code>
+(and a migration&rsquo;s actions) sets exactly one of <code>patch</code> / <code>http</code> / <code>wait</code> /
+<code>job</code> / <code>delete</code> / <code>apply</code>. Zero or two is rejected. See <a href="/defining-a-release/actions/">actions</a>
+.</li>
+<li><strong>One version source</strong> — when <code>spec.version</code> is set, exactly one of <code>value</code>,
+<code>fromObject</code>, or <code>fromArtifact</code> (see <a href="/gating/versioned-migrations/">versioned migrations</a>
+).</li>
+<li><strong>Coherent migrations</strong> — <code>spec.migrations</code> require a <code>spec.version</code>, each
+anchors to a real stage, and each migration action sets exactly one verb.</li>
+<li><strong>Decryption shape</strong> — <code>spec.decryption</code>, when set, names the only supported
+provider (<code>sops</code>), and a given <code>secretRef</code> carries a <code>name</code> (see
+<a href="/security/encryption/">secrets encryption</a>
+).</li>
+<li>Reserved post-v1 fields are rejected up front.</li>
+</ul>
+<p>The same <code>ValidateSpec</code> also runs <strong>inside the reconciler as a fallback</strong>, so a
+StageSet that slips past a disabled or bypassed webhook still fails loudly — it just
+fails at reconcile (<code>Ready=False</code>) instead of at admission.</p>
+<h2 id="failure-policy-trade-off">Failure-policy trade-off</h2>
+<p>The webhook is registered with <code>failurePolicy: Fail</code>: if its endpoint is
+unreachable, the apiserver <strong>rejects</strong> StageSet create/update rather than admit an
+unvalidated object. During a rolling update that window is brief — the next replica
+serves admission. If your GitOps tooling cannot tolerate even that, the
+reconciler-side fallback lets you run with the webhook <strong>disabled</strong>
+(<code>webhook.enabled: false</code>) and still catch invalid specs; they fail at reconcile
+instead of at admission.</p>
+<h2 id="tls-provisioning">TLS provisioning</h2>
+<p>The apiserver dials the webhook over TLS and verifies the serving certificate
+against the <code>caBundle</code> on the <code>ValidatingWebhookConfiguration</code>. Choose how that is
+provisioned with <code>--webhook-cert-mode</code> (<code>cert-manager</code> or <code>self-signed</code>; the binary
+defaults to <code>cert-manager</code>, while the chart value <code>webhook.certMode</code> defaults to
+<code>self-signed</code> for a no-prerequisite install):</p>
+<h3 id="cert-manager">cert-manager</h3>
+<p>The chart renders a <code>cert-manager.io/v1</code> Certificate; cert-manager issues the
+Secret, it is mounted at <code>--webhook-cert-dir</code>, and cert-manager renews it. The
+webhook server hot-reloads the rotated files. Requires
+<a href="https://cert-manager.io/">cert-manager</a>
+ in the cluster.</p>
+<h3 id="self-signed-chart-default">self-signed (chart default)</h3>
+<p>No cert-manager dependency: the controller generates an ECDSA CA and serving
+certificate in-pod, writes them to <code>--webhook-cert-dir</code>, and patches the named
+<code>ValidatingWebhookConfiguration</code>&rsquo;s <code>caBundle</code> so the apiserver trusts the chain
+(<code>--webhook-validating-config-name</code> is required). The <code>caBundle</code> is treated as a CA
+<strong>set</strong> — each replica unions its own CA in and prunes only its own expired blocks,
+so several replicas converge during a rolling update instead of clobbering each
+other&rsquo;s trust. A renewer goroutine regenerates at <code>validity/3</code>
+(<code>--webhook-cert-validity</code>, default one year) and the server hot-reloads without a
+restart.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Helm values</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">self-signed     </span><span class="w"> </span><span class="c"># chart default; or cert-manager</span><span class="w">
+</span></span></span></code></pre></div><p>The <a href="/reference/configuration/">configuration reference</a>
+ lists the full
+<code>--webhook-*</code> flag set.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/webhook" term="webhook" label="webhook"/><category scheme="https://stageset.projects.metio.wtf/tags/admission" term="admission" label="admission"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/tls" term="tls" label="tls"/></entry></feed>

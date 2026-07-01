@@ -1,0 +1,193 @@
+<!doctype html><html lang=en><head><meta name=generator content="Hugo 0.163.3"><meta charset=utf-8><meta content="metio.wtf" name=author><meta content="StageSet Controller" name=subject><meta content="ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)" name=description><meta name=viewport content="width=device-width,initial-scale=1"><meta property="og:site_name" content="StageSet Controller"><meta property="og:title" content="StageSet Controller"><meta property="og:description" content="ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)"><meta property="og:type" content="website"><meta property="og:url" content="https://stageset.projects.metio.wtf/"><meta property="og:locale" content="en"><meta property="og:image" content="https://stageset.projects.metio.wtf/og-image.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name=twitter:card content="summary_large_image"><meta name=twitter:title content="StageSet Controller"><meta name=twitter:description content="ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)"><meta name=twitter:image content="https://stageset.projects.metio.wtf/og-image.png"><meta name=fediverse:creator content="@sebhoss@mastodon.online"><script type=application/ld+json>{"@context":"https://schema.org","@type":"WebSite","description":"ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)","mentions":[{"@type":"SoftwareApplication","applicationCategory":"DeveloperApplication","name":"Jsonnet-as-a-Service","url":"https://jaas.projects.metio.wtf/"}],"name":"StageSet Controller","url":"https://stageset.projects.metio.wtf/"}</script><script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareSourceCode","codeRepository":"https://github.com/metio/stageset-controller","description":"ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)","license":"https://spdx.org/licenses/0BSD.html","name":"StageSet Controller","url":"https://stageset.projects.metio.wtf/"}</script><link href=https://stageset.projects.metio.wtf/ rel=canonical><link href=https://stageset.projects.metio.wtf/atom.xml rel=alternate title="StageSet Controller Atom" type=application/atom+xml><link href=https://stageset.projects.metio.wtf/index.xml rel=alternate title="StageSet Controller RSS" type=application/rss+xml><link href=https://stageset.projects.metio.wtf/sitemap.xml rel=sitemap title="StageSet Controller Sitemap" type=application/xml><link rel=author href=https://stageset.projects.metio.wtf/humans.txt><link rel=alternate type=application/rdf+xml title=FOAF href=https://stageset.projects.metio.wtf/foaf.rdf><link rel=license href=https://creativecommons.org/publicdomain/zero/1.0/><link rel=icon href=https://stageset.projects.metio.wtf/favicon.svg type=image/svg+xml><link rel=icon href=https://stageset.projects.metio.wtf/favicon.ico sizes="48x48 32x32 16x16"><link rel=apple-touch-icon href=https://stageset.projects.metio.wtf/apple-touch-icon.png><link href=https://stageset.projects.metio.wtf/css/mobile.min.4967d6bba3861616e6d5d2de4b890b8edee8aae461c1e8e9b22f733aad49016f2ad27ff42ddfe820f807f32098cfe2e6f6ede06b7cd6922d97a50a4d606cc165.css integrity="sha512-SWfWu6OGFhbm1dLeS4kLjt7oquRhwejpsi9zOq1JAW8q0n/0Ld/oIPgH8yCYz+Lm9u3ga3zWki2XpQpNYGzBZQ==" media="screen and (max-width: 800px)" rel=stylesheet><link href=https://stageset.projects.metio.wtf/css/tablet.min.589ea6ed457f1e7880d07ce9175ce2200e78eae7cee1a249e9826d625cd1b7eb3ca9ae5391b2fdbb0b2f57f76ea908049e76d457a8ddbd171a0a722020468b5c.css integrity="sha512-WJ6m7UV/HniA0HzpF1ziIA546ufO4aJJ6YJtYlzRt+s8qa5TkbL9uwsvV/duqQgEnnbUV6jdvRcaCnIgIEaLXA==" media="screen and (min-width: 801px) and (max-width: 1199px)" rel=stylesheet><link href=https://stageset.projects.metio.wtf/css/desktop.min.61a491426ce90ef60524cb57a4e2f3c74c79b194008cedb00eb86ffb6ea61e6112418fbe3aa565722271f077fdf06d7a75d05bad844bc69e3156ef7ffad1ee1c.css integrity="sha512-YaSRQmzpDvYFJMtXpOLzx0x5sZQAjO2wDrhv+26mHmESQY++OqVlciJx8Hf98G16ddBbrYRLxp4xVu9/+tHuHA==" media="screen and (min-width: 1200px)" rel=stylesheet><link href=https://stageset.projects.metio.wtf/css/darkmode.min.1ff1a9b4299fb7c393c44295c028b9ae3e30b0ced53310b7d193c3959d02ac76b805bc70bb530b2a8baf6c1abeab6c4a4ed048d62ca3bd931856ac81e3e6c020.css integrity="sha512-H/GptCmft8OTxEKVwCi5rj4wsM7VMxC30ZPDlZ0CrHa4Bbxwu1MLKouvbBq+q2xKTtBI1iyjvZMYVqyB4+bAIA==" media="screen and (prefers-color-scheme: dark)" rel=stylesheet><title>StageSet Controller &ndash; StageSet Controller</title></head><body id=site><header id=header><a id=logolink href=https://stageset.projects.metio.wtf/ title="StageSet Controller"><img id=logo src=https://stageset.projects.metio.wtf/images/logo.svg alt="StageSet Controller logo" width=40 height=40></a><h1 id=projectname><a id=rootlink href=https://stageset.projects.metio.wtf/>StageSet Controller</a>
+<a href=https://stageset.projects.metio.wtf/sitemap/ title="show me all pages" id=sitemaplink><img class=svgimg src=https://stageset.projects.metio.wtf/images/sitemap.svg alt=sitemap width=30 height=30></a></h1><span id=actions><a href=https://github.com/metio/stageset-controller id=github title="want some code?"><img class=svgimg src=https://stageset.projects.metio.wtf/images/github.svg alt=github width=32 height=32>
+</a><a href=https://stageset.projects.metio.wtf/atom.xml id=newsfeed title="get notified about updates"><img class=svgimg src=https://stageset.projects.metio.wtf/images/rss.svg alt=newsfeed width=32 height=32></a></span></header><nav id=navigation><ul><h3 class="mobileonly menutitle">Links</h3><li class=mobileonly><a href=https://github.com/metio/stageset-controller>See some code at GitHub</a></li><li class=mobileonly><a href=https://stageset.projects.metio.wtf/atom.xml>Subscribe to the Atom feed</a></li><li class=mobileonly><a href=https://stageset.projects.metio.wtf/sitemap/>See all pages at the sitemap</a></li><hr class="mobileonly menudivider"><h3 class="mobile-and-tablet menutitle">Navigation</h3><li><a href=/get-started/>Get started</a><ul><li><a href=/get-started/quickstart/>Quickstart</a></li><li><a href=/get-started/kubernetes/>Install on Kubernetes</a></li><li><a href=/get-started/jsonnet-to-rollout/>From Jsonnet to a gated rollout</a></li><li><a href=/get-started/flux-sources/>Stage sources</a></li></ul></li><li><a href=/guides/>Guides</a><ul><li><a href=/guides/parameters/>Parameterizing a rollout</a></li><li><a href=/guides/progressive-delivery/>Progressive delivery</a></li><li><a href=/guides/jsonnet-migrations/>Generating migrations with Jsonnet</a></li></ul></li><li><a href=/defining-a-release/>Defining a release</a><ul><li><a href=/defining-a-release/stages-and-sources/>Stages and sources</a></li><li><a href=/defining-a-release/actions/>Actions</a></li><li><a href=/defining-a-release/ready-checks/>Ready checks</a></li><li><a href=/defining-a-release/conflict-policies/>Conflict policies</a></li><li><a href=/defining-a-release/inventory/>Inventory and pruning</a></li></ul></li><li><a href=/gating/>Gating & rollout safety</a><ul><li><a href=/gating/update-windows/>Update windows</a></li><li><a href=/gating/stage-promotion/>Stage promotion</a></li><li><a href=/gating/error-budget/>Error-budget freeze</a></li><li><a href=/gating/versioned-migrations/>Versioned migrations</a></li><li><a href=/gating/rollback/>Rollback</a></li></ul></li><li><a href=/security/>Security & multi-tenancy</a><ul><li><a href=/security/encryption/>Secrets encryption</a></li><li><a href=/security/multi-cluster/>Multi-cluster and tenancy</a></li><li><a href=/security/admission-webhook/>Admission webhook</a></li><li><a href=/security/network-policy/>Network policy</a></li><li><a href=/security/service-mesh/>Service mesh</a></li></ul></li><li><a href=/integrations/>Integrations & tooling</a><ul><li><a href=/integrations/producer-aware-sources/>Producer-aware sources</a></li><li><a href=/integrations/flux-operator/>Flux Operator integration</a></li><li><a href=/integrations/claude-code/>Claude Code skill</a></li><li><a href=/integrations/mcp-server/>MCP server</a></li></ul></li><li><a href=/running/>Run in production</a><ul><li><a href=/running/production/>Production</a></li><li><a href=/running/operations/>Operations</a></li><li><a href=/running/scale-and-capacity/>Scale and capacity</a></li><li><a href=/running/disaster-recovery/>Backup and disaster recovery</a></li></ul></li><li><a href=/observability/>Observability</a><ul><li><a href=/observability/logging/>Logging</a></li><li><a href=/observability/tracing/>Tracing</a></li><li><a href=/observability/metrics/>Metrics</a></li><li><a href=/observability/slos/>Service level objectives</a></li><li><a href=/observability/alerting/>Alerting</a></li><li><a href=/observability/dashboard/>Dashboard</a></li></ul></li><li><a href=/cli/>CLI</a><ul><li><a href=/cli/get/>get</a></li><li><a href=/cli/build/>build</a></li><li><a href=/cli/diff/>diff</a></li><li><a href=/cli/apply/>apply</a></li><li><a href=/cli/reconcile/>reconcile</a></li><li><a href=/cli/lint-migrations/>lint-migrations</a></li></ul></li><li><a href=/api/>API</a><ul><li><a href=/api/stageset/>StageSet</a></li><li><a href=/api/stageinventory/>StageInventory</a></li></ul></li><li><a href=/reference/>Reference</a><ul><li><a href=/reference/configuration/>Configuration reference</a></li><li><a href=/reference/helm-values/>Helm chart values</a></li><li><a href=/reference/verifying-releases/>Verifying releases</a></li><li><a href=/reference/upgrading/>Upgrading</a></li></ul></li><li><a href=/comparisons/>Comparisons</a><ul><li><a href=/comparisons/helm/>vs Helm</a></li><li><a href=/comparisons/kustomize/>vs Kustomize</a></li><li><a href=/comparisons/flux/>vs Flux</a></li><li><a href=/comparisons/tanka-kubecfg/>vs Tanka & kubecfg</a></li><li><a href=/comparisons/argo-rollouts/>vs Argo Rollouts</a></li><li><a href=/comparisons/jsonnet-controller/>vs jsonnet-controller</a></li><li><a href=/comparisons/flux-operator/>vs Flux Operator ResourceSet</a></li></ul></li><li><a href=/runbooks/>Runbooks</a></li><li><a href=/contributing/>Contributing</a><ul><li><a href=/contributing/building/>Building and testing</a></li><li><a href=/contributing/ci-and-release/>CI and releases</a></li></ul></li></ul></nav><main id=content><h1 id=stageset-controller>StageSet Controller</h1><p><code>stageset-controller</code> is a <a href=https://fluxcd.io/>Flux</a>
+controller for <strong>ordered,
+gated, multi-stage delivery</strong> — roll a release out one stage at a time, prove
+each stage healthy before the next begins, and gate the whole thing on
+schedules, approvals, and error budgets. It is GitOps-native: every stage reads
+a Flux source, and the whole release is reconciled continuously, drift-corrected,
+and pruned.</p><p>Flux&rsquo;s <code>kustomize-controller</code> and <code>helm-controller</code> apply an artifact in one
+shot. That fits most releases, but not one that has to happen in sequence:
+install the CRDs before the operator that needs them, run a database migration
+before the app that reads the new schema, hold a production rollout until the
+canary is healthy, freeze changes during business hours.</p><p>A <code>StageSet</code> describes a release as an ordered list of stages. Each stage applies
+a Flux source — a <code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>, or an
+<a href=https://fluxcd.io/flux/components/source/externalartifacts/><code>ExternalArtifact</code></a>
+(including one rendered on the fly by a producer like <a href=https://jaas.projects.metio.wtf/>JaaS</a>
+) —
+waits for it to become healthy, and only then lets the next stage begin. Between
+stages, run typed actions (a migration <code>Job</code>, an HTTP gate, a wait-for-condition),
+gate rollouts behind <a href=/gating/update-windows/>update windows</a>
+, and run
+version-aware <a href=/gating/versioned-migrations/>migrations</a>
+when you cross a release boundary.
+Everything is reconciled continuously, drift-corrected, and pruned from a precise
+per-stage inventory.</p><h2 id=what-you-can-do-with-it>What you can do with it</h2><h3 id=sequence-and-gate-every-step>Sequence and gate every step</h3><ul><li><strong><a href=/defining-a-release/stages-and-sources/>Ordered stages</a>
+</strong>— each stage applies a source
+and must report healthy before the next one starts.</li><li><strong><a href=/defining-a-release/ready-checks/>Ready checks</a>
+</strong>— kstatus and CEL gates, so a stage
+counts as done only when its objects are genuinely ready, not merely applied.</li><li><strong><a href=/defining-a-release/actions/>Typed actions</a>
+</strong>— run a migration <code>Job</code>, an HTTP gate, a
+wait-for-condition, or a patch/delete before, after, or on failure of a stage.</li><li><strong><a href=/gating/stage-promotion/>Promotion gates</a>
+</strong>— hold a stage behind a soak
+window, a manual approval, or a metric analysis before it advances.</li></ul><h3 id=roll-out-safely>Roll out safely</h3><ul><li><strong><a href=/gating/update-windows/>Update windows</a>
+</strong>— allow or deny new revisions on a
+schedule, so a change freeze holds without pausing drift correction.</li><li><strong><a href=/gating/error-budget/>Error-budget freeze</a>
+</strong>— pause rollouts automatically
+while a service is out of its SLO budget, and resume when it recovers.</li><li><strong><a href=/gating/versioned-migrations/>Versioned migrations</a>
+</strong>— run version-aware
+migrations when a release crosses a boundary, with approval gates and coverage
+checks.</li><li><strong><a href=/gating/rollback/>Automatic rollback</a>
+</strong>— restore the last-good revision
+when a rollout fails.</li></ul><h3 id=source-agnostic-and-flux-native>Source-agnostic and Flux-native</h3><ul><li><strong><a href=/defining-a-release/stages-and-sources/>Any Flux source</a>
+</strong>— <code>GitRepository</code>,
+<code>OCIRepository</code>, <code>Bucket</code>, or <code>ExternalArtifact</code>, including one rendered on the
+fly by a producer like <a href=https://jaas.projects.metio.wtf/>JaaS</a>
+.</li><li><strong><a href=/integrations/producer-aware-sources/>Producer-aware</a>
+</strong>— re-render a stage
+automatically when its upstream producer republishes.</li><li><strong><a href=/security/encryption/>Secrets encryption</a>
+</strong>— decrypt SOPS-encrypted manifests
+in memory during apply.</li></ul><h3 id=built-for-platform-teams>Built for platform teams</h3><ul><li><strong><a href=/security/multi-cluster/>Multi-tenancy</a>
+</strong>— every apply runs as a tenant
+<code>ServiceAccount</code>, so the controller needs no broad write access of its own.</li><li><strong><a href=/observability/>Observability</a>
+</strong>— Prometheus metrics, SLOs, OTLP tracing,
+a starter alert set, and a Kubernetes Event on every transition.</li><li><strong><a href=/cli/>Tooling</a>
+</strong>— a <code>stagesetctl</code> CLI to preview (<code>diff</code>), render
+(<code>build</code>), and drive (<code>reconcile</code>) StageSets, plus an
+<a href=/integrations/mcp-server/>MCP server</a>
+for agent-driven operation.</li></ul><h2 id=what-a-stageset-looks-like>What a StageSet looks like</h2><p>A single StageSet can express an entire gated release — ordered stages, a
+producer-rendered source, typed actions, promotion gates, versioned migrations,
+an error-budget freeze, and rollback — all declaratively:</p><div class=highlight><pre tabindex=0 class=chroma><code class=language-yaml data-lang=yaml><span class=line><span class=cl><span class=nt>apiVersion</span><span class=p>:</span><span class=w> </span><span class=l>stages.metio.wtf/v1</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>StageSet</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=nt>metadata</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>payments</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>namespace</span><span class=p>:</span><span class=w> </span><span class=l>payments</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=nt>spec</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>serviceAccountName</span><span class=p>:</span><span class=w> </span><span class=l>payments-deployer   </span><span class=w> </span><span class=c># every apply runs as this tenant SA</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>decryption</span><span class=p>:</span><span class=w>                              </span><span class=c># decrypt SOPS-encrypted Secrets in-line</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>provider</span><span class=p>:</span><span class=w> </span><span class=l>sops</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>secretRef</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>sops-age</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>rollbackOnFailure</span><span class=p>:</span><span class=w> </span><span class=kc>true</span><span class=w>                  </span><span class=c># restore the last-good revision on failure</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=c># track the deployed version from the app&#39;s own label, and run a one-off</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=c># migration when a rollout crosses the 2.0.0 boundary</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>version</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>fromObject</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>stage</span><span class=p>:</span><span class=w> </span><span class=l>application</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>Deployment</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>payments-api</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>migrations</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>ledger-schema-2-0</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>from</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;&gt;=1.0.0, &lt;2.0.0&#34;</span><span class=w>              </span><span class=c># current version this applies to</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>to</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;2.0.0&#34;</span><span class=w>                          </span><span class=c># the exact boundary it crosses</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>stage</span><span class=p>:</span><span class=w> </span><span class=l>application</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>actions</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>migrate-ledger</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>job</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>sourceRef</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>payments-migrations</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=c># new revisions roll out only outside the Friday-evening freeze ...</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>updateWindows</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span>- <span class=nt>type</span><span class=p>:</span><span class=w> </span><span class=l>Deny</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>schedule</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;0 17 * * FRI&#34;</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>duration</span><span class=p>:</span><span class=w> </span><span class=l>60h</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>timeZone</span><span class=p>:</span><span class=w> </span><span class=l>Europe/Berlin</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=c># ... and only while the service is within its SLO error budget</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>errorBudget</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>source</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>prometheus</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>address</span><span class=p>:</span><span class=w> </span><span class=l>http://prometheus.monitoring:9090</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>query</span><span class=p>:</span><span class=w> </span><span class=l>slo:period_error_budget_remaining:ratio{sloth_service=&#34;payments&#34;}</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>freezeThreshold</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;0&#34;</span><span class=w>                    </span><span class=c># freeze once the budget is overspent</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>resumeThreshold</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;0.05&#34;</span><span class=w>                 </span><span class=c># resume only after it recovers</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>stages</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=c># 1 ── shared infrastructure: CRDs, namespaces, RBAC</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>infrastructure</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>sourceRef</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>payments-infra              </span><span class=w> </span><span class=c># an ExternalArtifact (the default kind)</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>readyChecks</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>checks</span><span class=p>:</span><span class=w>                            </span><span class=c># gate on the CRD being Established</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span>- <span class=nt>apiVersion</span><span class=p>:</span><span class=w> </span><span class=l>apiextensions.k8s.io/v1</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>CustomResourceDefinition</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>ledgers.payments.example</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=c># 2 ── the application, rendered on the fly from Jsonnet by JaaS</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>application</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>sourceRef</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>JsonnetSnippet              </span><span class=w> </span><span class=c># a producer, resolved to its ExternalArtifact</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>apiVersion</span><span class=p>:</span><span class=w> </span><span class=l>jaas.metio.wtf/v1</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>payments-api</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>actions</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>pre</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>db-migrate              </span><span class=w> </span><span class=c># runs before the manifests are applied</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>job</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>sourceRef</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>payments-migrations</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>post</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>smoke-test              </span><span class=w> </span><span class=c># stage is Ready only if this passes</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>http</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>url</span><span class=p>:</span><span class=w> </span><span class=l>https://payments.internal/healthz</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>expectedStatus</span><span class=p>:</span><span class=w> </span><span class=p>[</span><span class=m>200</span><span class=p>]</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>promotion</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>soak</span><span class=p>:</span><span class=w> </span><span class=l>15m                         </span><span class=w> </span><span class=c># advance only if it stays healthy ...</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>analysis</span><span class=p>:</span><span class=w>                          </span><span class=c># ... and the 5xx rate stays low</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>checks</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>error-rate</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>source</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                </span><span class=nt>prometheus</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                  </span><span class=nt>address</span><span class=p>:</span><span class=w> </span><span class=l>http://prometheus.monitoring:9090</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                  </span><span class=nt>query</span><span class=p>:</span><span class=w> </span><span class=l>sum(rate(http_requests_total{app=&#34;payments&#34;,code=~&#34;5..&#34;}[1m]))/sum(rate(http_requests_total{app=&#34;payments&#34;}[1m]))</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>threshold</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                </span><span class=nt>max</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;0.01&#34;</span><span class=w>                </span><span class=c># ≤ 1% 5xx</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=c># 3 ── production, promoted only after a human confirms</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>prod</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>sourceRef</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>payments-prod</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>promotion</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>requireManualPromotion</span><span class=p>:</span><span class=w> </span><span class=kc>true</span><span class=w>
+</span></span></span></code></pre></div><p>Stages run top to bottom: <code>infrastructure</code> must be Ready before <code>application</code> is
+touched, the migration runs as the version crosses <code>2.0.0</code>, <code>application</code> soaks
+and is checked against its error rate before <code>prod</code> begins, and <code>prod</code> waits for a
+manual promotion. New revisions roll out only outside the Friday freeze and while
+the SLO is in budget, and a failed run is rolled back — all reconciled
+continuously, with drift corrected and removed objects pruned. Only <code>spec.stages</code>
+is required; everything else is optional, so the
+<a href=/get-started/quickstart/>Quickstart</a>
+starts from a single stage.</p><h2 id=where-to-go-next>Where to go next</h2><ul><li><strong><a href=/get-started/quickstart/>Get started</a>
+</strong>— go from an empty cluster to one
+running StageSet in a few steps.</li><li><strong><a href=/guides/>Guides</a>
+</strong>— end-to-end walkthroughs: parameterizing a rollout,
+progressive delivery, generating migrations with Jsonnet.</li><li><strong><a href=/defining-a-release/>Defining a release</a>
+</strong>and
+<strong><a href=/gating/>Gating & rollout safety</a>
+</strong>— a page per feature, from a single
+stage to error-budget freezes, with copy-pasteable examples.</li><li><strong><a href=/cli/>CLI</a>
+</strong>and <strong><a href=/api/>API reference</a>
+</strong>— <code>stagesetctl</code> commands and
+every field of every custom resource.</li><li><strong><a href=/comparisons/>Comparisons</a>
+</strong>— how StageSet relates to Helm, Kustomize,
+Tanka, kubecfg, Flux, Argo Rollouts, and more.</li><li><strong><a href=/runbooks/>Runbooks</a>
+</strong>— symptom → cause → remediation for every status
+reason and operational alert.</li></ul><h2 id=related-projects>Related projects</h2><p><code>stageset-controller</code> handles the delivery end and composes with two adjacent
+projects, each useful on its own:</p><ul><li><strong><a href=https://github.com/metio/jsonnet-oci-images>JOI</a>
+</strong>publishes Jsonnet
+libraries as single-layer OCI images.</li><li><strong><a href=https://jaas.projects.metio.wtf/>JaaS</a>
+</strong>evaluates Jsonnet on demand and
+publishes the result as a Flux <code>ExternalArtifact</code>.</li><li><code>stageset-controller</code> takes those artifacts and rolls them out, in order, with
+gates.</li></ul><p>JOI and JaaS are not required — a stage reads straight from a <code>GitRepository</code>,
+<code>OCIRepository</code>, or <code>Bucket</code>, or from any <code>ExternalArtifact</code>, whatever produced
+it.</p></main><footer id=footer><p xmlns:dct=http://purl.org/dc/terms/ xmlns:vcard=http://www.w3.org/2001/vcard-rdf/3.0#><a rel=license href=https://creativecommons.org/publicdomain/zero/1.0/><img src=https://stageset.projects.metio.wtf/images/cc0.png style=border-style:none alt=CC0-1.0 width=88px height=31px></a><br>To the extent possible under law,
+<a rel=dct:publisher href=https://stageset.projects.metio.wtf/><span property="dct:title">metio.wtf</span>
+</a>has waived all copyright and related or neighboring rights to
+<span property="dct:title">stageset.projects.metio.wtf</span>.
+This work is published from:
+<span property="vcard:Country" datatype="dct:ISO3166" content="EN" about="https://stageset.projects.metio.wtf/">Germany</span></p><p id=footer-llms>For LLMs:
+<a href=https://stageset.projects.metio.wtf/llms.txt>llms.txt</a> &#183;
+<a href=https://stageset.projects.metio.wtf/llms-full.txt>llms-full.txt</a></p></footer></body></html>

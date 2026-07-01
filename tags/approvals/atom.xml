@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Approvals on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/approvals/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/approvals/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/approvals/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/approvals/</id><entry><title type="html">MigrationApprovalPending</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><id>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A version transition with pending migrations is held for operator approval; approve the target version to proceed.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationApprovalPending</code>. The Message names the target
+version and how many migrations await approval. <code>status.pendingMigrations</code> lists
+exactly what will run. Nothing is applied and <code>status.version</code> is not advanced —
+this is an intentional hold, not an error.</p>
+<h2 id="cause">Cause</h2>
+<p><code>spec.version.requireApproval</code> is set, and the current transition has pending
+migrations that have not been approved. So destructive migrations don&rsquo;t run
+unattended, the whole rollout (app and migrations) waits until an operator
+authorizes the target version.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Review <code>status.pendingMigrations</code> (or <code>stagesetctl diff</code>) to see what will run,
+then approve the target version by setting the annotation to it:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  stages.metio.wtf/approved-version<span class="o">=</span>2.0.0 --overwrite
+</span></span></code></pre></div><p>The controller proceeds on the next reconcile once the annotation equals the
+desired version. Because approval is tied to that exact version, a later
+transition to a different version holds again until you approve the new target —
+a stale approval never carries over.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/approvals" term="approvals" label="approvals"/></entry></feed>

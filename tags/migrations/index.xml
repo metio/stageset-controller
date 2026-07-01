@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Migrations on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/migrations/</link><description>Recent content in Migrations on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/migrations/index.xml" rel="self" type="application/rss+xml"/><item><title>DowngradeRequiresMigration</title><link>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=DowngradeRequiresMigration&lt;/code&gt;. Terminal: the run does not requeue until the desired version is at or above &lt;code&gt;status.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The desired version (&lt;code&gt;spec.version&lt;/code&gt;) is &lt;strong&gt;lower&lt;/strong&gt; than the version the controller last recorded as deployed (&lt;code&gt;status.version&lt;/code&gt;). Downgrades are refused by default: &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migrations&lt;/a&gt;
+ are forward-only action ladders, and replaying upgrade migrations in reverse is how data gets destroyed. The controller does not silently run a downgrade.&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageset &amp;lt;name&amp;gt; --output &lt;span class="nv"&gt;jsonpath&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;{.status.version}&amp;#39;&lt;/span&gt; &lt;span class="c1"&gt;# deployed&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# desired: read spec.version.value, or the version file the artifact carries&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Pick the intended direction:&lt;/p&gt;</description></item><item><title>Generating migrations with Jsonnet</title><link>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</guid><description>&lt;p&gt;A &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migration ladder&lt;/a&gt;
+ is just data — a list of
+version-gated actions. So you can &lt;em&gt;generate&lt;/em&gt; it with &lt;a href="https://jsonnet.org/"&gt;Jsonnet&lt;/a&gt;
+,
+publish it once as a Flux artifact with &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+,
+and have every StageSet that deploys the app consume it through
+&lt;code&gt;spec.migrationsSourceRef&lt;/code&gt;. One ladder, authored once, shared across namespaces.&lt;/p&gt;
+&lt;p&gt;The chain mirrors &lt;a href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/"&gt;From Jsonnet to a gated rollout&lt;/a&gt;
+,
+but the rendered artifact is the &lt;em&gt;migrations&lt;/em&gt; rather than the manifests:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Jsonnet ladder → JaaS (JsonnetSnippet) → ExternalArtifact → StageSet.migrationsSourceRef
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="prerequisites"&gt;Prerequisites&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Flux installed (with the &lt;code&gt;ExternalArtifact&lt;/code&gt; API — Flux ≥ v2.7.0).&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ installed in operator mode.&lt;/li&gt;
+&lt;li&gt;StageSet installed (see &lt;a href="https://stageset.projects.metio.wtf/get-started/kubernetes/"&gt;Installation&lt;/a&gt;
+).&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="1-write-the-ladder-in-jsonnet"&gt;1. Write the ladder in Jsonnet&lt;/h2&gt;
+&lt;p&gt;The snippet evaluates to a &lt;strong&gt;JSON array of migrations&lt;/strong&gt; — the same shape the
+ladder file uses, so JaaS&amp;rsquo;s &lt;code&gt;rendered.json&lt;/code&gt; &lt;em&gt;is&lt;/em&gt; the ladder. A small helper keeps
+each entry readable, and the file is trivially parameterizable (per app, per
+environment) with top-level args:&lt;/p&gt;</description></item><item><title>MigrationApprovalPending</title><link>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationApprovalPending&lt;/code&gt;. The Message names the target
+version and how many migrations await approval. &lt;code&gt;status.pendingMigrations&lt;/code&gt; lists
+exactly what will run. Nothing is applied and &lt;code&gt;status.version&lt;/code&gt; is not advanced —
+this is an intentional hold, not an error.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.version.requireApproval&lt;/code&gt; is set, and the current transition has pending
+migrations that have not been approved. So destructive migrations don&amp;rsquo;t run
+unattended, the whole rollout (app and migrations) waits until an operator
+authorizes the target version.&lt;/p&gt;</description></item><item><title>MigrationArtifactInvalid</title><link>https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationArtifactInvalid&lt;/code&gt;. The Message names the file and
+the parse or validation error. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced — the
+transition is held until the artifact is fixed and republished.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The StageSet sources its migration ladder from &lt;code&gt;spec.migrationsSourceRef&lt;/code&gt;, and
+the fetched artifact could not be turned into a valid ladder. Each
+&lt;code&gt;.yaml&lt;/code&gt;/&lt;code&gt;.yml&lt;/code&gt;/&lt;code&gt;.json&lt;/code&gt; file in the artifact (under the optional &lt;code&gt;path&lt;/code&gt;) must be a
+YAML or JSON document that is either a list of migrations or a single migration.
+Parsing is strict — a misspelled field is rejected rather than silently dropped,
+because a destructive ladder must not run a half-understood definition.&lt;/p&gt;</description></item><item><title>MigrationCoverageMissing</title><link>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationCoverageMissing&lt;/code&gt;. The Message names the boundary
+(e.g. &lt;code&gt;1.4.0 → 2.0.0&lt;/code&gt;). &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.version.requireMigrationCoverage&lt;/code&gt; is set, and the version transition crosses
+a &lt;strong&gt;major-version boundary&lt;/strong&gt; (the major component increased) with &lt;strong&gt;no migration&lt;/strong&gt;
+selected for it. A major bump usually implies breaking changes that need a
+migration, so rather than advance silently the controller fails closed and asks
+for an explicit decision.&lt;/p&gt;
+&lt;p&gt;Minor and patch transitions are never gated by this — only a major boundary.&lt;/p&gt;</description></item><item><title>MigrationDirty</title><link>https://stageset.projects.metio.wtf/runbooks/migrationdirty/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationdirty/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationDirty&lt;/code&gt;. The Message names the migration that keeps
+failing. The controller has &lt;strong&gt;stopped auto-retrying&lt;/strong&gt; — there is no backoff
+requeue — and &lt;code&gt;status.version&lt;/code&gt; is not advanced. &lt;code&gt;status.migrationFailureCount&lt;/code&gt; is
+at the threshold.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration failed repeatedly (the consecutive-failure threshold). Rather than
+keep re-attempting destructive work against an uncertain state, the controller
+halts and waits for a human — the golang-migrate &amp;ldquo;dirty&amp;rdquo; / Flyway &amp;ldquo;repair&amp;rdquo; model.
+A persistently-failing destructive migration usually means something needs
+fixing by hand (a bad action, a half-applied change, missing RBAC, a broken
+target) that retrying cannot resolve.&lt;/p&gt;</description></item><item><title>MigrationFailed</title><link>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationFailed&lt;/code&gt;. The Message names the migration and the
+failed action. The run halts at the anchoring stage; &lt;code&gt;status.version&lt;/code&gt; is not
+advanced. The controller retries with backoff.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration anchored before a stage ran an action that failed (a &lt;code&gt;job&lt;/code&gt; that
+errored, an &lt;code&gt;http&lt;/code&gt; call that returned an error, a &lt;code&gt;wait&lt;/code&gt; that timed out, an
+&lt;code&gt;apply&lt;/code&gt;/&lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt; the apiserver rejected). This reason is distinct from
+&lt;code&gt;StageFailed&lt;/code&gt; so you can tell a migration failure from the stage&amp;rsquo;s own apply.&lt;/p&gt;</description></item><item><title>MigrationSourceNotPinned</title><link>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationSourceNotPinned&lt;/code&gt;. The Message says the migrations
+source is pinned to a mutable tag/branch and &lt;code&gt;--require-pinned-migration-sources&lt;/code&gt;
+is set. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced — the migration ladder does not run.&lt;/p&gt;
+&lt;p&gt;When the flag is &lt;em&gt;off&lt;/em&gt;, this does not block: the ladder runs, but a
+&lt;code&gt;Warning MigrationSourceMutable&lt;/code&gt; event is emitted so the auto-rollout risk stays
+visible.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration ladder sourced from &lt;code&gt;spec.migrationsSourceRef&lt;/code&gt; runs remote-authored,
+destructive instructions. If the source is pinned to a &lt;strong&gt;mutable&lt;/strong&gt; revision — an
+&lt;code&gt;OCIRepository&lt;/code&gt; &lt;code&gt;spec.ref.tag&lt;/code&gt;/&lt;code&gt;spec.ref.semver&lt;/code&gt;, or a &lt;code&gt;GitRepository&lt;/code&gt;
+&lt;code&gt;spec.ref.branch&lt;/code&gt;/&lt;code&gt;tag&lt;/code&gt;/&lt;code&gt;semver&lt;/code&gt; — an upstream overwrite of that tag/branch
+silently changes what runs on the next source reconcile. An immutable pin
+(&lt;code&gt;OCIRepository&lt;/code&gt; &lt;code&gt;spec.ref.digest&lt;/code&gt; or &lt;code&gt;GitRepository&lt;/code&gt; &lt;code&gt;spec.ref.commit&lt;/code&gt;) removes
+that auto-rollout window.&lt;/p&gt;</description></item><item><title>MigrationSourceNotVerified</title><link>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationSourceNotVerified&lt;/code&gt;. The Message says either
+verification failed (&lt;code&gt;SourceVerified=False&lt;/code&gt;) or that verification is required but
+not configured. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced — the migration ladder does
+not run.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;Sourcing a migration ladder from &lt;code&gt;spec.migrationsSourceRef&lt;/code&gt; runs remote-authored,
+destructive instructions, so the controller can require they be provenance-verified
+before executing. Verification state comes from the source CR&amp;rsquo;s
+&lt;code&gt;status.conditions[SourceVerified]&lt;/code&gt;, which Flux source-controller sets from the
+source&amp;rsquo;s &lt;code&gt;spec.verify&lt;/code&gt; (cosign or notation):&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;SourceVerified=False&lt;/code&gt;&lt;/strong&gt; — the source configured &lt;code&gt;spec.verify&lt;/code&gt;, but the
+artifact&amp;rsquo;s signature did not pass. Always refused, regardless of flags — a
+tampered or unsigned-by-the-expected-identity artifact must not run.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;No &lt;code&gt;SourceVerified&lt;/code&gt; condition + &lt;code&gt;--require-verified-migration-sources&lt;/code&gt;&lt;/strong&gt; — the
+controller requires verification, but the source configures none.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;Configure signature verification on the source. For an &lt;code&gt;OCIRepository&lt;/code&gt;:&lt;/p&gt;</description></item><item><title>MigrationStageNotFound</title><link>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationStageNotFound&lt;/code&gt;. The Message names the migration
+and the anchor value it could not resolve. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced —
+the transition is held until the anchor resolves.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration that the version transition selected (&lt;code&gt;current &amp;lt; to &amp;lt;= desired&lt;/code&gt;)
+anchors to a stage that this StageSet does not have. A migration&amp;rsquo;s &lt;code&gt;stage&lt;/code&gt; value
+resolves to the stage whose &lt;code&gt;migrationAnchor&lt;/code&gt; (preferred) or &lt;code&gt;name&lt;/code&gt; equals it;
+an empty &lt;code&gt;stage&lt;/code&gt; anchors before the first stage. If none matches, the controller
+&lt;strong&gt;fails closed&lt;/strong&gt; instead of silently never running the migration — the failure
+mode a shared, late-binding ladder must not have (a &lt;code&gt;DROP&lt;/code&gt; that quietly never
+runs while the app advances to a schema that needs it).&lt;/p&gt;</description></item><item><title>stagesetctl lint-migrations</title><link>https://stageset.projects.metio.wtf/cli/lint-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/lint-migrations/</guid><description>&lt;p&gt;Validate a &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migration ladder&lt;/a&gt;
+ — a single file, or a
+directory of &lt;code&gt;.yaml&lt;/code&gt;/&lt;code&gt;.yml&lt;/code&gt;/&lt;code&gt;.json&lt;/code&gt; files — before publishing it to a source the
+controller will fetch. It runs the &lt;strong&gt;exact checks the controller runs&lt;/strong&gt; at
+admission and at sourced-artifact fetch time, so a ladder that lints clean here
+won&amp;rsquo;t fail closed later in the cluster.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl lint-migrations PATH
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;It checks:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;strict parsing — a misspelled field (&lt;code&gt;acions:&lt;/code&gt; for &lt;code&gt;actions:&lt;/code&gt;) is rejected, not
+silently dropped;&lt;/li&gt;
+&lt;li&gt;each migration has a name, a &lt;code&gt;to&lt;/code&gt; that parses as a concrete semver, and an
+optional &lt;code&gt;from&lt;/code&gt; that parses as a semver constraint;&lt;/li&gt;
+&lt;li&gt;each action sets exactly one verb, with a unique, non-empty name;&lt;/li&gt;
+&lt;li&gt;migration names are unique across the ladder.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;On success it prints the parsed ladder — each migration&amp;rsquo;s boundary, anchor stage,
+and action verbs — so you can eyeball what will run:&lt;/p&gt;</description></item><item><title>Versioned migrations</title><link>https://stageset.projects.metio.wtf/gating/versioned-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/versioned-migrations/</guid><description>&lt;p&gt;Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ exactly when the
+deployed version steps over the boundary, and never again.&lt;/p&gt;
+&lt;p&gt;Versioning is off until you set &lt;code&gt;spec.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="declaring-the-version"&gt;Declaring the version&lt;/h2&gt;
+&lt;p&gt;The controller needs to know &lt;em&gt;what version is currently being deployed&lt;/em&gt;. There are
+three ways to declare it; pick by &lt;strong&gt;where the version lives&lt;/strong&gt;.&lt;/p&gt;</description></item></channel></rss>

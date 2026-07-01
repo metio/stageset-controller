@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Tenancy on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/tenancy/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/tenancy/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/tenancy/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/tenancy/</id><entry><title type="html">Multi-cluster and tenancy</title><link href="https://stageset.projects.metio.wtf/security/multi-cluster/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/?utm_source=atom_feed" rel="related" type="text/html" title="RBACDenied"/><id>https://stageset.projects.metio.wtf/security/multi-cluster/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Impersonation, watch scoping, single-tenant cluster-admin, and remote clusters.</blockquote><p>There are two ways to run the controller, and they map onto two different trust
+models. Pick the one that matches your cluster:</p>
+<ul>
+<li><strong>Multi-tenant</strong> — the controller holds no write access of its own and applies
+every <code>StageSet</code> as that <code>StageSet</code>&rsquo;s <code>serviceAccountName</code>. Each tenant&rsquo;s RBAC
+bounds what its releases can touch. This is the chart default.</li>
+<li><strong>Single-tenant</strong> — the cluster has one operator, so per-tenant isolation buys
+nothing. Run the controller under its own identity bound to <code>cluster-admin</code> and
+skip impersonation entirely — the model Flux&rsquo;s <code>helm-controller</code> uses in its
+default install.</li>
+</ul>
+<p>The two sections below set each one up. The optional
+<a href="#scoping-the-controller-to-a-namespace-set">watch scoping</a>
+ narrows <em>which</em>
+namespaces a multi-tenant controller sees.</p>
+<h2 id="tenant-serviceaccounts-multi-tenant">Tenant ServiceAccounts (multi-tenant)</h2>
+<p>The controller never applies your manifests as itself. Set <code>serviceAccountName</code>
+and every operation for that <code>StageSet</code> — build, apply, prune, actions — runs as
+that ServiceAccount. The <code>StageSet</code> can do exactly what the SA&rsquo;s RBAC permits, and
+nothing more.</p>
+<p>On the local cluster the controller assumes the tenant identity by minting a
+short-lived <a href="https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-request-v1/">TokenRequest</a>
+
+token for the named ServiceAccount and authenticating as it. That needs only
+<code>create</code> on <code>serviceaccounts/token</code> in the controller&rsquo;s ClusterRole — the powerful
+<code>impersonate</code> verb is not granted. The token is cached per ServiceAccount and
+re-minted as it nears expiry.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer   </span><span class="w"> </span><span class="c"># all writes impersonate this SA</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-app</span><span class="w">
+</span></span></span></code></pre></div><p>Grant the SA only the rights that release needs:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">rbac.authorization.k8s.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">RoleBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">roleRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">apiGroup</span><span class="p">:</span><span class="w"> </span><span class="l">rbac.authorization.k8s.io</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ClusterRole</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">edit</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">subjects</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ServiceAccount</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span></code></pre></div><p>This is the multi-tenancy model: isolation comes from each <code>StageSet</code> being bounded
+by its tenant SA, not from the controller&rsquo;s own grant — by default the chart gives
+the controller <code>create</code> on <code>serviceaccounts/token</code> and read access, no blanket write
+and no <code>impersonate</code>. A <code>StageSet</code> with no <code>serviceAccountName</code>, or one bound to a
+too-narrow SA, fails closed rather than escalating.</p>
+<h2 id="single-tenant-cluster-admin">Single-tenant cluster-admin</h2>
+<p>On a cluster with a single operator, per-<code>StageSet</code> tenant identities are friction
+with no payoff — there is no other tenant to isolate from. Run the controller the way
+Flux&rsquo;s <code>helm-controller</code> runs by default: under its own ServiceAccount, bound to
+the built-in <code>cluster-admin</code> ClusterRole. <code>StageSet</code>s then omit <code>serviceAccountName</code>
+and apply as the controller, which can write any kind cluster-wide.</p>
+<p>Turn it on with one Helm value:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">rbac</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">clusterAdmin</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">     </span><span class="c"># bind the controller SA to cluster-admin</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm --namespace stageset-system upgrade --install stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://ghcr.io/metio/helm-charts/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set rbac.clusterAdmin<span class="o">=</span><span class="nb">true</span>
+</span></span></code></pre></div><p><code>StageSet</code>s then need nothing tenancy-related — they apply directly:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform-app   </span><span class="w"> </span><span class="c"># applied by the controller&#39;s cluster-admin identity</span><span class="w">
+</span></span></span></code></pre></div><p>When <code>serviceAccountName</code> is unset and no <code>kubeConfig</code> is given, the controller
+applies with its own client — so the <code>cluster-admin</code> binding is what lets those
+<code>StageSet</code>s write. The trade-off: every <code>StageSet</code> on the cluster has full write
+access, so this is for single-tenant clusters only. Leave <code>rbac.clusterAdmin</code> at its
+default <code>false</code> and give each <code>StageSet</code> a <a href="#tenant-serviceaccounts-multi-tenant">tenant ServiceAccount</a>
+
+whenever more than one team shares the cluster. The two mix — a cluster-admin controller
+honors <code>serviceAccountName</code> on any <code>StageSet</code> that sets it, dropping to that SA&rsquo;s
+rights for that release.</p>
+<h2 id="scoping-the-controller-to-a-namespace-set">Scoping the controller to a namespace set</h2>
+<p>By default the controller watches every namespace. To run one controller per
+tenant-group instead — disjoint deployments that each see only their own
+namespaces — set <code>controller.watchNamespaces</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">watchNamespaces</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">team-b</span><span class="w">
+</span></span></span></code></pre></div><p>This does two things together:</p>
+<ul>
+<li><strong>Cache scoping.</strong> The manager&rsquo;s informers only observe <code>StageSet</code>s and sources
+in the listed namespaces. Resources elsewhere never enter the cache, so the
+controller cannot act on them even if RBAC would allow it.</li>
+<li><strong>RBAC pivot.</strong> The chart stops binding the tenant ClusterRole cluster-wide and
+instead renders one <code>RoleBinding</code> per listed namespace — defense in depth, so the
+apiserver also refuses out-of-scope calls. (The cluster-scoped webhook-caBundle
+grant stays a <code>ClusterRoleBinding</code>, since a <code>ValidatingWebhookConfiguration</code> is
+not namespaced.)</li>
+</ul>
+<p>Run several releases with disjoint <code>watchNamespaces</code> lists to shard the cluster
+across independent controller instances. Combine it with impersonation for the
+tightest setup: each instance sees only its namespaces, and each <code>StageSet</code> is
+bounded by its tenant SA.</p>
+<h2 id="remote-clusters">Remote clusters</h2>
+<p>Point a <code>StageSet</code> at another cluster with <code>kubeConfig</code>, referencing a Secret that
+holds a kubeconfig. The controller authenticates to the remote cluster with the
+identity in that kubeconfig — token minting is local-cluster only, since a token
+minted on the controller&rsquo;s cluster carries the wrong issuer and audience for a
+remote apiserver. When <code>serviceAccountName</code> is also set, the controller layers
+classic header impersonation onto the kubeconfig identity, so the remote apply runs
+as that ServiceAccount on the remote cluster.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kubeConfig</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eu-kubeconfig</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># key defaults to &#34;value&#34; (the Flux convention); set it to override</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-app</span><span class="w">
+</span></span></span></code></pre></div><p>The Secret is read with the controller&rsquo;s own identity — connecting to the target
+cluster is the controller&rsquo;s job — and the kubeconfig payload defaults to the
+<code>value</code> key.</p>
+<h3 id="cloud-provider-auth">Cloud-provider auth</h3>
+<p>Instead of storing a self-contained kubeconfig in a Secret, point <code>kubeConfig</code> at
+a <code>configMapRef</code> to authenticate through a cloud provider&rsquo;s workload identity. The
+cluster&rsquo;s API server address and CA come from the ConfigMap, and the bearer token
+is minted by the provider&rsquo;s IAM/STS on each request:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kubeConfig</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">configMapRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eks-auth</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eks-auth</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">data</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">provider: aws              # one of</span><span class="p">:</span><span class="w"> </span><span class="l">aws, azure, gcp, generic (required)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cluster</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eks         </span><span class="w"> </span><span class="c"># provider-specific cluster resource name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">https://XXXX.eks.amazonaws.com </span><span class="w"> </span><span class="c"># API server address</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ca.crt</span><span class="p">:</span><span class="w"> </span><span class="l">|                 </span><span class="w"> </span><span class="c"># PEM-encoded CA bundle (optional)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>-----<span class="l">BEGIN CERTIFICATE-----</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="l">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>-----<span class="l">END CERTIFICATE-----</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">audiences</span><span class="p">:</span><span class="w"> </span><span class="l">|              </span><span class="w"> </span><span class="c"># OIDC audiences for the SA token (optional)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="l">sts.amazonaws.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">deployer </span><span class="w"> </span><span class="c"># cloud identity to impersonate (optional)</span><span class="w">
+</span></span></span></code></pre></div><p>The ConfigMap is read with the controller&rsquo;s own identity. Which keys are required
+depends on the provider; the <code>provider</code> key is always required and must be one of
+<code>aws</code>, <code>azure</code>, <code>gcp</code>, or <code>generic</code>. When <code>serviceAccountName</code> is set in the
+ConfigMap, that ServiceAccount (in the StageSet&rsquo;s namespace) is the cloud identity
+whose workload-identity binding the provider exchanges for a cluster token; when
+absent, the controller&rsquo;s own ambient cloud credentials are used.</p>
+<p><strong>Trust model:</strong> the ConfigMap names the provider and the cluster, but the actual
+cloud credential is never in the cluster — it is minted on demand from the cloud&rsquo;s
+IAM/STS using the controller&rsquo;s (or the named ServiceAccount&rsquo;s) workload identity.
+A malformed ConfigMap (unknown <code>provider</code>, missing a required key, or a missing
+ConfigMap) fails the StageSet terminally with <code>reason: InvalidSpec</code>; admission
+only checks that <code>configMapRef.name</code> is set, because the ConfigMap contents are
+not visible to the webhook.</p>
+<p><code>secretRef</code> and <code>configMapRef</code> are mutually exclusive — set exactly one.</p>
+<p>Cross-namespace <code>sourceRef</code> and <code>dependsOn</code> references can be disabled
+cluster-wide with the controller&rsquo;s <code>--no-cross-namespace-refs</code> flag when you want
+hard namespace isolation.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/multi-cluster" term="multi-cluster" label="multi-cluster"/><category scheme="https://stageset.projects.metio.wtf/tags/tenancy" term="tenancy" label="tenancy"/><category scheme="https://stageset.projects.metio.wtf/tags/impersonation" term="impersonation" label="impersonation"/><category scheme="https://stageset.projects.metio.wtf/tags/rbac" term="rbac" label="rbac"/></entry></feed>

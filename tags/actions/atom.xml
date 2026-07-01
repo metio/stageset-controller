@@ -1,0 +1,520 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Actions on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/actions/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/actions/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/actions/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/actions/</id><entry><title type="html">Actions</title><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/defining-a-release/ready-checks/?utm_source=atom_feed" rel="related" type="text/html" title="Ready checks"/><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="related" type="text/html" title="StageFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/?utm_source=atom_feed" rel="related" type="text/html" title="Conflict policies"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><id>https://stageset.projects.metio.wtf/defining-a-release/actions/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-27T08:18:16+02:00</updated><content type="html"><![CDATA[<blockquote>Typed pre, post, and on-failure steps — jobs, HTTP gates, waits, patches, deletes, transient applies.</blockquote><p>Actions are typed steps the controller runs around a stage&rsquo;s apply. They turn an
+ordered apply into an orchestrated rollout — run a migration before the app, gate
+the stage on an external check, clean up on failure.</p>
+<p>A stage has three action hooks:</p>
+<ul>
+<li><strong><code>pre</code></strong> — run before the manifests are built and applied. A failure aborts the
+stage with nothing applied.</li>
+<li><strong><code>post</code></strong> — run after the apply is verified. The stage is <code>Ready</code> only if these
+all succeed.</li>
+<li><strong><code>onFailure</code></strong> — best-effort steps run on any failure from the apply onward.</li>
+</ul>
+<p>Each action has a <code>name</code>, optional <code>timeout</code> and <code>retries</code>, and <strong>exactly one</strong>
+operation type (<code>patch</code>, <code>http</code>, <code>wait</code>, <code>job</code>, <code>delete</code>, or <code>apply</code>) — enforced
+by the validating admission webhook. Actions within a hook run in list order.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">application</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">pre</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">db-migrate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-migrations   </span><span class="w"> </span><span class="c"># render &amp; await Jobs from this artifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">post</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">smoke-test</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">http</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://my-app.internal/healthz</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">expectedStatus</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="m">200</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">onFailure</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">page-oncall</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">http</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://alerts.internal/stageset-failed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">method</span><span class="p">:</span><span class="w"> </span><span class="l">POST</span><span class="w">
+</span></span></span></code></pre></div><h2 id="the-six-action-types">The six action types</h2>
+<h3 id="job"><code>job</code></h3>
+<p>Render and await Kubernetes Jobs from an artifact. The classic use is a database
+migration that must complete before the app is applied.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">db-migrate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./jobs</span><span class="w">
+</span></span></span></code></pre></div><h3 id="http"><code>http</code></h3>
+<p>Call an HTTP endpoint and gate on the response — an approval webhook, a smoke
+test, an external readiness probe. Hosts must be permitted by the controller&rsquo;s
+<code>--allowed-action-hosts</code>; loopback and link-local are always denied. <code>method</code>
+defaults to <code>POST</code>; <code>expectedStatus</code> defaults to any <code>2xx</code>. The body and headers
+can be read from a <code>Secret</code> so tokens never sit in the spec:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">smoke-test</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">http</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://my-app.internal/healthz</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">method</span><span class="p">:</span><span class="w"> </span><span class="l">GET</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">expectedStatus</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="m">200</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">headersFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gate-token      </span><span class="w"> </span><span class="c"># Secret name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">authorization    </span><span class="w"> </span><span class="c"># the key names the header; its value is the value</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bodyFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gate-payload      </span><span class="w"> </span><span class="c"># Secret name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">body               </span><span class="w"> </span><span class="c"># this key&#39;s value becomes the request body</span><span class="w">
+</span></span></span></code></pre></div><h3 id="wait"><code>wait</code></h3>
+<p>Block for a fixed duration, or until a <a href="https://github.com/google/cel-spec">CEL</a>
+
+expression holds against a target object.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">settle</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">wait</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">duration</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">until-available</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">wait</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.availableReplicas &gt;= 3&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">5m</span><span class="w">
+</span></span></span></code></pre></div><h3 id="patch"><code>patch</code></h3>
+<p>Patch an existing object — flip a feature flag, scale something, annotate. <code>type</code>
+is <code>merge</code> (default) for a strategic-merge patch, or <code>json6902</code> for a JSON Patch:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">enable-traffic</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">patch</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Service</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">merge              </span><span class="w"> </span><span class="c"># default; or json6902</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">patch</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">      { &#34;spec&#34;: { &#34;selector&#34;: { &#34;release&#34;: &#34;green&#34; } } }</span><span class="w">
+</span></span></span></code></pre></div><p>Instead of a single <code>name</code>, the target can carry a <code>selector</code> to patch <strong>every</strong>
+object of that kind whose labels match — applied to each in the namespace. Exactly
+one of <code>name</code> or <code>selector</code> is set.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">grow-data-volumes</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">patch</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">PersistentVolumeClaim</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">web           </span><span class="w"> </span><span class="c"># label your StatefulSet&#39;s volumeClaimTemplates so its PVCs carry this</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">patch</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">      { &#34;spec&#34;: { &#34;resources&#34;: { &#34;requests&#34;: { &#34;storage&#34;: &#34;100Gi&#34; } } } }</span><span class="w">
+</span></span></span></code></pre></div><p>This is the missing half of resizing a StatefulSet&rsquo;s storage: the
+<code>volumeClaimTemplates</code> are immutable and its existing per-ordinal PVCs aren&rsquo;t
+touched by the StatefulSet, so a selector patch grows the existing volumes (the
+StorageClass needs <code>allowVolumeExpansion: true</code>; storage can only grow, never
+shrink), while a <a href="#delete"><code>delete</code></a>
+ with <code>cascade: Orphan</code> plus a re-apply
+recreates the StatefulSet so new ordinals pick up the larger template. Some CSI
+drivers expand the filesystem only on pod restart, so this isn&rsquo;t always
+zero-downtime.</p>
+<h3 id="delete"><code>delete</code></h3>
+<p>Remove an existing object; a missing object counts as success.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">drop-old-job</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">delete</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">batch/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Job</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">legacy-migration</span><span class="w">
+</span></span></span></code></pre></div><p><code>cascade</code> controls the target&rsquo;s dependents, mirroring <code>kubectl delete --cascade</code>:</p>
+<ul>
+<li><code>Background</code> (default) — delete the object; garbage-collect dependents asynchronously.</li>
+<li><code>Foreground</code> — delete dependents first, then the object.</li>
+<li><code>Orphan</code> — delete the object but leave its dependents running (their controller <code>ownerReferences</code> are removed).</li>
+</ul>
+<p><strong>Recreating an object whose immutable fields changed, without downtime.</strong> Some
+fields can&rsquo;t be <code>apply</code>d in place — a StatefulSet&rsquo;s <code>serviceName</code> or
+<code>podManagementPolicy</code>, a Service&rsquo;s <code>clusterIP</code>, a Job&rsquo;s <code>template</code>. <code>cascade: Orphan</code>
+is the building block: orphan-delete the object so its pods keep running, then let
+the stage re-apply the new spec, which <strong>adopts</strong> the still-running pods by selector.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app         </span><span class="w"> </span><span class="c"># carries the new StatefulSet spec</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">preActions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orphan-old-sts</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">delete</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StatefulSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">cascade</span><span class="p">:</span><span class="w"> </span><span class="l">Orphan    </span><span class="w"> </span><span class="c"># keep the pods; the apply below re-adopts them</span><span class="w">
+</span></span></span></code></pre></div><p>Doing it in <code>preActions</code> of the same stage that re-applies keeps the orphan window
+tight — the pods are ownerless only between the delete and the stage&rsquo;s apply in the
+same reconcile. (A delete in one stage and the re-apply in a later stage works too,
+but the pods stay ownerless across the gate between them.)</p>
+<p>Caveats: adoption needs the new object&rsquo;s selector to still match the running pods,
+so this can&rsquo;t help when the <strong>selector itself</strong> is the immutable change. And
+<code>Orphan</code> keeps existing PVCs — changing a StatefulSet&rsquo;s <code>volumeClaimTemplates</code>
+this way leaves the old volumes in place for existing ordinals (it doesn&rsquo;t resize
+storage).</p>
+<h3 id="apply"><code>apply</code></h3>
+<p>Apply transient, rollout-scoped manifests that are <strong>not</strong> inventory-tracked and
+are never pruned — a maintenance page, a one-shot canary, a temporary config. With
+<code>wait: true</code> the action blocks until the applied objects report Ready (kstatus),
+bounded by the action <code>timeout</code>, so a following <code>patch</code> can repoint traffic only
+once the resource is serving.</p>
+<p>Because the applied objects are never pruned by the inventory diff, stand a
+resource up only for the duration of a rollout by pairing an <code>apply</code> in <code>pre</code> with
+a matching <code>delete</code> in <code>post</code>, and guard a mid-run crash with an <code>onFailure</code>
+delete:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pre</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stand-up-maintenance-page</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apply</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">maintenance-page   </span><span class="w"> </span><span class="c"># an ExternalArtifact holding a Pod + Service</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">wait</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">                  </span><span class="c"># block until it is serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">post</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">tear-down-maintenance-page</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">delete</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">maintenance-page</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">onFailure</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">tear-down-maintenance-page-on-failure</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">delete</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">maintenance-page</span><span class="w">
+</span></span></span></code></pre></div><p>The action ledger gates each step per pinned revision, so a retry or controller
+restart never re-applies or re-deletes the resource for the same snapshot.</p>
+<p>To run a <code>job</code> action only when the deployed version crosses a release boundary,
+see <a href="/gating/versioned-migrations/">versioned migrations</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/ready-checks" term="ready-checks" label="ready-checks"/></entry><entry><title type="html">MigrationFailed</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><id>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A migration&rsquo;s action failed; the run halts at that stage and retries with backoff, skipping already-completed actions.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationFailed</code>. The Message names the migration and the
+failed action. The run halts at the anchoring stage; <code>status.version</code> is not
+advanced. The controller retries with backoff.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration anchored before a stage ran an action that failed (a <code>job</code> that
+errored, an <code>http</code> call that returned an error, a <code>wait</code> that timed out, an
+<code>apply</code>/<code>patch</code>/<code>delete</code> the apiserver rejected). This reason is distinct from
+<code>StageFailed</code> so you can tell a migration failure from the stage&rsquo;s own apply.</p>
+<p>Retries are safe for the actions that already completed: the per-action ledger
+(<code>status.executedMigrationActions</code>, keyed by migration content digest) records
+each finished action, so a retry resumes at the failed action rather than
+re-running destructive work from the top.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Read the Message and the migration&rsquo;s Events (<code>MigrationStarted</code> /
+<code>MigrationFailed</code>) to find the failed action and its error.</li>
+<li>Fix the underlying cause (the target object, RBAC for the action, the endpoint
+an <code>http</code> action calls, the image a <code>job</code> runs).</li>
+<li>The migration re-attempts automatically on the next retry. After repeated
+failures it escalates to <a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+, which halts
+auto-retry — see that page for the manual-recovery step.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">StageFailed</title><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><id>https://stageset.projects.metio.wtf/runbooks/stagefailed/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage failed to fetch, build, apply, verify, or run an action; the run halts there.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=StageFailed</code>. The Message names the stage and the operation that failed (<code>fetch artifact</code>, <code>build</code>, <code>apply</code>, <code>verify</code>, a pre/post action, or <code>connect to target cluster</code>). The run halts at that stage; later stages keep their previous revisions.</p>
+<h2 id="cause">Cause</h2>
+<p>A stage failed during execution. By operation:</p>
+<ul>
+<li><strong>fetch artifact</strong> — the artifact URL was unreachable, or its bytes failed digest verification. Transient fetch failures (network, 5xx, source not ready) back off and retry. Terminal ones — a digest mismatch, an oversized tarball, or a URL the SSRF guard rejects — stop requeuing, since the same fetch would fail the same way; the next genuine watch event or interval tick re-runs.</li>
+<li><strong>apply RBAC / missing CRD</strong> — a <code>Forbidden</code> apply, or a manifest whose kind the apiserver doesn&rsquo;t know, is reported as <a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+ (terminal), not <code>StageFailed</code>.</li>
+<li><strong>build</strong> — kustomize build or post-build substitution failed (a missing <code>substituteFrom</code> source, an invalid patch, a malformed manifest).</li>
+<li><strong>apply</strong> — the server-side apply was rejected: an immutable-field conflict, or an <strong>RBAC denial</strong> under the impersonated <code>serviceAccountName</code>.</li>
+<li><strong>verify</strong> — applied objects did not become Ready within the stage timeout (kstatus).</li>
+<li><strong>pre/post action</strong> — a <code>patch</code>/<code>http</code>/<code>wait</code>/<code>job</code>/<code>delete</code>/<code>apply</code> action failed or timed out.</li>
+<li><strong>connect to target cluster</strong> — a <code>spec.kubeConfig</code> Secret was missing, unparseable, or used the unsupported cloud-provider <code>configMapRef</code>.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;     <span class="c1"># Message: which stage + operation</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller --tail<span class="o">=</span><span class="m">200</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># For apply/verify failures, inspect what the stage tried to apply:</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageinventory <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --selector stages.metio.wtf/stage-set<span class="o">=</span>&lt;name&gt;,stages.metio.wtf/stage<span class="o">=</span>&lt;stage&gt;
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>Match the operation in the Message:</p>
+<ul>
+<li><strong>fetch / digest</strong> — confirm the producer republished cleanly; a digest mismatch means the artifact changed mid-flight or is corrupt.</li>
+<li><strong>build</strong> — validate the manifests/patches locally; ensure every <code>substituteFrom</code> ConfigMap/Secret exists.</li>
+<li><strong>apply RBAC</strong> — grant the impersonated <code>serviceAccountName</code> (or the controller) the verbs it was denied; the Message names the resource.</li>
+<li><strong>apply immutable conflict</strong> — set a per-stage <a href="/defining-a-release/conflict-policies/"><code>conflictPolicy</code></a>
+ (or <code>force: true</code>, its blunt <code>Recreate</code>-everything form) so the controller deletes and recreates the conflicting object; for objects holding data (<code>PersistentVolumeClaim</code>/<code>PersistentVolume</code>) a <code>Recreate</code> rule additionally requires <code>allowDataLoss: true</code>. Alternatively, use content-hash-suffixed names so a change is a new object rather than a mutation.</li>
+<li><strong>verify timeout</strong> — raise the stage <code>timeout</code>, or fix why the workload is not becoming Ready.</li>
+<li><strong>action</strong> — read the action&rsquo;s error; for <code>http</code>, confirm the host is in <code>--allowed-action-hosts</code>.</li>
+</ul>
+<p>Retries re-run the same pinned snapshot idempotently — actions already recorded in the stage&rsquo;s ledger do not re-fire. See <a href="/defining-a-release/stages-and-sources/">stages and sources</a>
+ for how a stage resolves and applies.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Versioned migrations</title><link href="https://stageset.projects.metio.wtf/gating/versioned-migrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><id>https://stageset.projects.metio.wtf/gating/versioned-migrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-27T07:43:56+02:00</updated><content type="html"><![CDATA[<blockquote>Run migrations once, when the deployed version crosses a release boundary — inline, or sourced from a Flux artifact and shared across StageSets.</blockquote><p>Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of <a href="/defining-a-release/actions/">actions</a>
+ exactly when the
+deployed version steps over the boundary, and never again.</p>
+<p>Versioning is off until you set <code>spec.version</code>.</p>
+<h2 id="declaring-the-version">Declaring the version</h2>
+<p>The controller needs to know <em>what version is currently being deployed</em>. There are
+three ways to declare it; pick by <strong>where the version lives</strong>.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Source</th>
+					<th>The version lives…</th>
+					<th>Best for</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="#inline--versionvalue"><code>version.value</code></a>
+</td>
+					<td>on the <code>StageSet</code></td>
+					<td>environment-pinned versions, quick starts</td>
+			</tr>
+			<tr>
+					<td><a href="#from-a-rendered-object--versionfromobject"><code>version.fromObject</code></a>
+</td>
+					<td>inside the manifests</td>
+					<td><strong>any source, including JaaS</strong> — the recommended default</td>
+			</tr>
+			<tr>
+					<td><a href="#from-a-file-in-the-artifact--versionfromartifact"><code>version.fromArtifact</code></a>
+</td>
+					<td>a file in the artifact</td>
+					<td>Git/OCI/Bucket sources that can ship a <code>VERSION</code> file</td>
+			</tr>
+	</tbody>
+</table>
+<p>Whichever you choose, the resolved value is trimmed and parsed as semver (a leading
+<code>v</code> is accepted). A missing stage/object/file, an empty value, or an unparseable
+one fails terminally with the <code>InvalidVersion</code> reason (see its
+<a href="/runbooks/invalidversion/">runbook</a>
+) — a half-versioned system is worse than an
+unversioned one.</p>
+<h3 id="inline--versionvalue">Inline — <code>version.value</code></h3>
+<p>The <code>StageSet</code> author pins the version directly. Use this when the version is a
+property of the environment rather than of the content, or to get started quickly:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.1.0&#34;</span><span class="w">      </span><span class="c"># bump this when you cut a release</span><span class="w">
+</span></span></span></code></pre></div><p>The trade-off: the version is declared here, not carried by the content, so you
+bump it by editing the <code>StageSet</code>.</p>
+<h3 id="from-a-rendered-object--versionfromobject">From a rendered object — <code>version.fromObject</code></h3>
+<p>The recommended way to let the version travel with the content.
+<a href="https://kubernetes.io/docs/">Kubernetes</a>
+ has a standard place for an
+application&rsquo;s version: the <code>app.kubernetes.io/version</code> label. Well-formed manifests
+set it, so the version is already inside the manifests — <code>fromObject</code> reads it back.
+This works for every source kind, including a single-document renderer like
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ that has no room for a separate file.</p>
+<p>A StageSet has <strong>one</strong> version that all its stages converge on; <code>fromObject</code> only
+chooses <em>which</em> stage&rsquo;s rendered output to read it from. That stage is optional —
+omit it to read from the first (leading) stage, which carries the new version
+first.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># stage omitted → defaults to the first stage (here, app)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment     </span><span class="w"> </span><span class="c"># the object to read</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># fieldPath omitted → reads metadata.labels[&#39;app.kubernetes.io/version&#39;]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>The controller builds the <code>app</code> stage&rsquo;s manifests (the same render it applies),
+finds the <code>Deployment/web</code> object, and reads its <code>app.kubernetes.io/version</code> label.
+Because the label is part of the manifests, the version changes in lockstep with
+the content — no second file to keep in sync.</p>
+<p><strong>Reading a different field.</strong> Set <code>fieldPath</code> to a kubectl-style JSONPath that
+resolves to the bare version string. (It must be the version <em>only</em>; a JSONPath
+can&rsquo;t split an <code>image: web:2.1.0</code> value, so prefer the label.) <code>apiVersion</code> is
+optional and narrows the match when a <code>Kind</code>+<code>Name</code> pair would be ambiguous:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-meta</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">fieldPath</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;{.data.version}&#34;</span><span class="w">   </span><span class="c"># must resolve to a bare semver, e.g. 2.1.0</span><span class="w">
+</span></span></span></code></pre></div><p>This is the path the <a href="/get-started/jsonnet-to-rollout/">Jsonnet-to-rollout tutorial</a>
+
+uses: the snippet renders the version into the manifest&rsquo;s version label, and the
+StageSet reads it straight back.</p>
+<h3 id="from-a-file-in-the-artifact--versionfromartifact">From a file in the artifact — <code>version.fromArtifact</code></h3>
+<p>The version travels with the content as a <strong>dedicated file</strong> containing a single
+semver. This fits <strong>Git/OCI/Bucket</strong> sources, where you can ship an extra file
+beside the manifests. (It does <em>not</em> fit JaaS <code>rendered</code> output, which is a single
+<code>rendered.json</code>; use <code>fromObject</code> there.)</p>
+<p><strong>Who writes it, and where:</strong> the artifact&rsquo;s producer. For a Git source, commit a
+<code>VERSION</code> file in the repo; for an OCI/Bucket artifact, include it in the pushed
+tree. The file lives at <code>path</code> inside the named stage&rsquo;s artifact, relative to the
+artifact root:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl"># VERSION — committed alongside the manifests it versions
+</span></span><span class="line"><span class="cl">2.1.0
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromArtifact</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app         </span><span class="w"> </span><span class="c"># which stage&#39;s artifact carries the file</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">VERSION      </span><span class="w"> </span><span class="c"># the file&#39;s path inside that artifact (cleaned; no leading ./)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>The controller fetches the <code>app</code> stage&rsquo;s artifact and reads the file at <code>path</code>.</p>
+<h2 id="declaring-migrations">Declaring migrations</h2>
+<p>Each migration names the boundary it crosses (<code>to</code>, optionally <code>from</code>), the stage
+it anchors before, and the actions to run:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromArtifact</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">VERSION</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill-ledger-2-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1.*&#34;</span><span class="w">               </span><span class="c"># optional: only when coming from a 1.x</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w">   </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">             </span><span class="c"># the boundary this migration crosses</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app              </span><span class="w"> </span><span class="c"># runs before this stage&#39;s pre-actions</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ledger-backfill-job</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p><code>to</code> is an <strong>exact</strong> target version, the same kind of value <code>version.value</code>
+holds. <code>from</code> is a semver <strong>constraint</strong>, not an exact version: it is matched
+against the currently deployed version with the same grammar Helm and
+<code>flux</code>-style ranges use. So <code>from</code> accepts ranges like <code>&gt;=1.0.0, &lt;2.0.0</code>,
+<code>1.x</code>, or <code>^1.2</code> — the migration fires only when the deployed version satisfies
+that constraint <em>and</em> the run crosses up to <code>to</code>. A <code>from</code> of <code>&gt;=1.0.0, &lt;2.0.0</code>
+with <code>to: &quot;2.0.0&quot;</code> runs the migration on any 1.x → 2.0.0 transition; omit
+<code>from</code> to fire on every crossing up to <code>to</code> regardless of where you start.</p>
+<p>When the deployed version crosses from a <code>1.x</code> into <code>2.0.0</code>, the <code>backfill</code> job
+runs once, anchored before the <code>app</code> stage. The controller tracks progress so a
+retry doesn&rsquo;t re-run a completed migration:</p>
+<ul>
+<li><code>status.version</code> — the deployed version, written only after a fully successful
+run.</li>
+<li><code>status.pendingMigrations</code> — migrations the next run will execute.</li>
+<li><code>status.executedMigrations</code> / <code>status.executedMigrationActions</code> — the in-flight
+ledgers (per migration, and per action within a migration) for the current
+transition, cleared once the version advances.</li>
+</ul>
+<p>Migrations emit <code>MigrationStarted</code> / <code>MigrationCompleted</code> events. A downgrade that
+would skip a required migration is refused with the <code>DowngradeRequiresMigration</code>
+reason — see its <a href="/runbooks/downgraderequiresmigration/">runbook</a>
+. For the
+failure path, see <a href="#when-a-migration-fails">When a migration fails</a>
+.</p>
+<p><strong>First adoption (baselining).</strong> The first time a StageSet sets <code>spec.version</code> and
+has no <code>status.version</code> yet, the controller records the version and runs <strong>no</strong>
+migrations — an existing deployment is assumed to already be at that version. It
+emits a <code>MigrationsBaselined</code> event so you can tell this apart from a real no-op
+and confirm the deployment really is at the recorded version. Migrations run only
+on a subsequent transition that crosses their boundary.</p>
+<h2 id="sharing-one-ladder-across-stagesets">Sharing one ladder across StageSets</h2>
+<p>Deploying the same application into many namespaces — one <code>StageSet</code> each — means
+the same migration ladder in every one. Copying a destructive ladder into N specs
+and keeping them in sync is exactly where a missed edit becomes a data-loss
+incident. Author the ladder <strong>once</strong> as an artifact and point every StageSet at it
+with <code>migrationsSourceRef</code> instead:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrationsSourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path: migrations          # optional</span><span class="p">:</span><span class="w"> </span><span class="l">a file or directory within the artifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p><code>migrationsSourceRef</code> is <strong>mutually exclusive</strong> with the inline <code>spec.migrations</code>.
+The artifact holds the ladder as YAML or JSON — each <code>.yaml</code>, <code>.yml</code>, or <code>.json</code>
+file is one migration or a list of them, parsed strictly so a misspelled field is
+rejected rather than ignored. The ladder lives once in the registry; each
+namespace carries only a small Flux source plus an identical StageSet, and a new
+release is a push to the registry, not an edit to N specs.</p>
+<p>Sourcing reuses the same fetch path as stage sources — revision pinning, the SSRF
+guard, and the size caps all apply. A source that is not yet ready holds the
+transition (the version is not advanced) rather than running a half-loaded ladder;
+a malformed or oversized artifact fails terminally with the
+<code>MigrationArtifactInvalid</code> reason — see its
+<a href="/runbooks/migrationartifactinvalid/">runbook</a>
+.</p>
+<h3 id="anchoring-a-shared-ladder">Anchoring a shared ladder</h3>
+<p>A migration&rsquo;s <code>stage</code> says <em>where in the rollout it runs</em> — before that stage&rsquo;s
+pre-actions. A ladder shared across StageSets can&rsquo;t hard-code one StageSet&rsquo;s stage
+names, so give each stage an <strong>anchor role</strong> and let migrations reference the role:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prepare</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">migrationAnchor</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre    </span><span class="w"> </span><span class="c"># this stage plays the &#34;db-pre&#34; role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rollout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>A migration in the shared ladder anchors to <code>db-pre</code> and resolves to whichever
+stage declares that role — <code>prepare</code> here, <code>db-migrate</code> in another StageSet — so
+one ladder travels across differently-named stages. A migration&rsquo;s <code>stage</code> resolves
+to the stage whose <code>migrationAnchor</code> matches, then by stage <code>name</code>; omit it to
+anchor before the first stage. Anchor keys are unique across names and roles. A
+migration that resolves to no stage fails closed with <code>MigrationStageNotFound</code>
+(see its <a href="/runbooks/migrationstagenotfound/">runbook</a>
+) — never silently skipped.</p>
+<h2 id="verifying-and-pinning-the-source">Verifying and pinning the source</h2>
+<p>A sourced ladder runs remote-authored, destructive instructions, so the controller
+can require the source prove its provenance and immutability before running:</p>
+<ul>
+<li><strong>Signature verification.</strong> Configure <code>spec.verify</code> (cosign or notation) on the
+Flux source. A source whose verification <em>fails</em> is always refused
+(<code>MigrationSourceNotVerified</code>). The controller flag
+<code>--require-verified-migration-sources</code> additionally refuses a source that
+configures no verification at all. Off by default; recommended in production.</li>
+<li><strong>Immutable pinning.</strong> Pin the source to a digest (<code>OCIRepository</code>
+<code>spec.ref.digest</code>) or commit (<code>GitRepository</code> <code>spec.ref.commit</code>) so a tag
+overwrite can&rsquo;t auto-roll new destructive content. A mutable-pinned source emits
+a <code>Warning</code> event; <code>--require-pinned-migration-sources</code> makes it a hard refusal
+(<code>MigrationSourceNotPinned</code>). Off by default; recommended in production.</li>
+</ul>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">digest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:…           </span><span class="w"> </span><span class="c"># immutable; bump deliberately to ship new migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">verify</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">cosign</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchOIDCIdentity</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subject</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github.com/your-org/.+$</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># url, interval, …</span><span class="w">
+</span></span></span></code></pre></div><p>Two further guards apply to a sourced ladder: it is always resolved in the
+StageSet&rsquo;s own namespace (a cross-namespace <code>migrationsSourceRef</code> is rejected), and
+an <code>http</code> action requires the controller&rsquo;s <code>--allowed-action-hosts</code> allowlist to be
+set, so remote-authored calls cannot reach arbitrary in-cluster endpoints.</p>
+<h2 id="when-a-migration-fails">When a migration fails</h2>
+<p>A failed migration halts the run at its anchoring stage under the
+<code>MigrationFailed</code> reason — distinct from a stage&rsquo;s own <code>StageFailed</code> — then retries
+with backoff. Retries are safe: the per-action ledger records each completed
+action keyed by the migration&rsquo;s content digest, so a retry resumes at the failed
+action rather than re-running a destructive one.</p>
+<p>After repeated failures the migration escalates to <code>MigrationDirty</code>: the controller
+stops auto-retrying destructive work against an uncertain state. Fix the cause,
+then clear the halt with a manual reconcile:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset orders <span class="se">\
+</span></span></span><span class="line"><span class="cl">  reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span> --overwrite
+</span></span></code></pre></div><p>See the <a href="/runbooks/migrationfailed/"><code>MigrationFailed</code></a>
+ and
+<a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+ runbooks.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/></entry></feed>

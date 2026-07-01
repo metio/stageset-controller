@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Runbooks on StageSet Controller</title><link>https://stageset.projects.metio.wtf/runbooks/</link><description>Recent content in Runbooks on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/runbooks/index.xml" rel="self" type="application/rss+xml"/><item><title>ArtifactNotFound</title><link>https://stageset.projects.metio.wtf/runbooks/artifactnotfound/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/artifactnotfound/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=ArtifactNotFound&lt;/code&gt;. Transient: the controller requeues in case the artifact appears.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;sourceRef&lt;/code&gt; resolves to &lt;strong&gt;no &lt;code&gt;ExternalArtifact&lt;/code&gt;&lt;/strong&gt;. Either:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;a &lt;strong&gt;direct&lt;/strong&gt; &lt;code&gt;sourceRef&lt;/code&gt; (&lt;code&gt;kind: ExternalArtifact&lt;/code&gt;, the default) names an object that does not exist in the target namespace; or&lt;/li&gt;
+&lt;li&gt;a &lt;strong&gt;producer&lt;/strong&gt; &lt;code&gt;sourceRef&lt;/code&gt; (e.g. &lt;code&gt;kind: JsonnetSnippet&lt;/code&gt;) exists, but no &lt;code&gt;ExternalArtifact&lt;/code&gt; carries a &lt;code&gt;spec.sourceRef&lt;/code&gt; back-pointer to it yet — the producer has not created its artifact object.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message names the missing ref&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get externalartifact
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;For a producer ref, confirm the producer object exists and that it is configured to publish an &lt;code&gt;ExternalArtifact&lt;/code&gt; (not only serve over HTTP):&lt;/p&gt;</description></item><item><title>AwaitingPromotion</title><link>https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=AwaitingPromotion&lt;/code&gt;. The Message names the stage waiting to be promoted. &lt;code&gt;status.stages[].promotionState&lt;/code&gt; shows &lt;code&gt;phase: AwaitingManual&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is &lt;strong&gt;not a failure&lt;/strong&gt; — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;&lt;code&gt;spec.stages[].promotion.requireManualPromotion&lt;/code&gt;&lt;/a&gt;
+ holds the rollout there until an operator promotes it. This is the &amp;ldquo;hold before prod&amp;rdquo; gate: a human confirms the stage is good (ideally after reviewing metrics) before the rollout advances.&lt;/p&gt;</description></item><item><title>BudgetExhausted</title><link>https://stageset.projects.metio.wtf/runbooks/budgetexhausted/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/budgetexhausted/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=BudgetExhausted&lt;/code&gt; (or, for an already-deployed StageSet, &lt;code&gt;READY=True&lt;/code&gt; with a &lt;code&gt;status.budgetFreeze&lt;/code&gt; and the message prefixed &lt;code&gt;Deployed;&lt;/code&gt;). &lt;code&gt;status.budgetFreeze&lt;/code&gt; records the last observed remaining budget, the freeze and resume thresholds, and when the freeze began.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is &lt;strong&gt;not a failure&lt;/strong&gt; — it is the &lt;a href="https://stageset.projects.metio.wtf/gating/error-budget/"&gt;error-budget freeze&lt;/a&gt;
+ working as configured. The metric source named in &lt;code&gt;spec.errorBudget.source&lt;/code&gt; returned a remaining-budget value below &lt;code&gt;freezeThreshold&lt;/code&gt;, so new-revision rollouts are held until the budget recovers. This is the Google SRE error-budget policy: when the budget is spent, stop shipping feature changes until reliability recovers.&lt;/p&gt;</description></item><item><title>BudgetSourceUnavailable</title><link>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;BudgetSourceUnavailable&lt;/code&gt; Warning event, the &lt;code&gt;stageset_metric_source_errors_total&lt;/code&gt; counter rising, and — when a gate&amp;rsquo;s &lt;code&gt;onSourceError&lt;/code&gt; is &lt;code&gt;Hold&lt;/code&gt; — &lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=BudgetSourceUnavailable&lt;/code&gt;. With &lt;code&gt;onSourceError: Allow&lt;/code&gt; the rollout proceeds and only the event and metric fire, so the condition may not show the reason.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A metric source (the &lt;a href="https://stageset.projects.metio.wtf/gating/error-budget/"&gt;error-budget freeze&lt;/a&gt;
+ or a &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;promotion analysis&lt;/a&gt;
+ check) was unreachable or returned no usable scalar: the Prometheus endpoint was down or returned a non-2xx, the query evaluated to an error, an empty or multi-sample vector, or &lt;code&gt;NaN&lt;/code&gt; (the shape a wrong query takes). This is treated as &lt;em&gt;transient&lt;/em&gt; — the controller keeps retrying.&lt;/p&gt;</description></item><item><title>Controller pod down</title><link>https://stageset.projects.metio.wtf/runbooks/controller-pod-down/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/controller-pod-down/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;stageset-controller&lt;/code&gt; pod is &lt;code&gt;NotReady&lt;/code&gt;; the &lt;code&gt;StageSetControllerPodDown&lt;/code&gt; alert
+fires. While no replica is Ready, StageSets are not reconciled and the
+&lt;a href="https://kubernetes.io/docs/"&gt;Kubernetes&lt;/a&gt;
+ admission webhook may reject &lt;code&gt;StageSet&lt;/code&gt;
+writes (&lt;code&gt;failurePolicy: Fail&lt;/code&gt;).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;a crash-looping container (bad config flag, missing RBAC, panic),&lt;/li&gt;
+&lt;li&gt;the node draining or out of resources,&lt;/li&gt;
+&lt;li&gt;a failing readiness probe (&lt;code&gt;/readyz&lt;/code&gt; on &lt;code&gt;--health-probe-bind-address&lt;/code&gt;),&lt;/li&gt;
+&lt;li&gt;the leader-election lease unobtainable.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system get pods --selector app.kubernetes.io/name&lt;span class="o"&gt;=&lt;/span&gt;stageset-controller
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system describe pod &amp;lt;pod&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs &amp;lt;pod&amp;gt; --previous --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Look for flag-parse errors at startup, RBAC &lt;code&gt;Forbidden&lt;/code&gt; on the controller&amp;rsquo;s own
+&lt;code&gt;ServiceAccount&lt;/code&gt;, or OOMKills.&lt;/p&gt;</description></item><item><title>DependencyNotReady</title><link>https://stageset.projects.metio.wtf/runbooks/dependencynotready/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/dependencynotready/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=DependencyNotReady&lt;/code&gt;. Transient: the controller requeues at &lt;code&gt;spec.retryInterval&lt;/code&gt; (or &lt;code&gt;spec.interval&lt;/code&gt;).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A StageSet listed in &lt;code&gt;spec.dependsOn&lt;/code&gt; is not &lt;code&gt;Ready&lt;/code&gt; at its observed generation, so this StageSet holds before doing any work. Semantics match kustomize-controller: a dependency is satisfied only when its &lt;code&gt;Ready=True&lt;/code&gt; &lt;strong&gt;and&lt;/strong&gt; its &lt;code&gt;status.observedGeneration&lt;/code&gt; equals its current generation (so a freshly-edited dependency mid-reconcile does not count as ready).&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message names the dependency&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageset &amp;lt;dependency&amp;gt; &lt;span class="c1"&gt;# is it Ready?&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;dependency&amp;gt; &lt;span class="c1"&gt;# why not?&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Resolve the dependency&amp;rsquo;s own Ready condition first (follow its runbook). Once it reports &lt;code&gt;Ready=True&lt;/code&gt; at its current generation, this StageSet proceeds on the next reconcile. If the dependency is intentionally &lt;a href="https://stageset.projects.metio.wtf/runbooks/suspended/"&gt;suspended&lt;/a&gt;
+, this StageSet waits indefinitely by design — remove the &lt;code&gt;dependsOn&lt;/code&gt; entry or resume the dependency.&lt;/p&gt;</description></item><item><title>DowngradeRequiresMigration</title><link>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=DowngradeRequiresMigration&lt;/code&gt;. Terminal: the run does not requeue until the desired version is at or above &lt;code&gt;status.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The desired version (&lt;code&gt;spec.version&lt;/code&gt;) is &lt;strong&gt;lower&lt;/strong&gt; than the version the controller last recorded as deployed (&lt;code&gt;status.version&lt;/code&gt;). Downgrades are refused by default: &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migrations&lt;/a&gt;
+ are forward-only action ladders, and replaying upgrade migrations in reverse is how data gets destroyed. The controller does not silently run a downgrade.&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageset &amp;lt;name&amp;gt; --output &lt;span class="nv"&gt;jsonpath&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;{.status.version}&amp;#39;&lt;/span&gt; &lt;span class="c1"&gt;# deployed&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# desired: read spec.version.value, or the version file the artifact carries&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Pick the intended direction:&lt;/p&gt;</description></item><item><title>InvalidSpec</title><link>https://stageset.projects.metio.wtf/runbooks/invalidspec/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/invalidspec/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=InvalidSpec&lt;/code&gt;. The Message names the offending field or action. Terminal: the controller does not requeue until the spec changes.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The spec failed validation that the CRD schema cannot express cheaply, normally one of:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;an &lt;strong&gt;action sets zero or more than one verb&lt;/strong&gt; — each action must set exactly one of &lt;code&gt;patch&lt;/code&gt;, &lt;code&gt;http&lt;/code&gt;, &lt;code&gt;wait&lt;/code&gt;, &lt;code&gt;job&lt;/code&gt;, &lt;code&gt;delete&lt;/code&gt;, &lt;code&gt;apply&lt;/code&gt; (see &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+);&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;spec.migrations&lt;/code&gt; without &lt;code&gt;spec.version&lt;/code&gt;&lt;/strong&gt;, or a migration anchored to a stage name that does not exist (see &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+);&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;spec.version&lt;/code&gt; does not name exactly one source&lt;/strong&gt; — set one of &lt;code&gt;value&lt;/code&gt;, &lt;code&gt;fromObject&lt;/code&gt;, or &lt;code&gt;fromArtifact&lt;/code&gt;;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;spec.decryption.provider&lt;/code&gt; is not &lt;code&gt;sops&lt;/code&gt;&lt;/strong&gt;, or a &lt;code&gt;secretRef&lt;/code&gt; is given without a &lt;code&gt;name&lt;/code&gt; (see &lt;a href="https://stageset.projects.metio.wtf/security/encryption/"&gt;encryption&lt;/a&gt;
+);&lt;/li&gt;
+&lt;li&gt;an &lt;strong&gt;invalid update window&lt;/strong&gt; — a malformed &lt;code&gt;schedule&lt;/code&gt;, &lt;code&gt;duration&lt;/code&gt;, or &lt;code&gt;timeZone&lt;/code&gt; (see &lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;update windows&lt;/a&gt;
+).&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The admission webhook normally rejects these at write time; seeing this on the object means the webhook was bypassed or disabled and the reconciler caught it.&lt;/p&gt;</description></item><item><title>InvalidVersion</title><link>https://stageset.projects.metio.wtf/runbooks/invalidversion/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/invalidversion/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=InvalidVersion&lt;/code&gt;. Terminal: the run does not requeue until the spec or the version file is fixed.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A version &lt;code&gt;spec.version&lt;/code&gt; (or a migration boundary) could not be resolved to a parseable &lt;a href="https://semver.org/"&gt;semver&lt;/a&gt;
+. The controller refuses to proceed rather than deploy a half-versioned system — a system whose recorded version is unknown is worse for migrations than an unversioned one. The Message names which input failed. By version source:&lt;/p&gt;</description></item><item><title>MigrationApprovalPending</title><link>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationApprovalPending&lt;/code&gt;. The Message names the target
+version and how many migrations await approval. &lt;code&gt;status.pendingMigrations&lt;/code&gt; lists
+exactly what will run. Nothing is applied and &lt;code&gt;status.version&lt;/code&gt; is not advanced —
+this is an intentional hold, not an error.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.version.requireApproval&lt;/code&gt; is set, and the current transition has pending
+migrations that have not been approved. So destructive migrations don&amp;rsquo;t run
+unattended, the whole rollout (app and migrations) waits until an operator
+authorizes the target version.&lt;/p&gt;</description></item><item><title>MigrationArtifactInvalid</title><link>https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationArtifactInvalid&lt;/code&gt;. The Message names the file and
+the parse or validation error. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced — the
+transition is held until the artifact is fixed and republished.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The StageSet sources its migration ladder from &lt;code&gt;spec.migrationsSourceRef&lt;/code&gt;, and
+the fetched artifact could not be turned into a valid ladder. Each
+&lt;code&gt;.yaml&lt;/code&gt;/&lt;code&gt;.yml&lt;/code&gt;/&lt;code&gt;.json&lt;/code&gt; file in the artifact (under the optional &lt;code&gt;path&lt;/code&gt;) must be a
+YAML or JSON document that is either a list of migrations or a single migration.
+Parsing is strict — a misspelled field is rejected rather than silently dropped,
+because a destructive ladder must not run a half-understood definition.&lt;/p&gt;</description></item><item><title>MigrationCoverageMissing</title><link>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationCoverageMissing&lt;/code&gt;. The Message names the boundary
+(e.g. &lt;code&gt;1.4.0 → 2.0.0&lt;/code&gt;). &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.version.requireMigrationCoverage&lt;/code&gt; is set, and the version transition crosses
+a &lt;strong&gt;major-version boundary&lt;/strong&gt; (the major component increased) with &lt;strong&gt;no migration&lt;/strong&gt;
+selected for it. A major bump usually implies breaking changes that need a
+migration, so rather than advance silently the controller fails closed and asks
+for an explicit decision.&lt;/p&gt;
+&lt;p&gt;Minor and patch transitions are never gated by this — only a major boundary.&lt;/p&gt;</description></item><item><title>MigrationDirty</title><link>https://stageset.projects.metio.wtf/runbooks/migrationdirty/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationdirty/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationDirty&lt;/code&gt;. The Message names the migration that keeps
+failing. The controller has &lt;strong&gt;stopped auto-retrying&lt;/strong&gt; — there is no backoff
+requeue — and &lt;code&gt;status.version&lt;/code&gt; is not advanced. &lt;code&gt;status.migrationFailureCount&lt;/code&gt; is
+at the threshold.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration failed repeatedly (the consecutive-failure threshold). Rather than
+keep re-attempting destructive work against an uncertain state, the controller
+halts and waits for a human — the golang-migrate &amp;ldquo;dirty&amp;rdquo; / Flyway &amp;ldquo;repair&amp;rdquo; model.
+A persistently-failing destructive migration usually means something needs
+fixing by hand (a bad action, a half-applied change, missing RBAC, a broken
+target) that retrying cannot resolve.&lt;/p&gt;</description></item><item><title>MigrationFailed</title><link>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationFailed&lt;/code&gt;. The Message names the migration and the
+failed action. The run halts at the anchoring stage; &lt;code&gt;status.version&lt;/code&gt; is not
+advanced. The controller retries with backoff.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration anchored before a stage ran an action that failed (a &lt;code&gt;job&lt;/code&gt; that
+errored, an &lt;code&gt;http&lt;/code&gt; call that returned an error, a &lt;code&gt;wait&lt;/code&gt; that timed out, an
+&lt;code&gt;apply&lt;/code&gt;/&lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt; the apiserver rejected). This reason is distinct from
+&lt;code&gt;StageFailed&lt;/code&gt; so you can tell a migration failure from the stage&amp;rsquo;s own apply.&lt;/p&gt;</description></item><item><title>MigrationSourceNotPinned</title><link>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationSourceNotPinned&lt;/code&gt;. The Message says the migrations
+source is pinned to a mutable tag/branch and &lt;code&gt;--require-pinned-migration-sources&lt;/code&gt;
+is set. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced — the migration ladder does not run.&lt;/p&gt;
+&lt;p&gt;When the flag is &lt;em&gt;off&lt;/em&gt;, this does not block: the ladder runs, but a
+&lt;code&gt;Warning MigrationSourceMutable&lt;/code&gt; event is emitted so the auto-rollout risk stays
+visible.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration ladder sourced from &lt;code&gt;spec.migrationsSourceRef&lt;/code&gt; runs remote-authored,
+destructive instructions. If the source is pinned to a &lt;strong&gt;mutable&lt;/strong&gt; revision — an
+&lt;code&gt;OCIRepository&lt;/code&gt; &lt;code&gt;spec.ref.tag&lt;/code&gt;/&lt;code&gt;spec.ref.semver&lt;/code&gt;, or a &lt;code&gt;GitRepository&lt;/code&gt;
+&lt;code&gt;spec.ref.branch&lt;/code&gt;/&lt;code&gt;tag&lt;/code&gt;/&lt;code&gt;semver&lt;/code&gt; — an upstream overwrite of that tag/branch
+silently changes what runs on the next source reconcile. An immutable pin
+(&lt;code&gt;OCIRepository&lt;/code&gt; &lt;code&gt;spec.ref.digest&lt;/code&gt; or &lt;code&gt;GitRepository&lt;/code&gt; &lt;code&gt;spec.ref.commit&lt;/code&gt;) removes
+that auto-rollout window.&lt;/p&gt;</description></item><item><title>MigrationSourceNotVerified</title><link>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationSourceNotVerified&lt;/code&gt;. The Message says either
+verification failed (&lt;code&gt;SourceVerified=False&lt;/code&gt;) or that verification is required but
+not configured. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced — the migration ladder does
+not run.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;Sourcing a migration ladder from &lt;code&gt;spec.migrationsSourceRef&lt;/code&gt; runs remote-authored,
+destructive instructions, so the controller can require they be provenance-verified
+before executing. Verification state comes from the source CR&amp;rsquo;s
+&lt;code&gt;status.conditions[SourceVerified]&lt;/code&gt;, which Flux source-controller sets from the
+source&amp;rsquo;s &lt;code&gt;spec.verify&lt;/code&gt; (cosign or notation):&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;SourceVerified=False&lt;/code&gt;&lt;/strong&gt; — the source configured &lt;code&gt;spec.verify&lt;/code&gt;, but the
+artifact&amp;rsquo;s signature did not pass. Always refused, regardless of flags — a
+tampered or unsigned-by-the-expected-identity artifact must not run.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;No &lt;code&gt;SourceVerified&lt;/code&gt; condition + &lt;code&gt;--require-verified-migration-sources&lt;/code&gt;&lt;/strong&gt; — the
+controller requires verification, but the source configures none.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;Configure signature verification on the source. For an &lt;code&gt;OCIRepository&lt;/code&gt;:&lt;/p&gt;</description></item><item><title>MigrationStageNotFound</title><link>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationStageNotFound&lt;/code&gt;. The Message names the migration
+and the anchor value it could not resolve. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced —
+the transition is held until the anchor resolves.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration that the version transition selected (&lt;code&gt;current &amp;lt; to &amp;lt;= desired&lt;/code&gt;)
+anchors to a stage that this StageSet does not have. A migration&amp;rsquo;s &lt;code&gt;stage&lt;/code&gt; value
+resolves to the stage whose &lt;code&gt;migrationAnchor&lt;/code&gt; (preferred) or &lt;code&gt;name&lt;/code&gt; equals it;
+an empty &lt;code&gt;stage&lt;/code&gt; anchors before the first stage. If none matches, the controller
+&lt;strong&gt;fails closed&lt;/strong&gt; instead of silently never running the migration — the failure
+mode a shared, late-binding ladder must not have (a &lt;code&gt;DROP&lt;/code&gt; that quietly never
+runs while the app advances to a schema that needs it).&lt;/p&gt;</description></item><item><title>PreviousRevisionUnavailable</title><link>https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=PreviousRevisionUnavailable&lt;/code&gt;. The StageSet has &lt;code&gt;spec.rollbackOnFailure&lt;/code&gt; set, a run failed, and the controller could not restore the last-good revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;&lt;code&gt;rollbackOnFailure&lt;/code&gt;&lt;/a&gt;
+ restores the previously-applied artifact revisions by re-fetching their recorded URLs and verifying their digests. That only works while the &lt;strong&gt;producer still retains&lt;/strong&gt; those revisions. This reason means a revision the rollback needs is no longer fetchable — the producer garbage-collected it.&lt;/p&gt;
+&lt;p&gt;Rollback is best-effort by contract: it works exactly when producers retain. Common triggers:&lt;/p&gt;</description></item><item><title>Producer watch engagement failing</title><link>https://stageset.projects.metio.wtf/runbooks/watch-engagement/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/watch-engagement/</guid><description>&lt;p&gt;&lt;code&gt;stageset_watch_engagement_failures_total{gvk=...}&lt;/code&gt; has increased above the
+per-hour threshold for the alert window, and the named producer kind stays
+unwatched. The controller engages producer watches lazily: the first time a
+StageSet names a producer kind in a stage&amp;rsquo;s &lt;code&gt;sourceRef&lt;/code&gt;, &lt;code&gt;engageProducerWatch&lt;/code&gt;
+adds a dynamic &lt;code&gt;source.Kind&lt;/code&gt; watch (routed through &lt;code&gt;mapProducer&lt;/code&gt;) so a change on
+that producer re-triggers the referencing StageSets. &lt;code&gt;ExternalArtifact&lt;/code&gt; is
+watched statically; the dynamic watches cover producer kinds such as
+&lt;code&gt;GitRepository&lt;/code&gt;, &lt;code&gt;OCIRepository&lt;/code&gt;, &lt;code&gt;Bucket&lt;/code&gt;, and operator-defined producers like a
+JaaS &lt;code&gt;JsonnetSnippet&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>PromotionBlocked</title><link>https://stageset.projects.metio.wtf/runbooks/promotionblocked/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/promotionblocked/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=PromotionBlocked&lt;/code&gt;. &lt;code&gt;status.stages[].promotionState&lt;/code&gt; shows &lt;code&gt;phase: Blocked&lt;/code&gt;, an &lt;code&gt;analysisFailures&lt;/code&gt; count, and &lt;code&gt;lastAnalysis&lt;/code&gt; with each check&amp;rsquo;s observed value and verdict. When the stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; is &lt;code&gt;Rollback&lt;/code&gt;, a Warning event records the revert and &lt;code&gt;promotionState.abortedRevision&lt;/code&gt; names the revision that was rolled back.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;promotion analysis&lt;/a&gt;
+ on the named stage failed: one or more checks read a metric outside its threshold for more than &lt;code&gt;failureLimit&lt;/code&gt; consecutive evaluations. The stage applied and became Ready, but its &lt;em&gt;observed behavior&lt;/em&gt; — error rate, latency, SLO burn, whatever the checks measure — is out of bounds, so the rollout is not advanced to the next stage.&lt;/p&gt;</description></item><item><title>RBACDenied</title><link>https://stageset.projects.metio.wtf/runbooks/rbacdenied/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/rbacdenied/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=RBACDenied&lt;/code&gt;. The Message names the call that failed and appends the verbatim apiserver error:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;ns&amp;gt; describe stageset &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;...
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Status:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Conditions:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Reason: RBACDenied
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Status: False
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Type: Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Message: stage &amp;#34;deploy&amp;#34; apply: RBAC denied apply — grant the missing verb to the tenant ServiceAccount ...
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The controller logs at error level and stops engaging backoff for this StageSet. The next reconcile happens only when the spec changes, a referenced source CR&amp;rsquo;s status flips, or &lt;code&gt;spec.interval&lt;/code&gt; ticks — so the workqueue isn&amp;rsquo;t burning cycles on a permanently-failing call.&lt;/p&gt;</description></item><item><title>Reconcile latency high</title><link>https://stageset.projects.metio.wtf/runbooks/reconcile-latency/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/reconcile-latency/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;controller_runtime_reconcile_time_seconds&lt;/code&gt; p99 for &lt;code&gt;controller=&amp;quot;stageset&amp;quot;&lt;/code&gt; exceeds
+the configured threshold; the &lt;code&gt;StageSetReconcileLatencyHigh&lt;/code&gt; alert fires (see
+&lt;a href="https://stageset.projects.metio.wtf/running/operations/"&gt;operations&lt;/a&gt;
+ for the alert set and its thresholds).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A single reconcile does a lot of work — resolve and fetch every stage&amp;rsquo;s artifact,
+kustomize-build, server-side apply, prune, verify readiness, and run actions — all
+impersonating the tenant &lt;code&gt;ServiceAccount&lt;/code&gt;. Latency climbs when any of those is slow:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;large artifacts or slow artifact servers,&lt;/li&gt;
+&lt;li&gt;many objects per stage (apply + prune scale with object count),&lt;/li&gt;
+&lt;li&gt;readiness waits and &lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt; actions with long timeouts,&lt;/li&gt;
+&lt;li&gt;apiserver or tenant-authorization slowness.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt; &lt;span class="p"&gt;|&lt;/span&gt; grep -i &lt;span class="s1"&gt;&amp;#39;slow\|timeout\|took&amp;#39;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Break the latency down by stage count and artifact size; a single StageSet with
+many large stages dominates p99.&lt;/p&gt;</description></item><item><title>ResolveFailed</title><link>https://stageset.projects.metio.wtf/runbooks/resolvefailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/resolvefailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=ResolveFailed&lt;/code&gt;. The Message describes why resolution failed.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;sourceRef&lt;/code&gt; could not be resolved to an &lt;code&gt;ExternalArtifact&lt;/code&gt; for a spec/config or API reason (distinct from &amp;ldquo;not published yet&amp;rdquo;, which is &lt;a href="https://stageset.projects.metio.wtf/runbooks/sourcenotready/"&gt;&lt;code&gt;SourceNotReady&lt;/code&gt;&lt;/a&gt;
+, and &amp;ldquo;no such object&amp;rdquo;, which is &lt;a href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/"&gt;&lt;code&gt;ArtifactNotFound&lt;/code&gt;&lt;/a&gt;
+). Common cases:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;an &lt;strong&gt;ambiguous producer&lt;/strong&gt; — more than one &lt;code&gt;ExternalArtifact&lt;/code&gt; back-points at the same producer object, so the target is undefined;&lt;/li&gt;
+&lt;li&gt;a &lt;strong&gt;cross-namespace ref rejected&lt;/strong&gt; by &lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;;&lt;/li&gt;
+&lt;li&gt;a &lt;strong&gt;transient API error&lt;/strong&gt; reading the source or artifact (a list/get blip). A permanent API error — RBAC denial or a missing source CRD — is reported as &lt;a href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/"&gt;&lt;code&gt;RBACDenied&lt;/code&gt;&lt;/a&gt;
+ instead, since retry can&amp;rsquo;t fix it.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;When the failing &lt;code&gt;sourceRef&lt;/code&gt; targets another namespace, the Message is deliberately scrubbed to &lt;code&gt;cross-namespace &amp;lt;kind&amp;gt; %q is not reachable&lt;/code&gt; so tenants cannot fingerprint other namespaces — check that source CR&amp;rsquo;s status in its own namespace.&lt;/p&gt;</description></item><item><title>Soaking</title><link>https://stageset.projects.metio.wtf/runbooks/soaking/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/soaking/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=Soaking&lt;/code&gt;. The Message names the stage and when the soak window closes. &lt;code&gt;status.stages[].promotionState&lt;/code&gt; shows &lt;code&gt;phase: Soaking&lt;/code&gt; with a &lt;code&gt;soakUntil&lt;/code&gt; timestamp.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is &lt;strong&gt;not a failure&lt;/strong&gt; — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;&lt;code&gt;spec.stages[].promotion.soak&lt;/code&gt;&lt;/a&gt;
+ holds the rollout at this stage for the configured duration before advancing to the next one. A soak catches delayed regressions — an OOM after warm-up, error-rate creep, a crashloop after several minutes — that the point-in-time &lt;code&gt;readyChecks&lt;/code&gt; cannot see.&lt;/p&gt;</description></item><item><title>SourceNotReady</title><link>https://stageset.projects.metio.wtf/runbooks/sourcenotready/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/sourcenotready/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=SourceNotReady&lt;/code&gt;. Transient: the controller requeues and clears the condition once the source publishes.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;sourceRef&lt;/code&gt; resolved to an &lt;code&gt;ExternalArtifact&lt;/code&gt; (directly, or via a producer&amp;rsquo;s RFC-0012 back-pointer such as a JaaS &lt;code&gt;JsonnetSnippet&lt;/code&gt;), but that artifact&amp;rsquo;s &lt;code&gt;status.conditions[Ready]&lt;/code&gt; is not yet &lt;code&gt;True&lt;/code&gt; — its producer has not finished publishing a revision. The StageSet gates on &lt;code&gt;Ready=True&lt;/code&gt; so it never builds against a half-written artifact.&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Which artifact, and is it Ready?&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get externalartifact
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe externalartifact &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# If the producer is a JsonnetSnippet (or other producer kind), check it:&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe jsonnetsnippet &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;This usually clears on its own when the producer publishes. If it persists:&lt;/p&gt;</description></item><item><title>StageFailed</title><link>https://stageset.projects.metio.wtf/runbooks/stagefailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/stagefailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=StageFailed&lt;/code&gt;. The Message names the stage and the operation that failed (&lt;code&gt;fetch artifact&lt;/code&gt;, &lt;code&gt;build&lt;/code&gt;, &lt;code&gt;apply&lt;/code&gt;, &lt;code&gt;verify&lt;/code&gt;, a pre/post action, or &lt;code&gt;connect to target cluster&lt;/code&gt;). The run halts at that stage; later stages keep their previous revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage failed during execution. By operation:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;fetch artifact&lt;/strong&gt; — the artifact URL was unreachable, or its bytes failed digest verification. Transient fetch failures (network, 5xx, source not ready) back off and retry. Terminal ones — a digest mismatch, an oversized tarball, or a URL the SSRF guard rejects — stop requeuing, since the same fetch would fail the same way; the next genuine watch event or interval tick re-runs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply RBAC / missing CRD&lt;/strong&gt; — a &lt;code&gt;Forbidden&lt;/code&gt; apply, or a manifest whose kind the apiserver doesn&amp;rsquo;t know, is reported as &lt;a href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/"&gt;&lt;code&gt;RBACDenied&lt;/code&gt;&lt;/a&gt;
+ (terminal), not &lt;code&gt;StageFailed&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;build&lt;/strong&gt; — kustomize build or post-build substitution failed (a missing &lt;code&gt;substituteFrom&lt;/code&gt; source, an invalid patch, a malformed manifest).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply&lt;/strong&gt; — the server-side apply was rejected: an immutable-field conflict, or an &lt;strong&gt;RBAC denial&lt;/strong&gt; under the impersonated &lt;code&gt;serviceAccountName&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;verify&lt;/strong&gt; — applied objects did not become Ready within the stage timeout (kstatus).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;pre/post action&lt;/strong&gt; — a &lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; action failed or timed out.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;connect to target cluster&lt;/strong&gt; — a &lt;code&gt;spec.kubeConfig&lt;/code&gt; Secret was missing, unparseable, or used the unsupported cloud-provider &lt;code&gt;configMapRef&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message: which stage + operation&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# For apply/verify failures, inspect what the stage tried to apply:&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageinventory &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --selector stages.metio.wtf/stage-set&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;name&amp;gt;,stages.metio.wtf/stage&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;stage&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Match the operation in the Message:&lt;/p&gt;</description></item><item><title>Stalled</title><link>https://stageset.projects.metio.wtf/runbooks/stalled/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/stalled/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=Stalled&lt;/code&gt;. Terminal: the controller does not requeue until the spec changes.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A condition that retrying cannot clear. Currently this is a &lt;strong&gt;&lt;code&gt;spec.dependsOn&lt;/code&gt; cycle&lt;/strong&gt; — two or more StageSets depend on each other (directly or transitively), so none can ever become Ready first. The cycle is detected by a breadth-first walk over the &lt;code&gt;dependsOn&lt;/code&gt; graph. A dependency that is merely not Ready yet (no cycle) reports &lt;a href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/"&gt;&lt;code&gt;DependencyNotReady&lt;/code&gt;&lt;/a&gt;
+ instead.&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message states &amp;#34;spec.dependsOn forms a cycle&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Trace the edges:&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageset &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --output custom-columns&lt;span class="o"&gt;=&lt;/span&gt;NAME:.metadata.name,DEPENDSON:.spec.dependsOn&lt;span class="o"&gt;[&lt;/span&gt;*&lt;span class="o"&gt;]&lt;/span&gt;.name
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Follow the &lt;code&gt;dependsOn&lt;/code&gt; names until you find the loop (A → B → A, or longer).&lt;/p&gt;</description></item><item><title>Succeeded</title><link>https://stageset.projects.metio.wtf/runbooks/succeeded/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/succeeded/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=True&lt;/code&gt;, &lt;code&gt;REASON=Succeeded&lt;/code&gt;. The Message names the applied revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is the healthy steady state: every stage&amp;rsquo;s artifact resolved, built, applied, and passed its readiness checks, and &lt;code&gt;status.lastAppliedRevisions&lt;/code&gt; matches &lt;code&gt;status.lastAttemptedRevisions&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Nothing to remediate.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;The controller keeps reconciling at &lt;code&gt;spec.interval&lt;/code&gt;; a re-render upstream (a new &lt;code&gt;ExternalArtifact&lt;/code&gt; revision) re-applies automatically and the condition stays &lt;code&gt;Succeeded&lt;/code&gt; once the new revision converges.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;status.stages[]&lt;/code&gt; reports per-stage &lt;code&gt;appliedRevision&lt;/code&gt; and inventory entry counts to confirm what each stage owns.&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>Suspended</title><link>https://stageset.projects.metio.wtf/runbooks/suspended/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/suspended/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=Suspended&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.suspend: true&lt;/code&gt; is set, so the controller short-circuits before any resolution, build, or apply. This is an intentional operator action, not a failure — applied objects are left exactly as they were at the last successful run.&lt;/p&gt;
+&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Resume by clearing the flag:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; patch stageset &amp;lt;name&amp;gt; --type&lt;span class="o"&gt;=&lt;/span&gt;merge --patch &lt;span class="s1"&gt;&amp;#39;{&amp;#34;spec&amp;#34;:{&amp;#34;suspend&amp;#34;:false}}&amp;#39;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The next reconcile picks up from the current artifact revisions.&lt;/p&gt;</description></item><item><title>TeardownForced</title><link>https://stageset.projects.metio.wtf/runbooks/teardown-forced/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/teardown-forced/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;A StageSet that was deleted lingered in &lt;code&gt;Terminating&lt;/code&gt;, then disappeared. A &lt;code&gt;Warning&lt;/code&gt; Event records the force-drop:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;ns&amp;gt; get events --field-selector reason=TeardownForced
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;...
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Warning TeardownForced TeardownForced after 1h0m0s of failing teardown (delete stage &amp;#34;deploy&amp;#34; objects) —
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: ...
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The &lt;code&gt;stageset_teardown_force_drop_total{namespace,name}&lt;/code&gt; counter increments at the same time.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;On deletion the controller tears the StageSet&amp;rsquo;s applied objects down in reverse stage order, then drops the finalizer. While a teardown step keeps failing the finalizer is held and the delete retries — so a transient target-cluster outage heals on its own.&lt;/p&gt;</description></item><item><title>UpdateDeferred</title><link>https://stageset.projects.metio.wtf/runbooks/updatedeferred/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/updatedeferred/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=UpdateDeferred&lt;/code&gt; (initial deploy held), or &lt;code&gt;READY=True&lt;/code&gt; with a message noting a deferral and a populated &lt;code&gt;status.pendingUpdate&lt;/code&gt; (an already-deployed StageSet with a held update).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is &lt;strong&gt;not a failure&lt;/strong&gt; — it is time-based delivery working as configured. A new revision (or the first deploy) is being held because the StageSet&amp;rsquo;s &lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;&lt;code&gt;spec.updateWindows&lt;/code&gt;&lt;/a&gt;
+ do not currently permit a rollout: either a &lt;code&gt;Deny&lt;/code&gt; window is active, or &lt;code&gt;Allow&lt;/code&gt; windows are declared and none is active right now. With &lt;code&gt;spec.windowScope: All&lt;/code&gt;, even drift correction is paused while a window is closed.&lt;/p&gt;</description></item><item><title>Webhook cert renewal failing</title><link>https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;stageset_webhook_cert_renewal_failures_total&lt;/code&gt; is increasing; the
+&lt;code&gt;StageSetWebhookCertRenewalFailing&lt;/code&gt; alert fires (see
+&lt;a href="https://stageset.projects.metio.wtf/running/operations/"&gt;operations&lt;/a&gt;
+ for the alert set and its thresholds).
+The current certificate keeps working until its natural expiry — that expiry is
+the deadline, after which cluster-wide &lt;code&gt;StageSet&lt;/code&gt; admission breaks.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;Only applies in &lt;code&gt;--webhook-cert-mode=self-signed&lt;/code&gt;. The in-pod renewer regenerates
+the serving cert every &lt;code&gt;validity/3&lt;/code&gt; and patches the
+&lt;code&gt;ValidatingWebhookConfiguration&lt;/code&gt;&amp;rsquo;s &lt;code&gt;caBundle&lt;/code&gt;. It fails when:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;the controller lost &lt;code&gt;update&lt;/code&gt; (or &lt;code&gt;get&lt;/code&gt;) on the named
+&lt;code&gt;ValidatingWebhookConfiguration&lt;/code&gt; (&lt;code&gt;--webhook-validating-config-name&lt;/code&gt;),&lt;/li&gt;
+&lt;li&gt;the VWC was renamed and the flag/&lt;code&gt;resourceNames&lt;/code&gt; weren&amp;rsquo;t updated,&lt;/li&gt;
+&lt;li&gt;the cert directory (&lt;code&gt;--webhook-cert-dir&lt;/code&gt;) became read-only.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;In &lt;code&gt;cert-manager&lt;/code&gt; mode this metric is irrelevant — &lt;a href="https://cert-manager.io/"&gt;cert-manager&lt;/a&gt;
+ owns renewal.&lt;/p&gt;</description></item><item><title>Workqueue saturation</title><link>https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;workqueue_depth{controller=&amp;quot;stageset&amp;quot;}&lt;/code&gt; stays high; StageSets reconcile slowly or
+lag behind their &lt;code&gt;spec.interval&lt;/code&gt;. The &lt;code&gt;StageSetControllerWorkqueueDepthHigh&lt;/code&gt; alert
+fires (see &lt;a href="https://stageset.projects.metio.wtf/running/operations/"&gt;operations&lt;/a&gt;
+ for the alert set and its
+thresholds).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The controller is enqueuing reconcile requests faster than it completes them.
+Common causes:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;apiserver slowness&lt;/strong&gt; — applies, dry-runs, and status writes all block on the
+apiserver (or the impersonated tenant&amp;rsquo;s authorization).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;slow sources&lt;/strong&gt; — a stage waiting on a large artifact fetch or a source that is
+slow to become Ready holds a worker.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;a stuck stage&lt;/strong&gt; — an action with a long timeout (a &lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt; that
+never completes) pins a worker for the whole timeout.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;too few workers for the StageSet count&lt;/strong&gt; — many StageSets reconciling on short
+intervals.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# which StageSets are churning?&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl get stagesets --all-namespaces --sort-by&lt;span class="o"&gt;=&lt;/span&gt;.status.observedGeneration
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# controller logs for slow operations / retries&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Correlate with &lt;code&gt;controller_runtime_reconcile_time_seconds&lt;/code&gt; (see
+&lt;a href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/"&gt;reconcile latency&lt;/a&gt;
+) and apiserver latency.&lt;/p&gt;</description></item></channel></rss>

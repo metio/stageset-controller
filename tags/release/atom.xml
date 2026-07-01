@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Release on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/release/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/release/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/release/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/release/</id><entry><title type="html">CI and releases</title><link href="https://stageset.projects.metio.wtf/contributing/ci-and-release/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/contributing/building/?utm_source=atom_feed" rel="related" type="text/html" title="Building and testing"/><link href="https://stageset.projects.metio.wtf/integrations/claude-code/?utm_source=atom_feed" rel="related" type="text/html" title="Claude Code skill"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><id>https://stageset.projects.metio.wtf/contributing/ci-and-release/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-18T20:07:19+02:00</updated><content type="html"><![CDATA[<blockquote>The pull-request gates and the automated calendar-based release process.</blockquote><h2 id="continuous-integration">Continuous integration</h2>
+<p>Every pull request runs <code>verify.yml</code>, which fans out into one job per concern so a
+failure points straight at the cause:</p>
+<ul>
+<li><strong>test</strong> — <code>go build</code> then the full <code>go test</code> suite.</li>
+<li><strong>lint-go</strong> — <code>go vet</code>, <code>staticcheck</code>, <code>gosec</code>, and a <code>gofumpt</code> formatting check.</li>
+<li><strong>vulnerabilities</strong> — <code>govulncheck</code> (a reachable advisory is a hard gate).</li>
+<li><strong>architecture</strong> — <code>arch-go</code> against <code>arch-go.yml</code>.</li>
+<li><strong>reuse</strong> — SPDX/REUSE compliance on every file.</li>
+<li><strong>text linters</strong> — <code>yamllint</code>, <code>actionlint</code>, <code>markdownlint</code>, <code>typos</code>, and Vale
+prose linting.</li>
+<li><strong>docs-lint</strong> — builds the Hugo site and lints the rendered output.</li>
+<li><strong>container-image</strong> — a buildx image build plus a Trivy scan.</li>
+<li><strong>dco</strong> — every non-bot commit carries a <code>Signed-off-by</code> trailer.</li>
+</ul>
+<p>A single <strong>all-green</strong> job depends on every other job and is the only required
+check, so new jobs are covered automatically. A separate <code>kind-smoke.yml</code> runs the
+operator end to end against a real kind cluster, and <code>fuzz.yml</code> exercises the fuzz
+targets.</p>
+<h2 id="releases">Releases</h2>
+<p>Releases are <strong>calendar-based and fully automated</strong> — there is no semver tag to
+bump by hand. <code>release.yml</code> runs on a Monday cron (and on manual dispatch), and the
+version is the run date (<code>date +'%Y.%-m.%-d'</code>, e.g. <code>2026.6.15</code>). A prepare job
+counts commits since the last release; an empty week publishes nothing.</p>
+<p>The pipeline is hand-rolled — no goreleaser, no GPG:</p>
+<ul>
+<li>Binaries are cross-compiled with <code>go build</code> (<code>CGO_ENABLED=0</code>, <code>-trimpath</code>,
+<code>-ldflags</code>) and archived per platform.</li>
+<li>A multi-arch image is pushed to <code>ghcr.io/metio/stageset-controller</code> and signed
+with <strong>cosign keyless</strong> (Fulcio OIDC) by digest.</li>
+<li>The GitHub Release attaches the archives, a <code>SHA256SUMS</code> file, and its cosign
+signature; identity is proven by the workflow&rsquo;s OIDC certificate, so there is no
+key to distribute.</li>
+</ul>
+<p>The Helm chart lives in the <a href="https://github.com/metio/helm-charts">metio/helm-charts</a>
+
+repository and vendors this repo&rsquo;s CRDs at each release; its <code>appVersion</code> tracks the
+binary&rsquo;s releases.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/contributing" term="contributing" label="contributing"/><category scheme="https://stageset.projects.metio.wtf/tags/ci" term="ci" label="ci"/><category scheme="https://stageset.projects.metio.wtf/tags/release" term="release" label="release"/></entry></feed>

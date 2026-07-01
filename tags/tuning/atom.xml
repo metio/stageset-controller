@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Tuning on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/tuning/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/tuning/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/tuning/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/tuning/</id><entry><title type="html">Scale and capacity</title><link href="https://stageset.projects.metio.wtf/running/scale-and-capacity/?utm_source=atom_feed" rel="alternate" type="text/html"/><id>https://stageset.projects.metio.wtf/running/scale-and-capacity/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Size a controller replica for your workload, decide how many replicas to run, tune the throughput knobs, and read the metrics that tell you when you are at capacity.</blockquote><p>Size the controller for the number and size of the <code>StageSet</code>s it manages, then
+tune its cadence and inventory knobs to fit. Start from the chart&rsquo;s defaults,
+raise resources only where a driver below applies to your release sizes, and watch
+the saturation signals so you scale on evidence rather than guesswork.</p>
+<h2 id="sizing-a-replica">Sizing a replica</h2>
+<p>A reconcile fetches each stage&rsquo;s artifact, decrypts and builds it, applies the
+rendered objects server-side, and polls readiness until the stage&rsquo;s gates pass.
+CPU and memory scale with different parts of that pipeline.</p>
+<h3 id="cpu">CPU</h3>
+<p>CPU is consumed by the build (kustomize render), the server-side apply of every
+object, and the readiness polling that gates progression. A <code>StageSet</code> with many
+stages, many objects per stage, or long-running readiness gates keeps a worker
+busy longer. Because reconciles for distinct <code>StageSet</code>s are processed one at a
+time (see <a href="#tuning-throughput">Tuning throughput</a>
+), CPU pressure shows up as a
+deeper workqueue and longer reconcile latency rather than as a pegged core. The
+chart&rsquo;s default request of <code>50m</code> suits ordinary workloads; raise it when reconcile
+latency climbs on a busy cluster.</p>
+<h3 id="memory">Memory</h3>
+<p>Resident memory is dominated by artifact fetching and the in-memory inventory. The
+fetcher holds a stage&rsquo;s artifact in memory while it builds, and four independent
+byte caps bound the worst case of a single fetch — they are internal constants,
+not flags:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Cap</th>
+					<th>Limit</th>
+					<th>Bounds</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>MaxArchiveBytes</code></td>
+					<td>64 MiB</td>
+					<td>the compressed download body</td>
+			</tr>
+			<tr>
+					<td><code>MaxDecompressedBytes</code></td>
+					<td>512 MiB</td>
+					<td>the inflated gzip stream as it is read</td>
+			</tr>
+			<tr>
+					<td><code>MaxPerEntryBytes</code></td>
+					<td>16 MiB</td>
+					<td>any single tar entry</td>
+			</tr>
+			<tr>
+					<td><code>MaxExtractedBytes</code></td>
+					<td>64 MiB</td>
+					<td>the extracted result held in memory</td>
+			</tr>
+	</tbody>
+</table>
+<p>The extracted result a build sees is therefore capped at 64 MiB per stage, and the
+gzip stream cannot inflate past 512 MiB even from a crafted archive — together
+these defend against gzip bombs and cap the per-fetch footprint. The sharded
+<code>StageInventory</code> adds memory proportional to how many objects each stage owns; very
+large stages are split across shards (see
+<a href="#tuning-throughput"><code>--inventory-shard-cap</code></a>
+), so no single inventory object grows
+unbounded.</p>
+<p>The chart&rsquo;s default request of <code>256Mi</code> covers ordinary inventories. Raise it for
+clusters with very large stages (many thousands of applied objects) or large
+artifacts. A defensible starting point for a busy cluster managing large releases:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l">200m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l">512Mi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ephemeralStorage</span><span class="p">:</span><span class="w"> </span><span class="l">64Mi  </span><span class="w"> </span><span class="c"># /tmp and the self-signed cert dir are emptyDirs</span><span class="w">
+</span></span></span></code></pre></div><p>The chart sets requests equal to limits, so the pod is fully bounded; see
+<a href="/running/production/#high-availability">Production</a>
+ for the resource block in
+context.</p>
+<h2 id="replicas-and-ha">Replicas and HA</h2>
+<p>Reconciliation is single-leader. The chart enables leader election by default, so
+even a single replica is lease-guarded, and only the lease holder reconciles —
+adding replicas does <strong>not</strong> add reconcile parallelism. What extra replicas buy is
+<strong>failover</strong> and <strong>admission availability</strong>: every replica answers the validating
+webhook and the read-only gate endpoint, so a <code>kubectl apply</code> of a <code>StageSet</code> and a
+Flagger gate check stay served during a leader handover.</p>
+<p>The lease is not released eagerly on shutdown, so after a rolling update the new
+leader takes over only when the old lease expires — budget a few seconds of
+reconcile pause on restart. Admission and the gate endpoint stay available
+throughout.</p>
+<p>Running more than one replica adds one hard requirement: the optional
+<a href="/gating/rollback/">rollback store</a>
+ must be reachable from whichever pod holds the
+lease. A <code>ReadWriteOnce</code> PVC cannot satisfy that, so a multi-replica install needs
+an <strong>RWX <code>PersistentVolume</code></strong> or an <strong>S3-compatible bucket</strong>. The
+<a href="/running/production/#high-availability">Production</a>
+ page has the full HA
+setup, including the <code>HorizontalPodAutoscaler</code> and <code>PodDisruptionBudget</code> the chart
+renders when the replica ceiling exceeds the floor; the leader model is detailed in
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+.</p>
+<h2 id="tuning-throughput">Tuning throughput</h2>
+<p>The knobs below control how often the controller reconciles and how it stores what
+it applies. Each lists what it does, its default, when to change it, and the metric
+that signals the need.</p>
+<h3 id="reconcile-cadence----default-interval-and-specinterval">Reconcile cadence — <code>--default-interval</code> and <code>spec.interval</code></h3>
+<p><code>--default-interval</code> (default <code>10m</code>) is the reconcile cadence a <code>StageSet</code> inherits
+when it omits <code>spec.interval</code>. A source change reconciles immediately through the
+artifact watch regardless of the interval; the interval is the periodic re-assert
+that heals out-of-band drift. Lowering it makes the controller re-check applied
+state more often — more responsive drift correction at the cost of more apiserver
+and apply traffic per <code>StageSet</code>. A <code>StageSet</code> can override the global default per
+release:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">5m                 </span><span class="w"> </span><span class="c"># re-assert applied state every 5 minutes</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">retryInterval</span><span class="p">:</span><span class="w"> </span><span class="l">1m            </span><span class="w"> </span><span class="c"># back off faster after a failed run</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">driftDetectionInterval</span><span class="p">:</span><span class="w"> </span><span class="l">30m  </span><span class="w"> </span><span class="c"># cheap drift sweep between full reconciles</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">api</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ExternalArtifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-api</span><span class="w">
+</span></span></span></code></pre></div><p><code>spec.driftDetectionInterval</code>, when set, re-asserts applied state on its own cadence
+between full reconciles, so you can keep the full <code>interval</code> long while still
+healing drift cheaply. Watch <code>stageset_drift_corrected_total</code> to judge whether
+drift is frequent enough to warrant a shorter sweep.</p>
+<h3 id="inventory-shard-size----inventory-shard-cap">Inventory shard size — <code>--inventory-shard-cap</code></h3>
+<p><code>--inventory-shard-cap</code> (default <code>5000</code>) is the maximum number of entries a single
+<code>StageInventory</code> object holds. When a stage owns more objects than the cap, its
+inventory is split across multiple shards so no one object grows unbounded.
+Sharding is automatic — the cap is a tuning knob you rarely touch. Lower it if your
+apiserver struggles with large <code>StageInventory</code> objects on very large applies;
+raise it to keep a moderately large stage in a single object. The per-stage shard
+count surfaces on the <code>StageSet</code> status, and the mechanism is described in
+<a href="/defining-a-release/inventory/">Inventory and pruning</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Helm values — controller-wide tuning.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">defaultInterval</span><span class="p">:</span><span class="w"> </span><span class="l">10m    </span><span class="w"> </span><span class="c"># cadence StageSets inherit when they omit spec.interval</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inventoryShardCap</span><span class="p">:</span><span class="w"> </span><span class="m">5000</span><span class="w">  </span><span class="c"># lower for smaller inventory objects on huge applies</span><span class="w">
+</span></span></span></code></pre></div><h3 id="watch-scope-and-reference-isolation">Watch scope and reference isolation</h3>
+<p><code>--watch-namespaces</code> (empty by default, meaning cluster-wide) scopes the manager&rsquo;s
+informers to a namespace set, so one deployment per tenant group observes only its
+own <code>StageSet</code>s — the multi-tenant controller-instances pattern. A scoped instance
+caches fewer objects and reconciles fewer <code>StageSet</code>s, which is both an isolation
+and a capacity lever. <code>--no-cross-namespace-refs</code> hard-denies cross-namespace
+<code>sourceRef</code> and <code>dependsOn</code> references. Both are covered in
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+.</p>
+<h2 id="knowing-when-youre-at-capacity">Knowing when you&rsquo;re at capacity</h2>
+<p>Scale on the saturation signals the controller exports, not on intuition. The
+<a href="/observability/metrics/">metrics</a>
+ page lists every series; the ones that mean &ldquo;at
+capacity&rdquo; are:</p>
+<ul>
+<li><strong><code>workqueue_depth{controller=&quot;stageset&quot;}</code></strong> — a depth that stays high means
+reconciles are arriving faster than the single-leader worker drains them. The
+<code>StageSetControllerWorkqueueDepthHigh</code> alert fires past a sustained depth; its
+runbook is <a href="/runbooks/workqueue-saturation/">workqueue saturation</a>
+.</li>
+<li><strong><code>controller_runtime_reconcile_time_seconds</code></strong> — rising p99 reconcile latency
+points at CPU pressure or slow readiness gates. The
+<code>StageSetReconcileLatencyHigh</code> alert covers it; see the
+<a href="/runbooks/reconcile-latency/">reconcile latency runbook</a>
+.</li>
+<li><strong><code>stageset_reconcile_total{reason=…}</code></strong> — a climbing non-<code>Succeeded</code> rate is a
+correctness or RBAC problem, not a sizing one; the
+<code>StageSetReconcileErrorsHigh</code> alert tracks it.</li>
+<li><strong><code>stageset_drift_corrected_total</code></strong> and <strong><code>stageset_update_deferred_total</code></strong> —
+frequent drift correction argues for a <code>driftDetectionInterval</code>; frequent
+deferrals mean update windows are throttling delivery.</li>
+</ul>
+<p>The chart ships these as a <code>PrometheusRule</code> with tunable thresholds — see
+<a href="/observability/alerting/">Alerting</a>
+ — and the published
+<a href="/observability/dashboard/">dashboard</a>
+ and <a href="/observability/slos/">SLOs</a>
+ render the
+same signals. When the workqueue stays deep and latency is high while reconciles
+still succeed, the lever is a larger CPU/memory request on the replica, a longer
+<code>--default-interval</code>, or splitting the workload across watch-scoped instances —
+adding replicas alone will not help, because only the leader reconciles.</p>
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="/running/production/#high-availability">Production</a>
+ — the hardened install, HA replicas, and the resource block in context.</li>
+<li><a href="/defining-a-release/inventory/">Inventory and pruning</a>
+ — sharding and the <code>StageInventory</code> the shard cap governs.</li>
+<li><a href="/security/multi-cluster/">Multi-cluster and tenancy</a>
+ — watch-scoped instances, the leader model, and cross-namespace isolation.</li>
+<li><a href="/observability/metrics/">Metrics</a>
+ — every exported series and how to scrape them.</li>
+<li><a href="/observability/alerting/">Alerting</a>
+ — the shipped saturation alerts and their thresholds.</li>
+<li><a href="/running/disaster-recovery/">Backup and disaster recovery</a>
+ — the state a multi-replica install must keep reachable.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/scale" term="scale" label="scale"/><category scheme="https://stageset.projects.metio.wtf/tags/capacity" term="capacity" label="capacity"/><category scheme="https://stageset.projects.metio.wtf/tags/sizing" term="sizing" label="sizing"/><category scheme="https://stageset.projects.metio.wtf/tags/resources" term="resources" label="resources"/><category scheme="https://stageset.projects.metio.wtf/tags/leader-election" term="leader-election" label="leader-election"/><category scheme="https://stageset.projects.metio.wtf/tags/throughput" term="throughput" label="throughput"/><category scheme="https://stageset.projects.metio.wtf/tags/tuning" term="tuning" label="tuning"/></entry></feed>

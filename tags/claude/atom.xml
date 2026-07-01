@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Claude on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/claude/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/claude/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/claude/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/claude/</id><entry><title type="html">MCP server</title><link href="https://stageset.projects.metio.wtf/integrations/mcp-server/?utm_source=atom_feed" rel="alternate" type="text/html"/><id>https://stageset.projects.metio.wtf/integrations/mcp-server/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Run the stageset-controller Model Context Protocol server so an agent reads StageSet status and drives reconciliation in-cluster.</blockquote><p>The controller exposes StageSet introspection — and, when opted in, control — as
+<a href="https://modelcontextprotocol.io/">Model Context Protocol</a>
+ tools, so an LLM
+agent (Claude Code, Claude Desktop, or any MCP client) calls them directly. The
+server runs inside the controller pod and serves over streamable HTTP; the tools
+read and patch StageSet resources as the controller&rsquo;s ServiceAccount, so an agent
+can never exceed the controller&rsquo;s own RBAC.</p>
+<h2 id="enable-the-server">Enable the server</h2>
+<p>Pass <code>--enable-mcp</code> to the controller to serve the read tools (off by default).
+It binds <code>--mcp-bind-address</code>, which defaults to <code>:8084</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stageset-controller --enable-mcp
+</span></span></code></pre></div><p>Reach it from your machine with a port-forward:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system port-forward deploy/stageset-controller 8084:8084
+</span></span></code></pre></div><p>The read tools:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Tool</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>list_stagesets</code></td>
+					<td>List StageSet resources with their Ready status, reason, suspend state, rolled-out version, and observed generation. Omit the namespace to list across every namespace the controller can read.</td>
+			</tr>
+			<tr>
+					<td><code>get_stageset</code></td>
+					<td>One StageSet&rsquo;s full status: the Ready condition (status, reason, message), the per-reason <a href="/runbooks/">runbook</a>
+ URL, suspend state, version, per-stage phases and applied revisions, and any pending migrations.</td>
+			</tr>
+			<tr>
+					<td><code>diff_revisions</code></td>
+					<td>A per-object unified diff of one stage&rsquo;s rendered manifests between two artifact revisions held in the <a href="/gating/rollback/">rollback store</a>
+. Pass the <code>stage</code> and the earlier <code>from</code> digest; <code>to</code> defaults to that stage&rsquo;s currently-applied digest. Secret values are masked. Needs the rollback store enabled and both revisions still retained in it.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="gated-mutations">Gated mutations</h2>
+<p>The server is read-only by default. Add <code>--mcp-allow-mutations</code> (which requires
+<code>--enable-mcp</code>) to also expose write tools:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stageset-controller --enable-mcp --mcp-allow-mutations
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Tool</th>
+					<th>Effect</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>reconcile_stageset</code></td>
+					<td>Stamp the <code>reconcile.fluxcd.io/requestedAt</code> annotation to request an immediate reconcile — the same trigger as <code>flux reconcile</code>.</td>
+			</tr>
+			<tr>
+					<td><code>suspend_stageset</code></td>
+					<td>Set <code>spec.suspend=true</code> so the controller stops reconciling the StageSet.</td>
+			</tr>
+			<tr>
+					<td><code>resume_stageset</code></td>
+					<td>Clear <code>spec.suspend</code> to resume reconciliation.</td>
+			</tr>
+	</tbody>
+</table>
+<p>These act on the StageSet as the controller&rsquo;s ServiceAccount, so they can never
+exceed the controller&rsquo;s own RBAC. Keep them off unless you intend the agent to
+drive reconciliation, and have your MCP client confirm each call. Like the
+<a href="/guides/progressive-delivery/">stage gate endpoint</a>
+, the server is
+best-effort: if its port can&rsquo;t bind the controller logs the failure and keeps
+reconciling.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/mcp" term="mcp" label="mcp"/><category scheme="https://stageset.projects.metio.wtf/tags/claude" term="claude" label="claude"/><category scheme="https://stageset.projects.metio.wtf/tags/operator" term="operator" label="operator"/></entry></feed>

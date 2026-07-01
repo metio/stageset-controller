@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Versioning on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/versioning/</link><description>Recent content in Versioning on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/versioning/index.xml" rel="self" type="application/rss+xml"/><item><title>DowngradeRequiresMigration</title><link>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=DowngradeRequiresMigration&lt;/code&gt;. Terminal: the run does not requeue until the desired version is at or above &lt;code&gt;status.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The desired version (&lt;code&gt;spec.version&lt;/code&gt;) is &lt;strong&gt;lower&lt;/strong&gt; than the version the controller last recorded as deployed (&lt;code&gt;status.version&lt;/code&gt;). Downgrades are refused by default: &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migrations&lt;/a&gt;
+ are forward-only action ladders, and replaying upgrade migrations in reverse is how data gets destroyed. The controller does not silently run a downgrade.&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageset &amp;lt;name&amp;gt; --output &lt;span class="nv"&gt;jsonpath&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;{.status.version}&amp;#39;&lt;/span&gt; &lt;span class="c1"&gt;# deployed&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# desired: read spec.version.value, or the version file the artifact carries&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Pick the intended direction:&lt;/p&gt;</description></item><item><title>InvalidVersion</title><link>https://stageset.projects.metio.wtf/runbooks/invalidversion/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/invalidversion/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=InvalidVersion&lt;/code&gt;. Terminal: the run does not requeue until the spec or the version file is fixed.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A version &lt;code&gt;spec.version&lt;/code&gt; (or a migration boundary) could not be resolved to a parseable &lt;a href="https://semver.org/"&gt;semver&lt;/a&gt;
+. The controller refuses to proceed rather than deploy a half-versioned system — a system whose recorded version is unknown is worse for migrations than an unversioned one. The Message names which input failed. By version source:&lt;/p&gt;</description></item><item><title>MigrationCoverageMissing</title><link>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationCoverageMissing&lt;/code&gt;. The Message names the boundary
+(e.g. &lt;code&gt;1.4.0 → 2.0.0&lt;/code&gt;). &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.version.requireMigrationCoverage&lt;/code&gt; is set, and the version transition crosses
+a &lt;strong&gt;major-version boundary&lt;/strong&gt; (the major component increased) with &lt;strong&gt;no migration&lt;/strong&gt;
+selected for it. A major bump usually implies breaking changes that need a
+migration, so rather than advance silently the controller fails closed and asks
+for an explicit decision.&lt;/p&gt;
+&lt;p&gt;Minor and patch transitions are never gated by this — only a major boundary.&lt;/p&gt;</description></item><item><title>Rollback</title><link>https://stageset.projects.metio.wtf/gating/rollback/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/rollback/</guid><description>&lt;p&gt;When a run fails, the controller can restore the last successfully-applied artifact
+revisions instead of leaving you on a broken release. Rollback is opt-in and needs
+somewhere to keep prior revisions.&lt;/p&gt;
+&lt;h2 id="enabling-it"&gt;Enabling it&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;rollbackOnFailure&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;On a failed run the controller restores each stage&amp;rsquo;s last-good artifact revision,
+best-effort, and emits a &lt;code&gt;RolledBack&lt;/code&gt; event. The coordinates it restores from are
+recorded in &lt;code&gt;status.lastAppliedSnapshot&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Versioned migrations</title><link>https://stageset.projects.metio.wtf/gating/versioned-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/versioned-migrations/</guid><description>&lt;p&gt;Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ exactly when the
+deployed version steps over the boundary, and never again.&lt;/p&gt;
+&lt;p&gt;Versioning is off until you set &lt;code&gt;spec.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="declaring-the-version"&gt;Declaring the version&lt;/h2&gt;
+&lt;p&gt;The controller needs to know &lt;em&gt;what version is currently being deployed&lt;/em&gt;. There are
+three ways to declare it; pick by &lt;strong&gt;where the version lives&lt;/strong&gt;.&lt;/p&gt;</description></item></channel></rss>

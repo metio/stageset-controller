@@ -1,0 +1,1087 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Operations on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/operations/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/operations/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/operations/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/operations/</id><entry><title type="html">Backup and disaster recovery</title><link href="https://stageset.projects.metio.wtf/running/disaster-recovery/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/defining-a-release/inventory/?utm_source=atom_feed" rel="related" type="text/html" title="Inventory and pruning"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="related" type="text/html" title="Production"/><link href="https://stageset.projects.metio.wtf/security/encryption/?utm_source=atom_feed" rel="related" type="text/html" title="Secrets encryption"/><id>https://stageset.projects.metio.wtf/running/disaster-recovery/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Back up the state the controller cannot fully reconstruct, and restore a cluster in the order that keeps pruning, teardown, and decryption safe.</blockquote><p>Back up the small set of state the controller cannot reconstruct, then rebuild a
+lost cluster by restoring that state in the right order. Most of what a <code>StageSet</code>
+manages is recomputed on the next reconcile from your Git repository and your Flux
+sources, so it needs no backup of its own. Three things are the exception, and
+losing any of them causes silent data damage rather than a clean failure.</p>
+<h2 id="what-the-controller-rebuilds-and-what-it-cannot">What the controller rebuilds, and what it cannot</h2>
+<p>A <code>StageSet</code> is a function of its source content: given the same spec and the same
+artifacts, a reconcile re-fetches, re-renders, and re-applies the same objects.
+The applied workloads, the <code>StageSet</code> status, the webhook&rsquo;s self-signed CA, and the
+leader lease are all reconstructed automatically. Three pieces of state need
+backup attention — two are unrecoverable if lost, and the third self-heals for the
+common case but is still worth backing up:</p>
+<ol>
+<li><strong><code>StageInventory</code> resources</strong> — the record of exactly which objects each stage
+owns, read to prune and to tear down. If it is lost while the stage&rsquo;s objects are
+still live, the controller <strong>self-heals</strong>: the next reconcile rebuilds the
+inventory from the objects&rsquo; owner and per-stage labels (across the GVKs the
+current render touches), emits an <code>InventoryReconstructed</code> event, and <strong>defers
+pruning that pass</strong> so it never deletes against a best-effort rebuild; the
+following reconcile prunes normally. The residual gap is a kind the current
+render no longer contains at all — those objects still carry the labels but
+aren&rsquo;t swept, so they stay orphaned. Back up the inventory so that gap, and
+reverse-order teardown, stay correct. It lives in <code>spec</code> precisely so a
+spec-restoring backup tool captures it.</li>
+<li><strong>Encryption key Secrets</strong> — the age or PGP private keys named by
+<code>spec.decryption.secretRef</code>. They are unrecoverable if lost. A
+<a href="/gating/rollback/">rollback</a>
+ that must re-decrypt a prior revision fails closed
+with reason <code>PreviousRevisionUnavailable</code>, and any new run that decrypts SOPS
+files fails until the keys are restored. Cloud-KMS keys live outside the cluster;
+back up the KMS key policy or ARN instead of the key material.</li>
+<li><strong>Rollback store contents</strong> — when <code>spec.rollbackOnFailure: true</code> and the
+producer retains only one revision, the <a href="/gating/rollback/">rollback store</a>
+ (a
+RWX <code>PersistentVolume</code> or an S3 bucket) holds the sole copy of the last-good
+rendered output. It is encrypted at rest because it contains decrypted Secrets.</li>
+</ol>
+<h2 id="state-inventory">State inventory</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Source of truth</th>
+					<th>Regeneratable?</th>
+					<th>Back up?</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSet</code> spec</td>
+					<td>your Git repository / Flux source</td>
+					<td>yes — re-applied by Flux</td>
+					<td>through the GitOps repo</td>
+			</tr>
+			<tr>
+					<td><code>StageSet</code> status</td>
+					<td>rebuilt by reconcile</td>
+					<td>yes — but <code>status.lastAppliedSnapshot</code> is the rollback target</td>
+					<td>via an etcd snapshot</td>
+			</tr>
+			<tr>
+					<td><strong><code>StageInventory</code></strong></td>
+					<td>the controller (cluster state only)</td>
+					<td><strong>best-effort self-heal from live objects</strong></td>
+					<td><strong>recommended (covers the residual-GVK gap + teardown)</strong></td>
+			</tr>
+			<tr>
+					<td><strong>Encryption key Secrets</strong></td>
+					<td><code>spec.decryption.secretRef</code></td>
+					<td><strong>no — unrecoverable</strong></td>
+					<td><strong>yes (critical)</strong></td>
+			</tr>
+			<tr>
+					<td><strong>Rollback store</strong></td>
+					<td>RWX PVC or S3 bucket</td>
+					<td><strong>no when it is the only copy</strong></td>
+					<td><strong>yes if <code>rollbackOnFailure</code> is used</strong></td>
+			</tr>
+			<tr>
+					<td>Applied workloads</td>
+					<td>stage sources</td>
+					<td>yes — re-applied from sources</td>
+					<td>no</td>
+			</tr>
+			<tr>
+					<td>Webhook self-signed CA</td>
+					<td>the controller</td>
+					<td>yes — regenerated on startup</td>
+					<td>no</td>
+			</tr>
+			<tr>
+					<td>Leader lease</td>
+					<td>the controller</td>
+					<td>yes — re-elected</td>
+					<td>no</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="what-to-back-up">What to back up</h2>
+<ul>
+<li><strong>Your GitOps repository.</strong> It holds every <code>StageSet</code> spec and the Flux source
+objects (<code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>, <code>ExternalArtifact</code>
+producers) the stages reference. This is the primary source of truth — keep it
+backed up the way you back up any Git repository.</li>
+<li><strong><code>StageInventory</code> resources.</strong> These are cluster state, not in Git. Capture them
+with a cluster backup tool (for example Velero) or an etcd snapshot. Because the
+inventory deliberately lives in <code>spec</code> — not <code>status</code> — any backup tool that
+restores <code>spec</code> captures the prune history. The relevant scope is every
+<code>StageInventory</code> in each <code>StageSet</code>&rsquo;s namespace.</li>
+<li><strong>Encryption key Secrets.</strong> Back up the Secrets named by
+<code>spec.decryption.secretRef</code> in each <code>StageSet</code>&rsquo;s namespace. For a cloud-KMS-only
+setup, back up the KMS key policy and ARN rather than key material.</li>
+<li><strong>Rollback-store contents and credentials</strong>, if <code>spec.rollbackOnFailure: true</code>.
+Snapshot the RWX volume or replicate the S3 bucket, and back up the bucket
+credentials Secret. Skip this if every producer retains more than one revision —
+rollback then re-fetches from the producer and the store is only a fast path.</li>
+</ul>
+<h2 id="rebuilding-a-cluster">Rebuilding a cluster</h2>
+<p>Restore in the order below. The order matters: the encryption keys and the
+inventory must exist <strong>before</strong> the controller reconciles a <code>StageSet</code>, or the first
+reconcile does damage.</p>
+<ol>
+<li><strong>Install the controller</strong> from the Helm chart. See
+<a href="/running/production/">Production</a>
+ for the hardened install.</li>
+<li><strong>Restore the encryption key Secrets.</strong> Keys must exist before any reconcile,
+because a stage that decrypts SOPS files fails until its <code>secretRef</code> Secret is
+present, and a <code>rollbackOnFailure</code> restore that re-decrypts a prior revision
+fails with <code>PreviousRevisionUnavailable</code> without them. See
+<a href="/security/encryption/">Secrets encryption</a>
+.</li>
+<li><strong>Restore the rollback-store credentials and contents</strong> if you use one, so a run
+that fails immediately after rebuild can still restore its last-good output. See
+<a href="/gating/rollback/">Rollback</a>
+.</li>
+<li><strong>Restore or re-sync the Flux sources.</strong> Let Flux reconcile the
+<code>GitRepository</code> / <code>OCIRepository</code> / <code>Bucket</code> objects and the producers so each
+stage&rsquo;s <code>ExternalArtifact</code> becomes <code>Ready</code> again.</li>
+<li><strong>Restore the <code>StageSet</code> resources</strong> — normally by letting Flux apply them from
+your GitOps repository.</li>
+<li><strong>Restore the <code>StageInventory</code> resources</strong> before the controller reconciles the
+<code>StageSet</code>s, so the first reconcile can prune correctly and a later deletion can
+tear down. Restoring the captured <code>spec</code> is sufficient — that is where the prune
+history lives. If a <code>StageSet</code> reconciles before its inventory is back, the run
+applies and verifies but cannot prune; objects a newer revision dropped are left
+orphaned until you restore the inventory and reconcile again.</li>
+</ol>
+<p>If you suspend each <code>StageSet</code> (<code>spec.suspend: true</code>) before step 5 and resume only
+after step 6, you remove the race entirely.</p>
+<h2 id="failure-modes">Failure modes</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Lost item</th>
+					<th>What happens</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageInventory</code></td>
+					<td>the next reconcile applies and verifies, but the prune step has nothing to diff against, so removed objects are <strong>orphaned</strong>; <code>StageSet</code> deletion cannot reverse-order tear stages down</td>
+			</tr>
+			<tr>
+					<td>Encryption key Secret</td>
+					<td>new runs that decrypt SOPS files fail; a <code>rollbackOnFailure</code> restore that must re-decrypt fails with reason <code>PreviousRevisionUnavailable</code></td>
+			</tr>
+			<tr>
+					<td>Rollback store</td>
+					<td>a rollback falls back to the producer&rsquo;s retained revisions; with single-revision retention there is nothing to restore and the rollback fails</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="verifying-recovery">Verifying recovery</h2>
+<p>After a rebuild, confirm the controller is back in a healthy steady state:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># Every StageSet reports Ready=True with reason Succeeded.</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace payments get stagesets
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># The inventory is present for each stage.</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace payments get stageinventories
+</span></span></code></pre></div><p>Then confirm pruning works end to end: change a stage&rsquo;s source so it renders one
+fewer object, let the <code>StageSet</code> reconcile, and check the dropped object is gone. A
+correct prune proves the restored inventory is intact — the controller&rsquo;s own
+<a href="/contributing/building/">disaster-recovery test</a>
+ pins exactly this guarantee: with
+the inventory restored, a removed object is pruned; with the inventory lost, the
+same removed object is orphaned.</p>
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="/defining-a-release/inventory/">Inventory and pruning</a>
+ — what the <code>StageInventory</code> records and how the prune diff works.</li>
+<li><a href="/security/encryption/">Secrets encryption</a>
+ — how <code>spec.decryption.secretRef</code> keys are read and used.</li>
+<li><a href="/gating/rollback/">Rollback</a>
+ — the rollback store and <code>rollbackOnFailure</code> behavior.</li>
+<li><a href="/running/production/">Production</a>
+ — hardening a production install.</li>
+<li><a href="/running/scale-and-capacity/">Scale and capacity</a>
+ — sizing replicas and the state a multi-replica install keeps reachable.</li>
+<li><a href="/runbooks/previousrevisionunavailable/"><code>PreviousRevisionUnavailable</code> runbook</a>
+ — remediating a rollback that cannot restore.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/backup" term="backup" label="backup"/><category scheme="https://stageset.projects.metio.wtf/tags/disaster-recovery" term="disaster-recovery" label="disaster-recovery"/><category scheme="https://stageset.projects.metio.wtf/tags/restore" term="restore" label="restore"/><category scheme="https://stageset.projects.metio.wtf/tags/inventory" term="inventory" label="inventory"/><category scheme="https://stageset.projects.metio.wtf/tags/encryption" term="encryption" label="encryption"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">Controller pod down</title><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/runbooks/controller-pod-down/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stageset-controller pod has been NotReady for the alert window.</blockquote><h2 id="symptom">Symptom</h2>
+<p>A <code>stageset-controller</code> pod is <code>NotReady</code>; the <code>StageSetControllerPodDown</code> alert
+fires. While no replica is Ready, StageSets are not reconciled and the
+<a href="https://kubernetes.io/docs/">Kubernetes</a>
+ admission webhook may reject <code>StageSet</code>
+writes (<code>failurePolicy: Fail</code>).</p>
+<h2 id="cause">Cause</h2>
+<ul>
+<li>a crash-looping container (bad config flag, missing RBAC, panic),</li>
+<li>the node draining or out of resources,</li>
+<li>a failing readiness probe (<code>/readyz</code> on <code>--health-probe-bind-address</code>),</li>
+<li>the leader-election lease unobtainable.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system get pods --selector app.kubernetes.io/name<span class="o">=</span>stageset-controller
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system describe pod &lt;pod&gt;
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system logs &lt;pod&gt; --previous --tail<span class="o">=</span><span class="m">200</span>
+</span></span></code></pre></div><p>Look for flag-parse errors at startup, RBAC <code>Forbidden</code> on the controller&rsquo;s own
+<code>ServiceAccount</code>, or OOMKills.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Fix the surfaced cause (correct the flag/values, grant the missing controller
+RBAC, raise resource limits).</li>
+<li>Run more than one replica with leader election so a single pod failure doesn&rsquo;t
+stop reconciliation — see <a href="/running/production/#high-availability">production</a>
+.</li>
+<li>If admission is blocking writes during the outage and you must unblock urgently,
+scope or relax the webhook <code>failurePolicy</code>, then restore it once the controller
+is healthy.</li>
+</ul>
+<p>See <a href="/running/operations/">operations</a>
+ for the full alert set and its thresholds.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Operations</title><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><id>https://stageset.projects.metio.wtf/running/operations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Metrics, alerts, events, and runbooks for running the controller day to day.</blockquote><h2 id="metrics">Metrics</h2>
+<p>The controller registers custom metrics on the controller-runtime registry, served
+on <code>--metrics-bind-address</code> (<code>:8080</code>) alongside the standard
+<code>controller_runtime_*</code> and <code>workqueue_*</code> series. Enable scraping with the chart&rsquo;s
+opt-in <code>ServiceMonitor</code> (<code>metrics.serviceMonitor.enabled</code>):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># values.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">        </span><span class="c"># needs the Prometheus operator CRDs</span><span class="w">
+</span></span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_reconcile_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>reason</code></td>
+					<td>Reconciles, by terminal Ready reason.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_stage_applied_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Stages applied and verified.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_drift_corrected_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Out-of-band drift re-asserted on a steady-state reconcile.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_update_deferred_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td>Rollouts held by a closed update window.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_webhook_cert_renewal_failures_total</code></td>
+					<td>counter</td>
+					<td><em>(none)</em></td>
+					<td>Failed self-signed webhook cert renewals.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_teardown_force_drop_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td>Finalizers force-dropped after <code>--max-teardown-wait</code> of failing teardown; sustained non-zero values flag an unreachable target and orphaned objects. See <a href="/runbooks/teardown-forced/">TeardownForced</a>
+.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_stage_ready</code></td>
+					<td>gauge</td>
+					<td><code>namespace</code>, <code>stageset</code>, <code>stage</code></td>
+					<td><code>1</code> when a stage is Ready, else <code>0</code> — for metric-based <a href="/guides/progressive-delivery/#argo-rollouts">progressive delivery</a>
+.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="alerts">Alerts</h2>
+<p>The chart ships an opt-in <code>PrometheusRule</code> with a starter alert set, gated on
+<code>metrics.prometheusRule.enabled</code> (requires the
+<a href="https://prometheus-operator.dev/">Prometheus operator</a>
+ CRDs). It covers the
+custom <code>stageset_*</code> metrics plus controller-runtime signals:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Alert</th>
+					<th>Fires on</th>
+					<th>Severity</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSetReconcileErrorsHigh</code></td>
+					<td>per-StageSet Ready=False rate (excludes the healthy <code>Succeeded</code>/<code>Suspended</code> reasons)</td>
+					<td>warning</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerWorkqueueDepthHigh</code></td>
+					<td>the reconcile queue not draining</td>
+					<td>warning</td>
+			</tr>
+			<tr>
+					<td><code>StageSetReconcileLatencyHigh</code></td>
+					<td>reconcile p99 latency over threshold</td>
+					<td>warning</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerPodDown</code></td>
+					<td>a controller pod NotReady</td>
+					<td>critical</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWebhookCertRenewalFailing</code></td>
+					<td>self-signed cert rotation failing</td>
+					<td>critical</td>
+			</tr>
+	</tbody>
+</table>
+<p>Every threshold is a knob under <code>metrics.prometheusRule.thresholds</code>, and
+<code>extraAlertLabels</code> is merged onto every rendered alert so all stageset alerts can
+route through one Alertmanager receiver. Each alert carries a <code>runbook_url</code>
+annotation pointing at the matching <a href="/runbooks/">runbook</a>
+ page on this site; the
+URL prefix is fixed to this site, and the reconcile-errors alert templates the
+URL on <code>$labels.reason</code>. Append your own rules under
+<code>metrics.prometheusRule.extraRules</code>, and silence a built-in alert by raising its
+threshold rather than forking the chart. When <code>StageSetControllerWorkqueueDepthHigh</code>
+or <code>StageSetReconcileLatencyHigh</code> fires persistently, the controller is at capacity
+— see <a href="/running/scale-and-capacity/">Scale and capacity</a>
+ for which lever to
+pull.</p>
+<h2 id="events">Events</h2>
+<p>The controller emits Kubernetes Events on every Ready-condition transition, so
+<code>kubectl describe stageset &lt;name&gt;</code> and <a href="https://fluxcd.io/">Flux</a>
+&rsquo;s
+<code>notification-controller</code> (via an <code>Alert</code> targeting <code>kind: StageSet</code>) both
+surface what happened. Normal events
+include <code>Succeeded</code>, <code>UpdateDeferred</code>, <code>MigrationStarted</code>, and
+<code>MigrationCompleted</code>; warnings include <code>StageFailed</code>, <code>DriftCorrected</code>,
+<code>RolledBack</code>, <code>MigrationFailed</code>, <code>OnFailureAction</code>, <code>RollbackStoreFailed</code>, and
+<code>TeardownForced</code> (a deleting StageSet&rsquo;s finalizer force-dropped after
+<code>--max-teardown-wait</code> — see <a href="/runbooks/teardown-forced/">TeardownForced</a>
+).</p>
+<h2 id="runbooks">Runbooks</h2>
+<p>Every actionable Ready-condition reason has a <a href="/runbooks/">runbook</a>
+ covering the
+symptom, cause, diagnosis, and remediation. The controller appends a
+<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code> link to every
+actionable Ready message (the reason lower-cased into a path segment), so a
+<code>kubectl describe</code> links straight to the fix. Healthy reasons (<code>Succeeded</code>,
+<code>Suspended</code>) get no link.</p>
+<p>For example, a <code>StageFailed</code> StageSet shows:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Message:  stage &#34;application&#34; failed: … (runbook: https://stageset.projects.metio.wtf/runbooks/stagefailed/)
+</span></span></code></pre></div><h2 id="forcing-a-reconcile">Forcing a reconcile</h2>
+<p>The controller reconciles on its <code>spec.interval</code>, on source changes, and on
+demand. To trigger an out-of-band run, stamp the standard annotation — which is
+what <code>flux reconcile</code> and <a href="/cli/reconcile/"><code>stagesetctl reconcile</code></a>
+ do for you:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset my-app <span class="se">\
+</span></span></span><span class="line"><span class="cl">  reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date -u +%FT%TZ<span class="k">)</span><span class="s2">&#34;</span> --overwrite
+</span></span></code></pre></div><p>The handled token is recorded in <code>status.lastHandledReconcileAt</code>.</p>
+<h2 id="drift-correction">Drift correction</h2>
+<p>On a steady-state reconcile the controller re-asserts the desired state, healing
+out-of-band changes to managed objects. Each correction emits a <code>DriftCorrected</code>
+event and increments <code>stageset_drift_corrected_total</code>. Tighten the cadence with
+<code>spec.driftDetectionInterval</code> when you need faster healing than <code>spec.interval</code>.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/></entry><entry><title type="html">Production</title><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/running/disaster-recovery/?utm_source=atom_feed" rel="related" type="text/html" title="Backup and disaster recovery"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><id>https://stageset.projects.metio.wtf/running/production/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A decision-oriented checklist for hardening a stageset-controller install before it manages production releases.</blockquote><p>The chart&rsquo;s defaults bring up a hardened, lease-guarded controller, but a few
+decisions still belong to you before it manages production releases: whether
+rollback is enabled and where its store lives, how many replicas run, what the
+controller can reach, and how you observe and recover it. Work through these in
+order. Each step states what to set and why, and ends with the Helm values for
+that step. Every flag and its Helm value live in the <a href="/reference/configuration/">configuration
+reference</a>
+.</p>
+<h2 id="1-decide-on-rollback-and-pick-its-store">1. Decide on rollback and pick its store</h2>
+<p>Rollback is opt-in. With no store the controller leaves a failed run on the
+broken release; with one it restores the last successfully-applied artifact
+revisions. The store keeps bit-exact copies that outlive the producer&rsquo;s garbage
+collection, so it is the difference between a recoverable failure and a manual
+incident.</p>
+<p>Two mutually-exclusive backends are available — a <code>ReadWriteMany</code> PVC or an
+S3-compatible bucket. For HA the store must be reachable from whichever pod holds
+the lease, which rules out a <code>ReadWriteOnce</code> PVC. On-prem, use an RWX class (NFS,
+CephFS); on a cloud provider, use the object store. The decision, the keep-count,
+and how restore selects a revision are covered in <a href="/gating/rollback/">Rollback</a>
+.</p>
+<p>The store holds rendered <code>Secret</code> data, so encrypt it at rest. The S3 backend
+takes a server-side-encryption mode (SSE-S3 or SSE-KMS with your key); see
+<a href="/gating/rollback/#encryption-at-rest">encryption at rest</a>
+. This is distinct from
+SOPS decryption of a stage&rsquo;s own source, which is configured per stage in
+<a href="/security/encryption/">Secrets encryption</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Option A: RWX PVC (on-prem)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">pvc</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pvc</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">ReadWriteMany]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">storageClass</span><span class="p">:</span><span class="w"> </span><span class="l">nfs-client    </span><span class="w"> </span><span class="c"># your RWX class (NFS, CephFS, …)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="l">10Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># Option B: S3-compatible bucket (cloud)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">s3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">s3</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l">s3.eu-west-1.amazonaws.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bucket</span><span class="p">:</span><span class="w"> </span><span class="l">my-org-stageset-rollback</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">region</span><span class="p">:</span><span class="w"> </span><span class="l">eu-west-1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sse</span><span class="p">:</span><span class="w"> </span><span class="l">s3                     </span><span class="w"> </span><span class="c"># SSE-S3; or kms (+ sseKmsKeyId), or none</span><span class="w">
+</span></span></span></code></pre></div><h2 id="high-availability">2. Run leader-elected HA</h2>
+<p>The chart enables leader election by default, so even a single replica is
+lease-guarded. For HA, raise the replica floor above one: only the lease holder
+reconciles, while every replica answers admission webhook calls, so admission
+stays available during a leader handover. When the replica ceiling exceeds the
+floor the chart also renders a <code>HorizontalPodAutoscaler</code> (CPU target 80%) and a
+<code>PodDisruptionBudget</code> (<code>minAvailable: 1</code>).</p>
+<p>The lease is not released eagerly on shutdown, so after a rolling update the new
+leader takes over when the old lease expires — budget a few seconds of reconcile
+pause on restart. Admission and the gate endpoint stay available throughout,
+since every replica serves them. The HA model is detailed in
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">replicas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">                 </span><span class="c"># leader-elected HA; the non-leader still serves admission</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">                 </span><span class="c"># &gt; min renders an HPA (CPU 80%) and a PodDisruptionBudget</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">leaderElect</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><h2 id="3-choose-the-tenancy-model-and-scope-rbac">3. Choose the tenancy model and scope RBAC</h2>
+<p>The controller never applies your manifests as itself. Every cluster operation
+for a <code>StageSet</code> — building, applying, pruning, running actions — runs as the
+<code>StageSet</code>&rsquo;s <code>spec.serviceAccountName</code>, so a release can only do what its tenant
+<code>ServiceAccount</code> permits and an over-broad or missing SA fails closed. On the
+local cluster the controller assumes that identity by minting a short-lived
+TokenRequest token for the SA, so the chart grants it only <code>create</code> on
+<code>serviceaccounts/token</code> — not write access and not the <code>impersonate</code> verb. Give
+every production <code>StageSet</code> a scoped <code>ServiceAccount</code>.</p>
+<p>Pick the model that matches your cluster. Multi-tenant clusters keep
+impersonation on and may scope the controller to a namespace set — one instance
+per tenant group, which also pivots RBAC to per-namespace bindings. Single-tenant
+clusters can bind the controller to <code>cluster-admin</code> so StageSets apply without a
+<code>serviceAccountName</code>. Both models, and remote-cluster reconciliation, are in
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+. To hard-isolate namespaces,
+deny cross-namespace <code>sourceRef</code>/<code>dependsOn</code> references.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Multi-tenant: scope the controller to a namespace set (RBAC pivots to</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># per-namespace bindings) and hard-isolate cross-namespace references.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">watchNamespaces</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">team-a, team-b]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">noCrossNamespaceRefs</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># Single-tenant: bind the controller SA to cluster-admin so StageSets apply</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># without a per-release serviceAccountName.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rbac</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">clusterAdmin</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><h2 id="4-set-resources-for-your-release-sizes">4. Set resources for your release sizes</h2>
+<p>The chart constrains the pod with requests equal to limits, so it is fully
+bounded out of the box. The defaults suit ordinary workloads; raise them for very
+large inventories or very busy clusters. Ephemeral storage covers <code>/tmp</code> and the
+self-signed cert directory, both emptyDirs. The reconcile cadence StageSets
+inherit when they omit <code>spec.interval</code>, and the inventory mode and shard cap that
+govern how applied objects are tracked, are tuning knobs worth reviewing.
+<a href="/running/scale-and-capacity/">Scale and capacity</a>
+ covers the sizing drivers
+and these throughput knobs in depth.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l">50m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l">256Mi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ephemeralStorage</span><span class="p">:</span><span class="w"> </span><span class="l">32Mi  </span><span class="w"> </span><span class="c"># /tmp and the self-signed cert dir are emptyDirs</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">defaultInterval</span><span class="p">:</span><span class="w"> </span><span class="l">10m    </span><span class="w"> </span><span class="c"># cadence StageSets inherit when they omit spec.interval</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inventoryShardCap</span><span class="p">:</span><span class="w"> </span><span class="m">5000</span><span class="w">  </span><span class="c"># lower for smaller inventory objects on huge applies</span><span class="w">
+</span></span></span></code></pre></div><h2 id="network-policy">5. Fence the network and the gate</h2>
+<p>The gate endpoint is unauthenticated — a read-only <code>GET</code> that progressive-delivery
+tooling (Flagger, Argo Rollouts) polls. Turn on the ingress-only <code>NetworkPolicy</code>
+to fence the gate, webhook, and metrics ports to only the peers that need them.</p>
+<p>The policy is ingress-only and does not restrict egress. The controller still
+fetches stage artifacts over HTTP from source-controller, so if your cluster
+default-denies egress, add an egress allowance to source-controller and DNS. When
+a stage runs <code>http</code> <a href="/defining-a-release/actions/">actions</a>
+, the hosts those actions may reach
+are an explicit allow-list — loopback and link-local are always denied.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">              </span><span class="c"># admits the webhook (9443), metrics (8080), gate (8082)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">allowedActionHosts</span><span class="p">:</span><span class="w">        </span><span class="c"># host globs http actions may reach; loopback/link-local always denied</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;*.internal.example.com&#34;</span><span class="w">
+</span></span></span></code></pre></div><h2 id="admission-webhook-tls">6. Provision the admission webhook certificate</h2>
+<p>The webhook validates <code>StageSet</code> spec invariants at <code>kubectl apply</code> time instead
+of at reconcile time. It is wired by the chart; the one decision is how its
+serving certificate is obtained. The default <code>self-signed</code> mode generates an
+in-pod CA and serving cert and rotates them at a third of their validity with no
+external dependency. The <code>cert-manager</code> mode hands issuance and rotation to
+<a href="https://cert-manager.io/">cert-manager</a>
+, which must be installed in the cluster.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Option A: cert-manager (issues + rotates the cert; requires cert-manager)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">cert-manager</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">issuerRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ClusterIssuer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">letsencrypt-prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># Option B: self-signed (chart default: in-pod CA + serving cert, rotated at</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># validity/3, with no cert-manager dependency)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">self-signed</span><span class="w">
+</span></span></span></code></pre></div><h2 id="7-enable-observability-and-alerts">7. Enable observability and alerts</h2>
+<p>Turn on the <code>ServiceMonitor</code> if you scrape with the Prometheus operator, and the
+bundled <code>PrometheusRule</code> for the starter alert set. Match the Prometheus selector
+labels so your instance picks up each object. The exposed metrics, the shipped
+alerts, and the events the controller emits are documented in
+<a href="/running/operations/#metrics">Operations</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">additionalLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prom      </span><span class="w"> </span><span class="c"># match your Prometheus&#39;s serviceMonitorSelector</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">prometheusRule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prom      </span><span class="w"> </span><span class="c"># match your Prometheus&#39;s ruleSelector</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraAlertLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l">platform          </span><span class="w"> </span><span class="c"># Alertmanager routing label</span><span class="w">
+</span></span></span></code></pre></div><p>Every actionable Ready-condition reason has a <a href="/runbooks/">runbook</a>
+, and the
+controller appends a direct link to each Ready message
+(<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code>), so a
+<code>kubectl describe</code> on a failing StageSet routes straight to the fix. Healthy
+reasons get no link.</p>
+<h2 id="8-plan-for-upgrades-and-recovery">8. Plan for upgrades and recovery</h2>
+<p>Calendar-based releases run on a weekly cron. Chart upgrades are <code>helm upgrade --install</code>; the chart ships CRDs under <code>templates/</code>, so schema changes apply
+automatically. Read
+<a href="/reference/upgrading/">Upgrading</a>
+
+before each upgrade — a release that changes an immutable selector field requires
+a manual delete first. For day-two work — forcing a reconcile, drift correction,
+reading events, and following a runbook — see
+<a href="/running/operations/">Operations</a>
+.</p>
+<h2 id="a-complete-production-valuesyaml">A complete production values.yaml</h2>
+<p>Two HA setups share one backbone: a leader-elected pair (or trio), a rollback
+store reachable from whichever pod holds the lease, cert-manager for the webhook,
+a <code>NetworkPolicy</code> fencing the unauthenticated gate, and a <code>ServiceMonitor</code> for
+Prometheus. They differ only in where the rollback store lives.</p>
+<h3 id="on-prem-rwx-storage">On-prem (RWX storage)</h3>
+<p>Back the store with a <code>ReadWriteMany</code> PVC on your storage class (NFS, CephFS, …)
+so every replica mounts the same volume — the store must be reachable from the
+lease holder, and an RWO PVC cannot satisfy that under HA.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># values-onprem.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">replicas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">                 </span><span class="c"># leader-elected HA; the non-leader still serves admission</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">                 </span><span class="c"># &gt; min renders an HPA (CPU 80%) and a PodDisruptionBudget</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">leaderElect</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">pvc</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pvc</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">ReadWriteMany]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">storageClass</span><span class="p">:</span><span class="w"> </span><span class="l">nfs-client    </span><span class="w"> </span><span class="c"># your RWX class (NFS, CephFS, …)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="l">10Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">cert-manager        </span><span class="w"> </span><span class="c"># requires cert-manager in the cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">                  </span><span class="c"># fences the unauthenticated gate endpoint</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">helm upgrade --install stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://ghcr.io/metio/helm-charts/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace stageset-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -f values-onprem.yaml
+</span></span></code></pre></div><h3 id="aws--eks-s3--irsa">AWS / EKS (S3 + IRSA)</h3>
+<p>Back the store with S3 and let the controller assume an IAM role through
+<a href="https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html">IRSA</a>
+
+instead of static keys: annotate the controller&rsquo;s ServiceAccount with the role
+ARN and leave the S3 credentials empty, and the store&rsquo;s minio-go client picks the
+role up from the pod&rsquo;s web-identity token. Grant the role
+<code>s3:GetObject</code>/<code>PutObject</code>/<code>ListBucket</code>/<code>DeleteObject</code> on the bucket.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># values-eks.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">replicas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">leaderElect</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">serviceAccount</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># an IAM role granting s3:GetObject/PutObject/ListBucket/DeleteObject on the bucket</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">eks.amazonaws.com/role-arn</span><span class="p">:</span><span class="w"> </span><span class="l">arn:aws:iam::123456789012:role/stageset-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">s3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">s3</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l">s3.eu-west-1.amazonaws.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bucket</span><span class="p">:</span><span class="w"> </span><span class="l">my-org-stageset-rollback</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">region</span><span class="p">:</span><span class="w"> </span><span class="l">eu-west-1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sse</span><span class="p">:</span><span class="w"> </span><span class="l">s3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># no existingSecret → credentials come from the IRSA role above</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">cert-manager</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">helm upgrade --install stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://ghcr.io/metio/helm-charts/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace stageset-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -f values-eks.yaml
+</span></span></code></pre></div><h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="/reference/configuration/">Configuration reference</a>
+ — every flag, its
+default, and the Helm value that drives it.</li>
+<li><a href="/running/operations/">Operations</a>
+ — metrics, alerts, events, forcing a
+reconcile, drift correction.</li>
+<li><a href="/gating/rollback/">Rollback</a>
+ — store backends, keep-count, and revision
+selection.</li>
+<li><a href="/security/multi-cluster/">Multi-cluster and tenancy</a>
+ — tenant ServiceAccounts,
+namespace scoping, remote-cluster reconciliation.</li>
+<li><a href="/runbooks/">Runbooks</a>
+ — incident response.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/production" term="production" label="production"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/ha" term="ha" label="ha"/></entry><entry><title type="html">Run in production</title><link href="https://stageset.projects.metio.wtf/running/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="related" type="text/html" title="Production"/><link href="https://stageset.projects.metio.wtf/running/disaster-recovery/?utm_source=atom_feed" rel="related" type="text/html" title="Backup and disaster recovery"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><id>https://stageset.projects.metio.wtf/running/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Operate the controller day to day — production hardening, routine operations, scaling, and backup and disaster recovery.</blockquote><p>Once the controller is installed, these pages cover keeping it healthy in
+production: the posture to set before going live, what to watch day to day, how
+to size it, and how to recover its state.</p>
+<ul>
+<li><strong><a href="/running/production/">Production</a>
+</strong> — HA replicas, leader election, webhook
+TLS, and the security posture to set before going live.</li>
+<li><strong><a href="/running/operations/">Operations</a>
+</strong> — day-two running: what to watch, drift
+correction, and routine tasks.</li>
+<li><strong><a href="/running/scale-and-capacity/">Scale and capacity</a>
+</strong> — sizing, throughput, and
+resource tuning for larger fleets.</li>
+<li><strong><a href="/running/disaster-recovery/">Backup and disaster recovery</a>
+</strong> — what to back
+up and how to recover the controller&rsquo;s state.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/production" term="production" label="production"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/scaling" term="scaling" label="scaling"/></entry><entry><title type="html">Runbooks</title><link href="https://stageset.projects.metio.wtf/runbooks/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><id>https://stageset.projects.metio.wtf/runbooks/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Symptom-to-remediation pages for every StageSet status reason and operational alert, grouped by what each means for the rollout.</blockquote><p>Start from the <code>status.conditions[Ready].reason</code> on a StageSet, or from a firing
+operational alert, and follow the matching page to diagnose and remediate the
+symptom.</p>
+<p>The controller appends the matching page link to each actionable Ready message —
+<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code> — so a
+<code>kubectl describe</code> routes you straight here. Healthy and intentional reasons
+carry no link.</p>
+<p>The reasons below are grouped by what they mean for the rollout. If you are
+paging in a hurry, check <strong>Healthy and intentional holds</strong> first — those are not
+failures.</p>
+<h2 id="healthy-and-intentional-holds">Healthy and intentional holds</h2>
+<p>The rollout is doing exactly what it was told to. No action is needed beyond the
+one the gate is waiting for — approve, promote, resume, or wait for the window.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/succeeded/"><code>Succeeded</code></a>
+</td>
+					<td>All stages applied and verified; healthy steady state.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/suspended/"><code>Suspended</code></a>
+</td>
+					<td>Reconciliation is paused via <code>spec.suspend</code>.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/updatedeferred/"><code>UpdateDeferred</code></a>
+</td>
+					<td>A new revision is held by a closed update window.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/soaking/"><code>Soaking</code></a>
+</td>
+					<td>A healthy stage is holding through its soak window before advancing.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/awaitingpromotion/"><code>AwaitingPromotion</code></a>
+</td>
+					<td>A healthy stage is holding for a manual promotion.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationapprovalpending/"><code>MigrationApprovalPending</code></a>
+</td>
+					<td>A version transition with pending migrations is held for operator approval.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/budgetexhausted/"><code>BudgetExhausted</code></a>
+</td>
+					<td>A rollout is frozen because the service is out of its SLO error budget; it resumes on its own when the budget recovers.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="waiting-on-upstream">Waiting on upstream</h2>
+<p>Blocked on something outside the StageSet. These usually clear on their own once
+the upstream becomes ready; check the referenced source or dependency.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/sourcenotready/"><code>SourceNotReady</code></a>
+</td>
+					<td>The source exists but has not published a ready artifact yet.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/artifactnotfound/"><code>ArtifactNotFound</code></a>
+</td>
+					<td>The referenced <code>ExternalArtifact</code> could not be found; the controller requeues.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/resolvefailed/"><code>ResolveFailed</code></a>
+</td>
+					<td>A source reference could not be resolved to a ready <code>ExternalArtifact</code>.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/dependencynotready/"><code>DependencyNotReady</code></a>
+</td>
+					<td>A StageSet named in <code>spec.dependsOn</code> is not yet Ready.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="failures-that-need-action">Failures that need action</h2>
+<p>Something is wrong with the StageSet, its sources, or its permissions, and the
+rollout will not progress until you fix it.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/stagefailed/"><code>StageFailed</code></a>
+</td>
+					<td>A stage failed to fetch, build, apply, verify, or run an action.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/stalled/"><code>Stalled</code></a>
+</td>
+					<td>The run cannot make progress and will not retry until the spec changes.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/invalidspec/"><code>InvalidSpec</code></a>
+</td>
+					<td>The spec is invalid; the Message names the offending field or action.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/invalidversion/"><code>InvalidVersion</code></a>
+</td>
+					<td>A version source or value could not be parsed as semver.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+</td>
+					<td>An apiserver call failed with Forbidden, or referenced a kind the apiserver does not know.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/promotionblocked/"><code>PromotionBlocked</code></a>
+</td>
+					<td>A stage&rsquo;s promotion analysis breached its thresholds.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/previousrevisionunavailable/"><code>PreviousRevisionUnavailable</code></a>
+</td>
+					<td><code>rollbackOnFailure</code> is set but the last-good revisions could not be restored.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/budgetsourceunavailable/"><code>BudgetSourceUnavailable</code></a>
+</td>
+					<td>A metric source for an error-budget freeze or a promotion analysis could not be read.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/teardown-forced/"><code>TeardownForced</code></a>
+</td>
+					<td>A deleting StageSet&rsquo;s finalizer was force-dropped after teardown kept failing, possibly orphaning objects.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="migration-problems">Migration problems</h2>
+<p>A version-aware migration is holding the rollout back. The version stays pinned
+to a safe revision until the migration is fixed or approved.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/migrationfailed/"><code>MigrationFailed</code></a>
+</td>
+					<td>A migration&rsquo;s action failed; the run halts and retries with backoff.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+</td>
+					<td>A migration failed repeatedly; auto-retry is halted until a manual reconcile clears it.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationartifactinvalid/"><code>MigrationArtifactInvalid</code></a>
+</td>
+					<td>A sourced migration ladder could not be parsed or failed content validation.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationcoveragemissing/"><code>MigrationCoverageMissing</code></a>
+</td>
+					<td>A major-version transition has no covering migration and coverage is required.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationstagenotfound/"><code>MigrationStageNotFound</code></a>
+</td>
+					<td>A migration anchors to a stage that does not exist in this StageSet.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationsourcenotpinned/"><code>MigrationSourceNotPinned</code></a>
+</td>
+					<td>A sourced ladder is pinned to a mutable tag or branch instead of an immutable digest or commit.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationsourcenotverified/"><code>MigrationSourceNotVerified</code></a>
+</td>
+					<td>A sourced ladder is not signature-verified; the destructive ladder is refused.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/downgraderequiresmigration/"><code>DowngradeRequiresMigration</code></a>
+</td>
+					<td>The desired version is below the deployed version across a migration boundary.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="operational-alerts">Operational alerts</h2>
+<p>These are reached from a firing Prometheus alert rather than a Ready reason —
+they describe the controller&rsquo;s own health, not a single StageSet.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Alert</th>
+					<th>Page</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSetControllerPodDown</code></td>
+					<td><a href="/runbooks/controller-pod-down/">Controller pod down</a>
+</td>
+					<td>A controller pod has been NotReady for the alert window.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetReconcileLatencyHigh</code></td>
+					<td><a href="/runbooks/reconcile-latency/">Reconcile latency high</a>
+</td>
+					<td>Reconcile p99 latency is above threshold.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerWorkqueueDepthHigh</code></td>
+					<td><a href="/runbooks/workqueue-saturation/">Workqueue saturation</a>
+</td>
+					<td>The controller cannot drain its reconcile queue fast enough.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWebhookCertRenewalFailing</code></td>
+					<td><a href="/runbooks/webhook-cert-renewal/">Webhook cert renewal failing</a>
+</td>
+					<td>The self-signed admission webhook certificate is not being rotated.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWatchEngagementFailing</code></td>
+					<td><a href="/runbooks/watch-engagement/">Producer watch engagement failing</a>
+</td>
+					<td>A dynamic watch on a producer source kind failed to engage, so referencing StageSets stop re-triggering on its changes.</td>
+			</tr>
+	</tbody>
+</table>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">stagesetctl get</title><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl apply"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><id>https://stageset.projects.metio.wtf/cli/get/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Print human-readable StageSet status, or list StageSets.</blockquote><p>With no <code>NAME</code>, lists StageSets in the current namespace. With a <code>NAME</code>, prints that
+StageSet&rsquo;s detail (Ready reason, per-stage phase, revisions, version) — a readable
+view of <a href="/api/stageset/#status"><code>StageSet.status</code></a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl get [NAME] [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>-A</code>, <code>--all-namespaces</code></td>
+					<td><code>false</code></td>
+					<td>List StageSets across all namespaces.</td>
+			</tr>
+			<tr>
+					<td><code>-o</code>, <code>--output</code></td>
+					<td><em>(table)</em></td>
+					<td>Output format: empty for the human table, or <code>yaml</code> / <code>json</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="listing">Listing</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl get -A
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAMESPACE   NAME       READY   REASON       STAGES   VERSION   PENDING
+</span></span><span class="line"><span class="cl">payments    payments   True    Succeeded    2/2      2.1.0     -
+</span></span><span class="line"><span class="cl">platform    platform   True    Succeeded    3/3      -         -
+</span></span><span class="line"><span class="cl">staging     web        False   StageFailed  1/2      -         -
+</span></span></code></pre></div><p><code>STAGES</code> is <code>ready/total</code>; <code>PENDING</code> shows <code>held until &lt;time&gt;</code> when an
+<a href="/gating/update-windows/">update window</a>
+ is holding a rollout. A <code>False</code> <code>READY</code>
+maps to a <a href="/runbooks/">runbook</a>
+ by its <code>REASON</code>.</p>
+<h2 id="detail">Detail</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl --namespace payments get payments
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Name:       payments
+</span></span><span class="line"><span class="cl">Namespace:  payments
+</span></span><span class="line"><span class="cl">Ready:      True (Succeeded)
+</span></span><span class="line"><span class="cl">Message:    All 2 stages applied
+</span></span><span class="line"><span class="cl">Version:    2.1.0
+</span></span><span class="line"><span class="cl">Last handled reconcile: 2026-06-15T09:21:04Z
+</span></span><span class="line"><span class="cl">Stages:
+</span></span><span class="line"><span class="cl">  NAME            PHASE   REVISION        ENTRIES
+</span></span><span class="line"><span class="cl">  infrastructure  Ready   sha256:9f3c1a   12
+</span></span><span class="line"><span class="cl">  application     Ready   sha256:1a2b3c   8
+</span></span></code></pre></div><p>Conditional lines fill in when the StageSet is in that state: <code>Suspended: true</code>
+when <a href="/api/stageset/#scheduling"><code>spec.suspend</code></a>
+ is set, <code>Pending migrations:</code>
+when a <a href="/gating/versioned-migrations/">version boundary</a>
+ is queued, and a
+<code>Pending update:</code> block (next-window time plus the held revisions) when an
+<a href="/gating/update-windows/">update window</a>
+ is holding a rollout — for example:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Ready:      False (UpdateDeferred)
+</span></span><span class="line"><span class="cl">Pending update:
+</span></span><span class="line"><span class="cl">  Next window opens: 2026-06-16T08:00:00Z
+</span></span><span class="line"><span class="cl">  Held: payments/payments-app -&gt; sha256:cafe
+</span></span></code></pre></div><p>Add <code>-o yaml</code> (or <code>-o json</code>) to print the full object instead of the summary — the
+machine-readable form for scripting or piping into <code>jq</code>/<code>yq</code>.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">stagesetctl reconcile</title><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl apply"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><id>https://stageset.projects.metio.wtf/cli/reconcile/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Force an out-of-band reconcile, optionally waiting for it to be handled.</blockquote><p>Stamps the <code>reconcile.fluxcd.io/requestedAt</code>
+<a href="/api/stageinventory/#well-known-labels-and-annotations">annotation</a>
+ to trigger a
+reconcile now, optionally waiting for the controller to report it handled.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl reconcile NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(all)</em></td>
+					<td>Force only this stage to re-run its actions (single-stage reconcile).</td>
+			</tr>
+			<tr>
+					<td><code>--with-source</code></td>
+					<td><code>false</code></td>
+					<td>Also re-request the stage sources before reconciling.</td>
+			</tr>
+			<tr>
+					<td><code>--update-now</code></td>
+					<td><code>false</code></td>
+					<td>Apply a window-held rollout immediately, bypassing update windows.</td>
+			</tr>
+			<tr>
+					<td><code>--force</code></td>
+					<td><code>false</code></td>
+					<td>Proceed even when the StageSet is suspended.</td>
+			</tr>
+			<tr>
+					<td><code>--wait</code></td>
+					<td><code>false</code></td>
+					<td>Block until the controller reports the request handled.</td>
+			</tr>
+			<tr>
+					<td><code>--timeout</code></td>
+					<td><code>5m</code></td>
+					<td>How long to wait with <code>--wait</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl --namespace payments reconcile payments
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Reconcile requested for StageSet payments (token 2026-06-15T09:30:00Z)
+</span></span></code></pre></div><p>Force just one stage to re-run its actions:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile payments --stage application
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Reconcile requested for stage &#34;application&#34; of StageSet payments (token 2026-06-15T09:31:12Z)
+</span></span></code></pre></div><p>Re-pull sources, push a window-held rollout through, and wait for it:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile payments --with-source --update-now --wait --timeout 10m
+</span></span></code></pre></div><p><code>--update-now</code> is the CLI equivalent of the <code>stages.metio.wtf/update-now</code>
+annotation — the supported escape hatch when an <a href="/gating/update-windows/">update
+window</a>
+ is holding a rollout you need to ship now.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">Suspended</title><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><id>https://stageset.projects.metio.wtf/runbooks/suspended/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-17T10:56:50+02:00</updated><content type="html"><![CDATA[<blockquote>Reconciliation is paused via spec.suspend.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=Suspended</code>.</p>
+<h2 id="cause">Cause</h2>
+<p><code>spec.suspend: true</code> is set, so the controller short-circuits before any resolution, build, or apply. This is an intentional operator action, not a failure — applied objects are left exactly as they were at the last successful run.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Resume by clearing the flag:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; patch stageset &lt;name&gt; --type<span class="o">=</span>merge --patch <span class="s1">&#39;{&#34;spec&#34;:{&#34;suspend&#34;:false}}&#39;</span>
+</span></span></code></pre></div><p>The next reconcile picks up from the current artifact revisions.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Webhook cert renewal failing</title><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><id>https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The self-signed admission webhook certificate is not being rotated.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>stageset_webhook_cert_renewal_failures_total</code> is increasing; the
+<code>StageSetWebhookCertRenewalFailing</code> alert fires (see
+<a href="/running/operations/">operations</a>
+ for the alert set and its thresholds).
+The current certificate keeps working until its natural expiry — that expiry is
+the deadline, after which cluster-wide <code>StageSet</code> admission breaks.</p>
+<h2 id="cause">Cause</h2>
+<p>Only applies in <code>--webhook-cert-mode=self-signed</code>. The in-pod renewer regenerates
+the serving cert every <code>validity/3</code> and patches the
+<code>ValidatingWebhookConfiguration</code>&rsquo;s <code>caBundle</code>. It fails when:</p>
+<ul>
+<li>the controller lost <code>update</code> (or <code>get</code>) on the named
+<code>ValidatingWebhookConfiguration</code> (<code>--webhook-validating-config-name</code>),</li>
+<li>the VWC was renamed and the flag/<code>resourceNames</code> weren&rsquo;t updated,</li>
+<li>the cert directory (<code>--webhook-cert-dir</code>) became read-only.</li>
+</ul>
+<p>In <code>cert-manager</code> mode this metric is irrelevant — <a href="https://cert-manager.io/">cert-manager</a>
+ owns renewal.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller <span class="p">|</span> grep -i <span class="s1">&#39;cert\|renew\|caBundle&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl get validatingwebhookconfiguration &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.webhooks[*].clientConfig.caBundle}&#39;</span> <span class="p">|</span> head -c <span class="m">40</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li>Restore <code>get</code>/<code>update</code> on the named VWC in the controller&rsquo;s ClusterRole
+(<code>resourceNames</code> must include it).</li>
+<li>Fix the <code>--webhook-validating-config-name</code> / <code>--webhook-cert-dir</code> flags if they
+drifted from the deployed VWC and mount.</li>
+<li>As a longer-term option, switch to <code>--webhook-cert-mode=cert-manager</code> so renewal
+is handled by cert-manager.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry></feed>

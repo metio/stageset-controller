@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Gating &amp; rollout safety on StageSet Controller</title><link>https://stageset.projects.metio.wtf/gating/</link><description>Recent content in Gating &amp; rollout safety on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/gating/index.xml" rel="self" type="application/rss+xml"/><item><title>Error-budget freeze</title><link>https://stageset.projects.metio.wtf/gating/error-budget/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/error-budget/</guid><description>&lt;p&gt;An error-budget freeze holds new-revision rollouts while a service is out of its
+SLO error budget, and resumes them on its own once the budget recovers — the
+Google SRE error-budget policy: when the budget is spent, stop shipping feature
+changes until reliability is back. The controller does no SLO math; it reads one
+number (the remaining budget) from a metric source you already run and compares
+it to a threshold.&lt;/p&gt;</description></item><item><title>Rollback</title><link>https://stageset.projects.metio.wtf/gating/rollback/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/rollback/</guid><description>&lt;p&gt;When a run fails, the controller can restore the last successfully-applied artifact
+revisions instead of leaving you on a broken release. Rollback is opt-in and needs
+somewhere to keep prior revisions.&lt;/p&gt;
+&lt;h2 id="enabling-it"&gt;Enabling it&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;rollbackOnFailure&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;On a failed run the controller restores each stage&amp;rsquo;s last-good artifact revision,
+best-effort, and emits a &lt;code&gt;RolledBack&lt;/code&gt; event. The coordinates it restores from are
+recorded in &lt;code&gt;status.lastAppliedSnapshot&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Stage promotion</title><link>https://stageset.projects.metio.wtf/gating/stage-promotion/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/stage-promotion/</guid><description>&lt;p&gt;A promotion gate decides whether a healthy, applied stage may &lt;em&gt;advance&lt;/em&gt; the
+rollout to the next stage. It is distinct from &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/ready-checks/"&gt;&lt;code&gt;readyChecks&lt;/code&gt;&lt;/a&gt;
+,
+which decide whether a stage&amp;rsquo;s just-applied objects became Ready: a promotion
+gate runs &lt;em&gt;after&lt;/em&gt; the stage is Ready and gates only advancement. Holding a gate
+parks the rollout at the stage — the stage stays applied and its drift keeps
+being corrected, and later stages are never touched.&lt;/p&gt;</description></item><item><title>Update windows</title><link>https://stageset.projects.metio.wtf/gating/update-windows/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/update-windows/</guid><description>&lt;p&gt;Update windows gate &lt;em&gt;when&lt;/em&gt; new artifact revisions roll out, without pausing
+reconciliation. Drift correction keeps running; only the rollout of a &lt;em&gt;new&lt;/em&gt;
+revision is held until a window allows it.&lt;/p&gt;
+&lt;h2 id="deny-a-recurring-window"&gt;Deny a recurring window&lt;/h2&gt;
+&lt;p&gt;Freeze rollouts during business hours:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;updateWindows&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Deny&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;schedule&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;0 9 * * MON-FRI&amp;#34;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# 5-field cron: start of the window&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;duration&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;8h&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;timeZone&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Europe/Berlin&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;A new revision that arrives inside the window is held; &lt;code&gt;status.pendingUpdate&lt;/code&gt;
+records what is waiting and &lt;code&gt;nextWindowOpens&lt;/code&gt; when it will ship. The controller
+emits an &lt;code&gt;UpdateDeferred&lt;/code&gt; event and increments &lt;code&gt;stageset_update_deferred_total&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Versioned migrations</title><link>https://stageset.projects.metio.wtf/gating/versioned-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/versioned-migrations/</guid><description>&lt;p&gt;Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ exactly when the
+deployed version steps over the boundary, and never again.&lt;/p&gt;
+&lt;p&gt;Versioning is off until you set &lt;code&gt;spec.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="declaring-the-version"&gt;Declaring the version&lt;/h2&gt;
+&lt;p&gt;The controller needs to know &lt;em&gt;what version is currently being deployed&lt;/em&gt;. There are
+three ways to declare it; pick by &lt;strong&gt;where the version lives&lt;/strong&gt;.&lt;/p&gt;</description></item></channel></rss>

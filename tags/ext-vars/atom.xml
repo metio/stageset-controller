@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Ext-Vars on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/ext-vars/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/ext-vars/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/ext-vars/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/ext-vars/</id><entry><title type="html">Parameterizing a rollout</title><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="related" type="text/html" title="Dashboard"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="related" type="text/html" title="Progressive delivery"/><id>https://stageset.projects.metio.wtf/guides/parameters/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Two layers of parameters — JaaS TLAs/extVars at render time, StageSet postBuild substitution at delivery.</blockquote><p>A rollout takes parameters at two distinct layers, which serve different purposes:</p>
+<ul>
+<li><strong>Render-time parameters (JaaS).</strong> Change <em>what gets rendered</em>. The Jsonnet
+computes its output from top-level arguments (<code>tlas</code>) and external variables
+(<code>externalVariables</code>). Different values produce a different <code>ExternalArtifact</code>.</li>
+<li><strong>Delivery-time parameters (StageSet <code>postBuild</code>).</strong> Inject values <em>into
+already-rendered manifests</em>, per stage, by string substitution — the same
+mechanism Flux&rsquo;s <code>kustomize-controller</code> uses.</li>
+</ul>
+<p>Use render-time parameters for structural logic; use delivery-time parameters to
+stamp environment-specific values onto a shared artifact.</p>
+<h2 id="render-time-jaas-tlas-and-external-variables">Render-time: JaaS TLAs and external variables</h2>
+<p>Top-level arguments map to a Jsonnet <code>function(...)</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-jsonnet" data-lang="jsonnet"><span class="line"><span class="cl"><span class="c1">// main.jsonnet
+</span></span></span><span class="line"><span class="cl"><span class="k">function</span><span class="p">(</span><span class="nv">name</span><span class="o">=</span><span class="s">&#39;web&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">replicas</span><span class="o">=</span><span class="s">&#39;2&#39;</span><span class="p">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;apps/v1&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Deployment&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">metadata</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">spec</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">replicas</span><span class="p">:</span><span class="w"> </span><span class="nb">std.parseInt</span><span class="p">(</span><span class="nv">replicas</span><span class="p">)</span><span class="w"> </span><span class="c">/* … */</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">kind: GitRepository, name: web-manifests, path</span><span class="p">:</span><span class="w"> </span><span class="l">./jsonnet }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tlas</span><span class="p">:</span><span class="w">                          </span><span class="c"># → function(name, replicas)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;web&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;3&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">externalVariables</span><span class="p">:</span><span class="w">            </span><span class="c"># → std.extVar(&#39;environment&#39;)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">environment</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;production&#34;</span><span class="w">
+</span></span></span></code></pre></div><p><code>tlas</code> is a map of name → list of values (a single-element list for a scalar
+argument; multiple values become a JSON array). <code>externalVariables</code> are plain
+strings read with <code>std.extVar</code>.</p>
+<h2 id="delivery-time-stageset-postbuild-substitution">Delivery-time: StageSet postBuild substitution</h2>
+<p>When the rendered manifests carry <code>${var}</code> placeholders, a stage substitutes them
+at apply time — from inline values, ConfigMaps, and Secrets:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substitute</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">cluster_name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-vars</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Secret</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-secrets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">optional</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><p>A manifest field like <code>value: &quot;${cluster_name}&quot;</code> becomes <code>value: &quot;prod-eu&quot;</code> for
+this stage.</p>
+<blockquote>
+<p><strong>A substituted number is a number.</strong> Substitution is textual and runs after
+kustomize, which drops the quotes around a plain <code>${var}</code> scalar — so a numeric
+value such as <code>replicas: &quot;${COUNT}&quot;</code> with <code>COUNT: &quot;3&quot;</code> lands as the YAML
+integer <code>3</code>, not the string <code>&quot;3&quot;</code>. For fields that must be strings —
+<code>ConfigMap</code>/<code>Secret</code> <code>data</code>, label and annotation values — keep the substituted
+value non-numeric (e.g. <code>&quot;v${COUNT}&quot;</code>) or build it with a <code>configMapGenerator</code>,
+otherwise the apply fails with <code>expected string, got int</code>. This matches Flux
+kustomize-controller&rsquo;s post-build substitution.</p>
+</blockquote>
+<h2 id="reusing-one-artifact-across-environments">Reusing one artifact across environments</h2>
+<p>The two layers combine into a common pattern: render an environment-<em>agnostic</em>
+artifact once with JaaS, then have several StageSets — one per environment —
+consume that same artifact and stamp their own values with <code>postBuild</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">apiVersion: jaas.metio.wtf/v1, kind: JsonnetSnippet, name</span><span class="p">:</span><span class="w"> </span><span class="l">web }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- {<span class="w"> </span><span class="nt">kind: ConfigMap, name</span><span class="p">:</span><span class="w"> </span><span class="l">staging-vars }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># production (same artifact, different values)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">apiVersion: jaas.metio.wtf/v1, kind: JsonnetSnippet, name</span><span class="p">:</span><span class="w"> </span><span class="l">web }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- {<span class="w"> </span><span class="nt">kind: ConfigMap, name</span><span class="p">:</span><span class="w"> </span><span class="l">production-vars }</span><span class="w">
+</span></span></span></code></pre></div><p>One render, many environments — each StageSet bounded by its own
+<a href="/security/multi-cluster/">ServiceAccount</a>
+ and gated by its own
+<a href="/defining-a-release/actions/">actions</a>
+ and <a href="/gating/update-windows/">update windows</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/tlas" term="tlas" label="tlas"/><category scheme="https://stageset.projects.metio.wtf/tags/ext-vars" term="ext-vars" label="ext-vars"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/></entry></feed>

@@ -1,0 +1,138 @@
+# StageSet Controller
+
+> ordered, gated, multi-stage delivery of Flux sources (Git, OCI, Bucket, ExternalArtifact)
+
+Project home: https://stageset.projects.metio.wtf/ — full text for LLMs: https://stageset.projects.metio.wtf/llms-full.txt
+
+## Get started
+
+- [From Jsonnet to a gated rollout](https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/): Write Jsonnet manifests, render them with JaaS, and roll them out with StageSet — end to end.
+- [Install on Kubernetes](https://stageset.projects.metio.wtf/get-started/kubernetes/): Prerequisites, the idempotent Helm deploy, how upgrades treat the CRDs, where to customize, and how to verify the controller is healthy.
+- [Quickstart](https://stageset.projects.metio.wtf/get-started/quickstart/): Install the controller and roll out your first StageSet in a few steps.
+- [Stage sources — Git, OCI, Bucket](https://stageset.projects.metio.wtf/get-started/flux-sources/): Point a stage straight at a Git/OCI/Bucket source, or render manifests first into an ExternalArtifact.
+
+## Guides
+
+- [Generating migrations with Jsonnet](https://stageset.projects.metio.wtf/guides/jsonnet-migrations/): Render a version-gated migration ladder with JaaS and consume it from a StageSet via migrationsSourceRef.
+- [Parameterizing a rollout](https://stageset.projects.metio.wtf/guides/parameters/): Two layers of parameters — JaaS TLAs/extVars at render time, StageSet postBuild substitution at delivery.
+- [Progressive delivery](https://stageset.projects.metio.wtf/guides/progressive-delivery/): Gate a Flagger or Argo Rollouts promotion on a StageSet stage, and gate a StageSet stage on a Rollout.
+
+## Defining a release
+
+- [Actions](https://stageset.projects.metio.wtf/defining-a-release/actions/): Typed pre, post, and on-failure steps — jobs, HTTP gates, waits, patches, deletes, transient applies.
+- [Conflict policies](https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/): Resolve immutable-field and ownership conflicts per resource.
+- [Inventory and pruning](https://stageset.projects.metio.wtf/defining-a-release/inventory/): How a StageSet records what each stage applied — the sharded StageInventory — prunes what a revision no longer renders, and labels every applied object for per-stage discovery.
+- [Ready checks](https://stageset.projects.metio.wtf/defining-a-release/ready-checks/): Gate a stage on health with kstatus and CEL expressions.
+- [Stages and sources](https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/): The core — ordered stages applying Flux sources, with path, prune, patches, and substitution.
+
+## Gating & rollout safety
+
+- [Error-budget freeze](https://stageset.projects.metio.wtf/gating/error-budget/): Freeze new-revision rollouts while a service is out of its SLO error budget, resuming on its own when it recovers.
+- [Rollback](https://stageset.projects.metio.wtf/gating/rollback/): Restore the last good artifact revision when a run fails.
+- [Stage promotion](https://stageset.projects.metio.wtf/gating/stage-promotion/): Hold a rollout at a stage with a soak window or a manual gate before it advances.
+- [Update windows](https://stageset.projects.metio.wtf/gating/update-windows/): Allow or deny rollouts on a schedule, without pausing reconciliation.
+- [Versioned migrations](https://stageset.projects.metio.wtf/gating/versioned-migrations/): Run migrations once, when the deployed version crosses a release boundary — inline, or sourced from a Flux artifact and shared across StageSets.
+
+## Security & multi-tenancy
+
+- [Admission webhook](https://stageset.projects.metio.wtf/security/admission-webhook/): The validating webhook for StageSet — the invariants it enforces, why it exists instead of CEL, the failure-policy trade-off, and the two TLS provisioning modes.
+- [Multi-cluster and tenancy](https://stageset.projects.metio.wtf/security/multi-cluster/): Impersonation, watch scoping, single-tenant cluster-admin, and remote clusters.
+- [Network policy](https://stageset.projects.metio.wtf/security/network-policy/): The opt-in NetworkPolicy the chart ships — pod-scoped allowlists vs. a namespace-wide default-deny, choosing a policy engine, the ingress and egress traffic the controller needs, and how to tighten each port.
+- [Secrets encryption](https://stageset.projects.metio.wtf/security/encryption/): Decrypt SOPS-encrypted files in a stage's source before they are applied.
+- [Service mesh](https://stageset.projects.metio.wtf/security/service-mesh/): The opt-in service-mesh authorization the chart ships — Istio or Linkerd identity-based authorization and mTLS layered over networkPolicy, per-port allowed mesh identities, the non-mesh carve-outs for the apiserver and kubelet, and native passthrough.
+
+## Integrations & tooling
+
+- [Claude Code skill](https://stageset.projects.metio.wtf/integrations/claude-code/): Install the StageSet plugin so Claude Code authors and operates StageSets.
+- [Flux Operator (ResourceSet) integration](https://stageset.projects.metio.wtf/integrations/flux-operator/): Feed discovered versions into gated promotion, or fan out one StageSet per input.
+- [MCP server](https://stageset.projects.metio.wtf/integrations/mcp-server/): Run the stageset-controller Model Context Protocol server so an agent reads StageSet status and drives reconciliation in-cluster.
+- [Producer-aware sources](https://stageset.projects.metio.wtf/integrations/producer-aware-sources/): Reference a producer like JaaS and let the controller find its ExternalArtifact.
+
+## Run in production
+
+- [Backup and disaster recovery](https://stageset.projects.metio.wtf/running/disaster-recovery/): Back up the state the controller cannot fully reconstruct, and restore a cluster in the order that keeps pruning, teardown, and decryption safe.
+- [Operations](https://stageset.projects.metio.wtf/running/operations/): Metrics, alerts, events, and runbooks for running the controller day to day.
+- [Production](https://stageset.projects.metio.wtf/running/production/): A decision-oriented checklist for hardening a stageset-controller install before it manages production releases.
+- [Scale and capacity](https://stageset.projects.metio.wtf/running/scale-and-capacity/): Size a controller replica for your workload, decide how many replicas to run, tune the throughput knobs, and read the metrics that tell you when you are at capacity.
+
+## Observability
+
+- [Alerting](https://stageset.projects.metio.wtf/observability/alerting/): The controller's Kubernetes Events on StageSet transitions, the opt-in PrometheusRule alert catalog with tunable thresholds, and how every alert and Ready reason links to a runbook.
+- [Dashboard](https://stageset.projects.metio.wtf/observability/dashboard/): The StageSet controller ships a maintained Grafana dashboard as a single-layer OCI image — render it through JaaS and hand it to the grafana-operator.
+- [Logging](https://stageset.projects.metio.wtf/observability/logging/): The controller's structured slog output, the --log-level and --log-format flags, reading logs with kubectl and jq, and the chart values that drive them.
+- [Metrics](https://stageset.projects.metio.wtf/observability/metrics/): The controller's Prometheus metrics — the stageset_* custom series and controller-runtime signals, scraping with a ServiceMonitor or a plain config, querying with PromQL, and the chart values that drive them.
+- [Service level objectives](https://stageset.projects.metio.wtf/observability/slos/): The StageSet controller's SLOs — reconcile availability and reconcile latency — with their SLIs, targets, error budget, the dashboard that shows them, and how to tune them.
+- [Tracing](https://stageset.projects.metio.wtf/observability/tracing/): OpenTelemetry tracing for the controller — the --tracing-endpoint, --tracing-insecure, and --tracing-sample-ratio flags, pointing at an OTLP collector, and the chart values that drive them.
+
+## CLI
+
+- [stagesetctl apply](https://stageset.projects.metio.wtf/cli/apply/): Server-side-apply a StageSet's rendered manifests to the cluster, in stage order, under the controller's field manager.
+- [stagesetctl build](https://stageset.projects.metio.wtf/cli/build/): Render a StageSet's manifests to stdout, exactly as the controller would.
+- [stagesetctl diff](https://stageset.projects.metio.wtf/cli/diff/): Preview what a StageSet would change in the cluster — usable as a CI gate.
+- [stagesetctl get](https://stageset.projects.metio.wtf/cli/get/): Print human-readable StageSet status, or list StageSets.
+- [stagesetctl lint-migrations](https://stageset.projects.metio.wtf/cli/lint-migrations/): Validate a migration ladder file or directory before publishing it to a source.
+- [stagesetctl reconcile](https://stageset.projects.metio.wtf/cli/reconcile/): Force an out-of-band reconcile, optionally waiting for it to be handled.
+
+## API reference
+
+- [StageInventory](https://stageset.projects.metio.wtf/api/stageinventory/): The controller-managed inventory of objects each stage applied.
+- [StageSet](https://stageset.projects.metio.wtf/api/stageset/): Every field of the StageSet resource — the one you author.
+
+## Reference
+
+- [Configuration reference](https://stageset.projects.metio.wtf/reference/configuration/): Every stageset-controller command-line flag and its default.
+- [Helm chart values](https://stageset.projects.metio.wtf/reference/helm-values/): Complete reference for every value the stageset-controller Helm chart exposes, generated from the chart's values.schema.json.
+- [Upgrading](https://stageset.projects.metio.wtf/reference/upgrading/): The actions required when upgrading stageset-controller, one section per release that needs migration steps.
+- [Verifying releases](https://stageset.projects.metio.wtf/reference/verifying-releases/): Verify the signed container image, release archives, and stagesetctl CLI before you run them.
+
+## Comparisons
+
+- [StageSet vs Argo Rollouts](https://stageset.projects.metio.wtf/comparisons/argo-rollouts/): Different layers — staged multi-artifact delivery versus single-workload traffic shifting.
+- [StageSet vs Flux kustomize-controller](https://stageset.projects.metio.wtf/comparisons/flux/): Intra-release stages and gates versus per-Kustomization ordering.
+- [StageSet vs Flux Operator ResourceSet](https://stageset.projects.metio.wtf/comparisons/flux-operator/): Horizontal fan-out and scheduled discovery versus vertical, gated promotion.
+- [StageSet vs Helm](https://stageset.projects.metio.wtf/comparisons/helm/): How StageSet relates to Helm's templating and hook ordering.
+- [StageSet vs jsonnet-controller](https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/): A jsonnet-native Flux applier versus a renderer-agnostic staged-delivery layer.
+- [StageSet vs Kustomize](https://stageset.projects.metio.wtf/comparisons/kustomize/): Why StageSet delivers what Kustomize only builds.
+- [StageSet vs Tanka and kubecfg](https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/): Reconciled, gated delivery versus CLI-driven Jsonnet apply.
+
+## Runbooks
+
+- [ArtifactNotFound](https://stageset.projects.metio.wtf/runbooks/artifactnotfound/): The referenced ExternalArtifact could not be found (transient; the controller requeues).
+- [AwaitingPromotion](https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/): A stage is applied and healthy and the rollout is holding for a manual promotion.
+- [BudgetExhausted](https://stageset.projects.metio.wtf/runbooks/budgetexhausted/): A rollout is frozen because the service is out of its SLO error budget.
+- [BudgetSourceUnavailable](https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/): A metric source for an error-budget freeze or a promotion analysis could not be read.
+- [Controller pod down](https://stageset.projects.metio.wtf/runbooks/controller-pod-down/): A stageset-controller pod has been NotReady for the alert window.
+- [DependencyNotReady](https://stageset.projects.metio.wtf/runbooks/dependencynotready/): A StageSet named in spec.dependsOn is not yet Ready.
+- [DowngradeRequiresMigration](https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/): The desired version is below the deployed version and a migration boundary blocks the downgrade.
+- [InvalidSpec](https://stageset.projects.metio.wtf/runbooks/invalidspec/): The StageSet spec is invalid; the Message names the offending field or action.
+- [InvalidVersion](https://stageset.projects.metio.wtf/runbooks/invalidversion/): A version source or value could not be parsed as semver.
+- [MigrationApprovalPending](https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/): A version transition with pending migrations is held for operator approval; approve the target version to proceed.
+- [MigrationArtifactInvalid](https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/): A migration ladder sourced via spec.migrationsSourceRef could not be parsed or failed content validation; the version is held back until the artifact is fixed.
+- [MigrationCoverageMissing](https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/): A major-version transition has no migration covering it, and requireMigrationCoverage is set; the version is held back.
+- [MigrationDirty](https://stageset.projects.metio.wtf/runbooks/migrationdirty/): A migration failed repeatedly, so the controller halted auto-retry; clear the halt with a manual reconcile once the cause is fixed.
+- [MigrationFailed](https://stageset.projects.metio.wtf/runbooks/migrationfailed/): A migration's action failed; the run halts at that stage and retries with backoff, skipping already-completed actions.
+- [MigrationSourceNotPinned](https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/): A sourced migration ladder's source is pinned to a mutable tag/branch instead of an immutable digest/commit, and pinning is required.
+- [MigrationSourceNotVerified](https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/): A sourced migration ladder's source is not signature-verified; the destructive ladder is refused until verification passes.
+- [MigrationStageNotFound](https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/): A version-selected migration anchors to a stage that doesn't exist in this StageSet; the version is held back rather than skipping the migration.
+- [PreviousRevisionUnavailable](https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/): rollbackOnFailure is set but the last-good revisions could not be restored.
+- [Producer watch engagement failing](https://stageset.projects.metio.wtf/runbooks/watch-engagement/): A dynamic watch on a producer source kind failed to engage, so StageSets referencing that kind no longer re-trigger on the producer's upstream changes.
+- [PromotionBlocked](https://stageset.projects.metio.wtf/runbooks/promotionblocked/): A stage's promotion analysis breached its thresholds, so the rollout will not advance past it.
+- [RBACDenied](https://stageset.projects.metio.wtf/runbooks/rbacdenied/): An apiserver call the controller made — resolving a source, an impersonated apply, or a tenant get — failed with Forbidden or referenced a kind the apiserver does not know.
+- [Reconcile latency high](https://stageset.projects.metio.wtf/runbooks/reconcile-latency/): Reconcile p99 latency for the StageSet controller is above threshold.
+- [ResolveFailed](https://stageset.projects.metio.wtf/runbooks/resolvefailed/): A source reference could not be resolved to a ready ExternalArtifact.
+- [Soaking](https://stageset.projects.metio.wtf/runbooks/soaking/): A stage is applied and healthy and the rollout is holding through its promotion soak window before advancing.
+- [SourceNotReady](https://stageset.projects.metio.wtf/runbooks/sourcenotready/): The source exists but has not published a ready artifact yet (transient).
+- [StageFailed](https://stageset.projects.metio.wtf/runbooks/stagefailed/): A stage failed to fetch, build, apply, verify, or run an action; the run halts there.
+- [Stalled](https://stageset.projects.metio.wtf/runbooks/stalled/): The run cannot make progress and will not retry until the spec changes.
+- [Succeeded](https://stageset.projects.metio.wtf/runbooks/succeeded/): All stages applied and verified the healthy steady state.
+- [Suspended](https://stageset.projects.metio.wtf/runbooks/suspended/): Reconciliation is paused via spec.suspend.
+- [TeardownForced](https://stageset.projects.metio.wtf/runbooks/teardown-forced/): A deleting StageSet's finalizer was force-dropped after teardown kept failing past --max-teardown-wait, possibly orphaning objects on the target cluster.
+- [UpdateDeferred](https://stageset.projects.metio.wtf/runbooks/updatedeferred/): A new revision is held by a closed update window.
+- [Webhook cert renewal failing](https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/): The self-signed admission webhook certificate is not being rotated.
+- [Workqueue saturation](https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/): The controller cannot drain its reconcile queue fast enough.
+
+## Contributing
+
+- [Building and testing](https://stageset.projects.metio.wtf/contributing/building/): Build the controller, run the test suite, and pass the static-analysis gate.
+- [CI and releases](https://stageset.projects.metio.wtf/contributing/ci-and-release/): The pull-request gates and the automated calendar-based release process.
+

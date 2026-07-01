@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Externalartifact on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/externalartifact/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/externalartifact/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/externalartifact/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/externalartifact/</id><entry><title type="html">ArtifactNotFound</title><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="related" type="text/html" title="ResolveFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/watch-engagement/?utm_source=atom_feed" rel="related" type="text/html" title="Producer watch engagement failing"/><id>https://stageset.projects.metio.wtf/runbooks/artifactnotfound/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The referenced ExternalArtifact could not be found (transient; the controller requeues).</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=ArtifactNotFound</code>. Transient: the controller requeues in case the artifact appears.</p>
+<h2 id="cause">Cause</h2>
+<p>A stage&rsquo;s <code>sourceRef</code> resolves to <strong>no <code>ExternalArtifact</code></strong>. Either:</p>
+<ul>
+<li>a <strong>direct</strong> <code>sourceRef</code> (<code>kind: ExternalArtifact</code>, the default) names an object that does not exist in the target namespace; or</li>
+<li>a <strong>producer</strong> <code>sourceRef</code> (e.g. <code>kind: JsonnetSnippet</code>) exists, but no <code>ExternalArtifact</code> carries a <code>spec.sourceRef</code> back-pointer to it yet — the producer has not created its artifact object.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;     <span class="c1"># Message names the missing ref</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get externalartifact
+</span></span></code></pre></div><p>For a producer ref, confirm the producer object exists and that it is configured to publish an <code>ExternalArtifact</code> (not only serve over HTTP):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get &lt;producer-kind&gt; &lt;name&gt; --output yaml
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li>Fix a typo in <code>sourceRef.name</code> / <code>sourceRef.namespace</code>.</li>
+<li>For a direct ref, create (or wait for) the named <code>ExternalArtifact</code>.</li>
+<li>For a producer ref, ensure the producer actually publishes an artifact and that it lands in the same namespace as the StageSet (cross-namespace producer refs are gated by <code>--no-cross-namespace-refs</code>).</li>
+</ul>
+<p>If the artifact exists but is not yet published, the reason is <a href="/runbooks/sourcenotready/"><code>SourceNotReady</code></a>
+; a spec/API resolution failure is <a href="/runbooks/resolvefailed/"><code>ResolveFailed</code></a>
+. See <a href="/defining-a-release/stages-and-sources/">stages and sources</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Producer-aware sources</title><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stages and sources"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="related" type="text/html" title="ResolveFailed"/><id>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Reference a producer like JaaS and let the controller find its ExternalArtifact.</blockquote><p>Point a stage at the resource that <em>produces</em> an artifact, and the controller
+finds the <code>ExternalArtifact</code> that producer publishes. This is the third source
+route, alongside the two direct ones — an <code>ExternalArtifact</code> (the default
+<code>sourceRef.kind</code>) or a Flux <code>GitRepository</code>/<code>OCIRepository</code>/<code>Bucket</code> — covered in
+<a href="/defining-a-release/stages-and-sources/#source-kinds">stages and sources</a>
+. Reach for it when an
+operator publishes an <code>ExternalArtifact</code> from a custom resource (for example
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ rendering Jsonnet).</p>
+<h2 id="referencing-a-producer">Referencing a producer</h2>
+<p>Set <code>kind</code> (and <code>apiVersion</code>) to a producer resource, and the controller resolves
+it to the <code>ExternalArtifact</code> that producer publishes — the one whose
+<code>spec.sourceRef</code> back-references the producer (matched on group, kind, and name).
+For example, a <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ <code>JsonnetSnippet</code>
+renders Jsonnet and publishes an <code>ExternalArtifact</code>; reference the snippet and the
+controller follows the link:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">dashboards</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">grafana-dashboards</span><span class="w">
+</span></span></span></code></pre></div><p>The controller also watches the common Flux source kinds (<code>GitRepository</code>,
+<code>OCIRepository</code>, <code>Bucket</code>) so a stage re-reconciles when an upstream source
+changes.</p>
+<p>A producer can itself consume another producer first: a JaaS <code>JsonnetSnippet</code> can
+render from the artifact another snippet publishes. That chaining happens on the
+producer side — see
+<a href="https://jaas.projects.metio.wtf/defining-a-release/snippet-sources/#chaining-snippets">chaining snippets</a>
+.
+A stage references only the final producer and reads the <code>ExternalArtifact</code> it
+publishes.</p>
+<h2 id="related-projects">Related projects</h2>
+<p>JOI, JaaS, and <code>StageSet</code> compose end to end:</p>
+<ul>
+<li><strong><a href="https://github.com/metio/jsonnet-oci-images">JOI</a>
+</strong> publishes Jsonnet
+libraries as single-layer OCI images (usable both as image-volume mounts and as
+Flux <code>OCIRepository</code> sources).</li>
+<li><strong><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+</strong> evaluates Jsonnet — optionally
+importing those JOI libraries — and publishes the rendered JSON as an
+<code>ExternalArtifact</code>.</li>
+<li><strong><code>StageSet</code></strong> references the <code>JsonnetSnippet</code> (or its artifact) and rolls the
+result out in ordered, gated stages.</li>
+</ul>
+<p>Each project is independently useful; a stage reads straight from a
+<code>GitRepository</code>, <code>OCIRepository</code>, or <code>Bucket</code>, or from any <code>ExternalArtifact</code>
+regardless of what produced it.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">ResolveFailed</title><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/watch-engagement/?utm_source=atom_feed" rel="related" type="text/html" title="Producer watch engagement failing"/><id>https://stageset.projects.metio.wtf/runbooks/resolvefailed/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A source reference could not be resolved to a ready ExternalArtifact.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=ResolveFailed</code>. The Message describes why resolution failed.</p>
+<h2 id="cause">Cause</h2>
+<p>A stage&rsquo;s <code>sourceRef</code> could not be resolved to an <code>ExternalArtifact</code> for a spec/config or API reason (distinct from &ldquo;not published yet&rdquo;, which is <a href="/runbooks/sourcenotready/"><code>SourceNotReady</code></a>
+, and &ldquo;no such object&rdquo;, which is <a href="/runbooks/artifactnotfound/"><code>ArtifactNotFound</code></a>
+). Common cases:</p>
+<ul>
+<li>an <strong>ambiguous producer</strong> — more than one <code>ExternalArtifact</code> back-points at the same producer object, so the target is undefined;</li>
+<li>a <strong>cross-namespace ref rejected</strong> by <code>--no-cross-namespace-refs</code>;</li>
+<li>a <strong>transient API error</strong> reading the source or artifact (a list/get blip). A permanent API error — RBAC denial or a missing source CRD — is reported as <a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+ instead, since retry can&rsquo;t fix it.</li>
+</ul>
+<p>When the failing <code>sourceRef</code> targets another namespace, the Message is deliberately scrubbed to <code>cross-namespace &lt;kind&gt; %q is not reachable</code> so tenants cannot fingerprint other namespaces — check that source CR&rsquo;s status in its own namespace.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;
+</span></span><span class="line"><span class="cl"><span class="c1"># Ambiguity: are there multiple artifacts pointing at the producer?</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get externalartifact --output yaml <span class="p">|</span> grep -A3 sourceRef
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li><strong>Ambiguous producer:</strong> ensure exactly one <code>ExternalArtifact</code> back-points at the producer, or reference the <code>ExternalArtifact</code> directly by name.</li>
+<li><strong>Cross-namespace rejected:</strong> move the source into the StageSet&rsquo;s namespace, or run the controller without <code>--no-cross-namespace-refs</code> if your <a href="/security/multi-cluster/">tenancy model</a>
+ allows it.</li>
+<li><strong>RBAC / missing CRD:</strong> these surface as <a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+ — grant the controller (or the impersonated <code>serviceAccountName</code>) read on the source kind, or install the <code>source-controller</code> CRDs.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Stages and sources</title><link href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="related" type="text/html" title="ResolveFailed"/><link href="https://stageset.projects.metio.wtf/get-started/flux-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stage sources — Git, OCI, Bucket"/><link href="https://stageset.projects.metio.wtf/api/stageset/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet"/><id>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The core — ordered stages applying Flux sources, with path, prune, patches, and substitution.</blockquote><p>A <code>StageSet</code> is an ordered list of stages. Each stage resolves a
+<a href="https://fluxcd.io/">Flux</a>
+ source — a <code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>,
+or an <code>ExternalArtifact</code> (the default) — applies its manifests, waits for them to
+become healthy, and only then lets the next stage start.</p>
+<h2 id="one-stage">One stage</h2>
+<p>The minimum is one stage pointing at one artifact in the same namespace:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app         </span><span class="w"> </span><span class="c"># an ExternalArtifact</span><span class="w">
+</span></span></span></code></pre></div><p><code>sourceRef.kind</code> defaults to <code>ExternalArtifact</code>, so the common case is a single
+line. The controller fetches the artifact, applies every manifest in it, and marks
+the stage <code>Ready</code> once the applied objects report healthy.</p>
+<h2 id="source-kinds">Source kinds</h2>
+<p>A <code>sourceRef</code> resolves to a Flux artifact three ways. Point it at whichever you
+already have:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># 1. an ExternalArtifact (the default — kind omitted)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># 2. a classic Flux source, consumed directly</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository       </span><span class="w"> </span><span class="c"># or OCIRepository, or Bucket</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-manifests</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># 3. a producer that publishes an ExternalArtifact (resolved via its back-pointer)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p><code>GitRepository</code>, <code>OCIRepository</code>, and <code>Bucket</code> carry the same <code>status.artifact</code>
+contract as <code>ExternalArtifact</code>, so the controller reads them directly — no producer
+in between. A stage can apply manifests straight from a Git repo or an OCI artifact,
+like Flux&rsquo;s own <code>kustomize-controller</code>. For the producer case (for example
+rendering Jsonnet with <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+), see
+<a href="/integrations/producer-aware-sources/">producer-aware sources</a>
+.</p>
+<h2 id="ordered-stages">Ordered stages</h2>
+<p>Add more stages and they run top to bottom — each one waits for the previous to be
+<code>Ready</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">crds         </span><span class="w"> </span><span class="c"># 1 ── install the CRDs first</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform-crds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">operator     </span><span class="w"> </span><span class="c"># 2 ── then the operator that needs them</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform-operator</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">workloads    </span><span class="w"> </span><span class="c"># 3 ── then the workloads it manages</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-workloads</span><span class="w">
+</span></span></span></code></pre></div><p>This is the core of a <code>StageSet</code>: <code>operator</code> is never applied until <code>crds</code> is
+healthy, so the operator never crash-loops waiting for a CRD that isn&rsquo;t there yet.</p>
+<h2 id="shaping-a-stages-manifests">Shaping a stage&rsquo;s manifests</h2>
+<p>A stage can build from a sub-path of the artifact, customize with patches, and
+substitute variables — the <a href="https://kubectl.docs.kubernetes.io/">kustomize</a>
+-style
+surface:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./overlays/production     </span><span class="w"> </span><span class="c"># build a sub-path of the artifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prune</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">                      </span><span class="c"># GC objects that leave this stage (default)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">patches</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">patch</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">            - op: replace
+</span></span></span><span class="line"><span class="cl"><span class="sd">              path: /spec/replicas
+</span></span></span><span class="line"><span class="cl"><span class="sd">              value: 6</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substitute</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">cluster_name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-vars</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Secret</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-secrets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">optional</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><ul>
+<li><strong><code>path</code></strong> builds from a directory inside the artifact (default <code>./</code>).</li>
+<li><strong><code>prune</code></strong> (default <code>true</code>) garbage-collects objects that fall out of the stage
+between reconciles, tracked precisely via the stage&rsquo;s
+<a href="/api/stageinventory/"><code>StageInventory</code></a>
+.</li>
+<li><strong><code>patches</code></strong> are strategic-merge or JSON6902 patches applied after the build.</li>
+<li><strong><code>postBuild</code></strong> substitutes <code>${var}</code> references from inline values, ConfigMaps,
+and Secrets at delivery time — see <a href="/guides/parameters/">parameterizing a rollout</a>
+
+for the full render-time-vs-delivery-time treatment.</li>
+</ul>
+<p>From here, layer on <a href="/defining-a-release/actions/">actions</a>
+ to gate the stage, or
+<a href="/defining-a-release/ready-checks/">ready checks</a>
+ to define what &ldquo;healthy&rdquo; means.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/flux" term="flux" label="flux"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/></entry></feed>

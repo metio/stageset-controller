@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Comparison on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/comparison/</link><description>Recent content in Comparison on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/comparison/index.xml" rel="self" type="application/rss+xml"/><item><title>StageSet vs Argo Rollouts</title><link>https://stageset.projects.metio.wtf/comparisons/argo-rollouts/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/argo-rollouts/</guid><description>&lt;p&gt;&lt;a href="https://argoproj.github.io/argo-rollouts/"&gt;Argo Rollouts&lt;/a&gt;
+ and &lt;code&gt;StageSet&lt;/code&gt; are easy
+to mention in the same breath because both roll things out gradually, but they
+operate at different layers and are complementary rather than competing.&lt;/p&gt;
+&lt;h2 id="what-argo-rollouts-does"&gt;What Argo Rollouts does&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;Argo Rollouts&lt;/code&gt; replaces a &lt;code&gt;Deployment&lt;/code&gt; with a &lt;code&gt;Rollout&lt;/code&gt; that shifts traffic to a new
+version &lt;strong&gt;progressively&lt;/strong&gt; — canary or blue-green — pausing at weighted steps and
+promoting based on &lt;strong&gt;metric analysis&lt;/strong&gt; (Prometheus queries, web/Job providers).
+Its unit of work is a &lt;strong&gt;single workload&amp;rsquo;s&lt;/strong&gt; version transition and the traffic in
+front of it.&lt;/p&gt;</description></item><item><title>StageSet vs Flux kustomize-controller</title><link>https://stageset.projects.metio.wtf/comparisons/flux/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/flux/</guid><description>&lt;p&gt;This is the closest comparison — &lt;code&gt;StageSet&lt;/code&gt; is built &lt;em&gt;for&lt;/em&gt;
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ and borrows its conventions. Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt;
+(and &lt;code&gt;helm-controller&lt;/code&gt;) reconcile a source into the cluster continuously, exactly
+like &lt;code&gt;StageSet&lt;/code&gt;. The difference is granularity.&lt;/p&gt;
+&lt;h2 id="what-kustomize-controller-gives-you"&gt;What kustomize-controller gives you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Continuous reconciliation of a &lt;code&gt;Kustomization&lt;/code&gt; from a Flux source, with pruning,
+health checks, drift correction, and &lt;code&gt;dependsOn&lt;/code&gt; ordering &lt;strong&gt;between&lt;/strong&gt;
+Kustomizations.&lt;/li&gt;
+&lt;li&gt;Impersonation via &lt;code&gt;serviceAccountName&lt;/code&gt;, &lt;code&gt;postBuild&lt;/code&gt; substitution, patches — the
+same surface &lt;code&gt;StageSet&lt;/code&gt; deliberately mirrors.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Ordering within a release.&lt;/strong&gt; &lt;code&gt;kustomize-controller&lt;/code&gt; applies one Kustomization
+as a unit; ordering exists only &lt;em&gt;between&lt;/em&gt; Kustomizations via &lt;code&gt;dependsOn&lt;/code&gt;. To
+sequence three steps you create three Kustomizations and wire their
+dependencies. &lt;code&gt;StageSet&lt;/code&gt; expresses that as one resource with ordered &lt;code&gt;stages&lt;/code&gt; —
+and the controller waits for each stage&amp;rsquo;s health before the next.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Typed actions between steps.&lt;/strong&gt; Migrations, HTTP gates, waits, and transient
+applies are first-class &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+; in plain Flux you&amp;rsquo;d model
+these as extra Kustomizations and Jobs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Release-level features.&lt;/strong&gt; &lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;Update windows&lt;/a&gt;
+,
+&lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+, and
+&lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;rollback&lt;/a&gt;
+ operate across the whole staged release.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Source-native.&lt;/strong&gt; A stage consumes a &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt;
+directly (just like &lt;code&gt;kustomize-controller&lt;/code&gt;), or an &lt;code&gt;ExternalArtifact&lt;/code&gt; (RFC-0012),
+or a &lt;em&gt;producer&lt;/em&gt; resolved to its artifact — which is how it also pairs with
+renderers like &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SOPS parity.&lt;/strong&gt; Encrypted Secrets in a source decrypt the same way, via
+&lt;a href="https://stageset.projects.metio.wtf/security/encryption/"&gt;&lt;code&gt;spec.decryption&lt;/code&gt;&lt;/a&gt;
+ (age, PGP, or cloud KMS), so a SOPS-using
+repo ports across unchanged.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; sits alongside the other Flux controllers and reuses Flux&amp;rsquo;s source layer,
+notifications (&lt;code&gt;Alert&lt;/code&gt;/&lt;code&gt;Provider&lt;/code&gt; targeting &lt;code&gt;kind: StageSet&lt;/code&gt;), and reconcile
+annotations. Use &lt;code&gt;kustomize-controller&lt;/code&gt; for ordinary one-shot reconciliation and
+reach for &lt;code&gt;StageSet&lt;/code&gt; when a release needs ordered, gated stages.&lt;/p&gt;</description></item><item><title>StageSet vs Flux Operator ResourceSet</title><link>https://stageset.projects.metio.wtf/comparisons/flux-operator/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/flux-operator/</guid><description>&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; and the &lt;a href="https://fluxoperator.dev/"&gt;Flux Operator&lt;/a&gt;
+&amp;rsquo;s &lt;code&gt;ResourceSet&lt;/code&gt;
+solve different axes of delivery, and they compose cleanly:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;ResourceSet&lt;/code&gt; is horizontal fan-out.&lt;/strong&gt; It templates &lt;em&gt;N&lt;/em&gt; instances of a set of
+resources from a matrix of inputs, and pairs with a
+&lt;code&gt;ResourceSetInputProvider&lt;/code&gt; (RSIP) to &lt;em&gt;discover&lt;/em&gt; those inputs — pull requests,
+branches, tags, OCI artifact tags — on a schedule.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;StageSet&lt;/code&gt; is vertical promotion.&lt;/strong&gt; It moves &lt;em&gt;one&lt;/em&gt; application through an
+ordered list of gated &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages&lt;/a&gt;
+, with typed
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+, &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+,
+and &lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;rollback&lt;/a&gt;
+ along the way.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Reach for &lt;code&gt;ResourceSet&lt;/code&gt; to stamp out many similar deployments from a changing set
+of inputs. Reach for &lt;code&gt;StageSet&lt;/code&gt; to roll a single release out in order, gated at
+each step. To do both — discover a new version, then promote it through gated
+stages — run them together; see the
+&lt;a href="https://stageset.projects.metio.wtf/integrations/flux-operator/"&gt;Flux Operator integration&lt;/a&gt;
+ page.&lt;/p&gt;</description></item><item><title>StageSet vs Helm</title><link>https://stageset.projects.metio.wtf/comparisons/helm/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/helm/</guid><description>&lt;p&gt;&lt;a href="https://helm.sh/"&gt;Helm&lt;/a&gt;
+ is two things: a templating engine (charts) and an
+imperative release tool (&lt;code&gt;helm upgrade&lt;/code&gt;). &lt;code&gt;StageSet&lt;/code&gt; is neither — it&amp;rsquo;s a declarative
+delivery controller. The overlap is ordering: Helm&amp;rsquo;s hooks and hook weights give you
+&lt;em&gt;some&lt;/em&gt; sequencing inside a single chart&amp;rsquo;s install/upgrade.&lt;/p&gt;
+&lt;h2 id="what-helm-gives-you"&gt;What Helm gives you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Templated, parameterized manifests (charts and values).&lt;/li&gt;
+&lt;li&gt;Install/upgrade ordering via &lt;code&gt;helm.sh/hook&lt;/code&gt; (pre-install, post-upgrade, …) and
+&lt;code&gt;hook-weight&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;A release history you can roll back to with &lt;code&gt;helm rollback&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Continuous reconciliation.&lt;/strong&gt; &lt;code&gt;helm upgrade&lt;/code&gt; is a point-in-time, imperative
+action; nothing re-asserts the state afterward. &lt;code&gt;StageSet&lt;/code&gt; reconciles on an
+interval, corrects drift, and prunes — it&amp;rsquo;s GitOps, not a one-shot.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Ordering across artifacts, not just within one chart.&lt;/strong&gt; Helm hooks order
+resources &lt;em&gt;inside&lt;/em&gt; a release. &lt;code&gt;StageSet&lt;/code&gt; orders whole &lt;em&gt;stages&lt;/em&gt;, each its own
+artifact, with readiness gating between them.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Typed gates between steps.&lt;/strong&gt; Hooks run Jobs; &lt;code&gt;StageSet&lt;/code&gt; stages can run Jobs,
+HTTP gates, waits, patches, deletes, and transient applies, as pre/post/onFailure
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Identity.&lt;/strong&gt; A &lt;code&gt;StageSet&lt;/code&gt; applies under a per-tenant &lt;code&gt;ServiceAccount&lt;/code&gt;; &lt;code&gt;helm upgrade&lt;/code&gt; runs as whoever ran it.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;Render a chart to manifests (e.g. via a producer that publishes an
+&lt;code&gt;ExternalArtifact&lt;/code&gt;) and deliver it with &lt;code&gt;StageSet&lt;/code&gt;. The controller understands
+&lt;code&gt;helm.sh/hook&lt;/code&gt; resources: &lt;code&gt;applyHelmHookResources&lt;/code&gt; (default &lt;code&gt;true&lt;/code&gt;) applies them as
+ordinary objects, so a Helm-style chart&amp;rsquo;s hook resources still get created, under
+&lt;code&gt;StageSet&lt;/code&gt;&amp;rsquo;s ordering and gating rather than Helm&amp;rsquo;s.&lt;/p&gt;</description></item><item><title>StageSet vs jsonnet-controller</title><link>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</guid><description>&lt;p&gt;&lt;a href="https://github.com/pelotech/jsonnet-controller"&gt;jsonnet-controller&lt;/a&gt;
+ (pelotech) is a
+Flux controller that evaluates Jsonnet (kubecfg- and Tanka-style) and applies the
+result to the cluster. Its &lt;code&gt;Konfiguration&lt;/code&gt; resource (&lt;code&gt;jsonnet.io/v1beta1&lt;/code&gt;) is, in
+effect, &lt;em&gt;kustomize-controller for Jsonnet&lt;/em&gt;: point it at a &lt;code&gt;GitRepository&lt;/code&gt; (or an
+HTTP(S) URL), and it builds the Jsonnet and reconciles the manifests — with
+pruning, health/revision tracking, TLA string/code variables, and &lt;code&gt;dependsOn&lt;/code&gt;
+ordering &lt;strong&gt;between&lt;/strong&gt; Konfigurations.&lt;/p&gt;
+&lt;p&gt;The two projects sit at &lt;strong&gt;different layers&lt;/strong&gt;, which is the whole comparison.&lt;/p&gt;</description></item><item><title>StageSet vs Kustomize</title><link>https://stageset.projects.metio.wtf/comparisons/kustomize/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/kustomize/</guid><description>&lt;p&gt;&lt;a href="https://kustomize.io/"&gt;Kustomize&lt;/a&gt;
+ (the &lt;code&gt;kustomize&lt;/code&gt; CLI / &lt;code&gt;kubectl kustomize&lt;/code&gt;) is a
+manifest &lt;em&gt;builder&lt;/em&gt;: it composes bases and overlays, applies patches, and emits YAML.
+It does not apply anything, and it has no notion of ordering, readiness, or
+reconciliation — that&amp;rsquo;s &lt;code&gt;kubectl apply&lt;/code&gt;&amp;rsquo;s job, and &lt;code&gt;kubectl&lt;/code&gt; applies everything at
+once.&lt;/p&gt;
+&lt;h2 id="what-kustomize-gives-you"&gt;What Kustomize gives you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Overlay composition, strategic-merge and JSON6902 patches, variable replacement,
+generators.&lt;/li&gt;
+&lt;li&gt;A pure transformation: in goes a kustomization, out come manifests.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;It delivers, not just builds.&lt;/strong&gt; Kustomize stops at YAML. &lt;code&gt;StageSet&lt;/code&gt; applies it,
+waits for health, prunes what&amp;rsquo;s gone, and keeps doing so.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Ordering and gates.&lt;/strong&gt; &lt;code&gt;kubectl apply -k&lt;/code&gt; has no stages and no gates. &lt;code&gt;StageSet&lt;/code&gt;
+sequences stages and runs &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ between them.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Continuous reconciliation and drift correction&lt;/strong&gt;, versus a one-shot &lt;code&gt;apply&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; &lt;em&gt;includes&lt;/em&gt; the parts of Kustomize you reach for at delivery time: a stage
+has &lt;code&gt;path&lt;/code&gt;, &lt;code&gt;patches&lt;/code&gt;, and &lt;code&gt;postBuild&lt;/code&gt; substitution
+(&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages and sources&lt;/a&gt;
+). So you can keep authoring with
+Kustomize overlays and let a stage apply the right overlay, patched and
+substituted — then add the ordering, gating, and reconciliation Kustomize alone
+doesn&amp;rsquo;t offer.&lt;/p&gt;</description></item><item><title>StageSet vs Tanka and kubecfg</title><link>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</guid><description>&lt;p&gt;&lt;a href="https://tanka.dev/"&gt;Tanka&lt;/a&gt;
+ and &lt;a href="https://github.com/kubecfg/kubecfg"&gt;kubecfg&lt;/a&gt;
+ are
+Jsonnet-based config tools: you express your resources in Jsonnet, the tool renders
+them, diffs against the cluster, and applies. They generate configuration and run a
+CLI-driven apply, but they are imperative tools you run, not controllers that
+reconcile.&lt;/p&gt;
+&lt;h2 id="what-tanka--kubecfg-give-you"&gt;What Tanka / kubecfg give you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Jsonnet-powered, DRY manifest generation (libraries, abstractions, environments).&lt;/li&gt;
+&lt;li&gt;A &lt;code&gt;diff&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; workflow with dependency-aware ordering of a single apply.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Reconciliation, not invocation.&lt;/strong&gt; Tanka/kubecfg apply when &lt;em&gt;you&lt;/em&gt; run them.
+&lt;code&gt;StageSet&lt;/code&gt; runs in-cluster and continuously reconciles, corrects drift, and
+prunes.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Staged, gated delivery.&lt;/strong&gt; They apply a rendered set (in dependency order);
+they don&amp;rsquo;t model multi-stage rollouts with readiness gates, update windows, or
+versioned migrations between stages.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;GitOps identity and tenancy.&lt;/strong&gt; &lt;code&gt;StageSet&lt;/code&gt; applies under a per-tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt; inside the cluster; Tanka/kubecfg use your local credentials.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;The Jsonnet &lt;em&gt;generation&lt;/em&gt; that Tanka and kubecfg do so well has a GitOps-native
+equivalent in two related projects:&lt;/p&gt;</description></item></channel></rss>

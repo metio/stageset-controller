@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Jsonnet on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/jsonnet/</link><description>Recent content in Jsonnet on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/jsonnet/index.xml" rel="self" type="application/rss+xml"/><item><title>From Jsonnet to a gated rollout</title><link>https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/</guid><description>&lt;p&gt;This tutorial follows a complete delivery: write &lt;a href="https://kubernetes.io/docs/"&gt;Kubernetes&lt;/a&gt;
+
+manifests in &lt;a href="https://jsonnet.org/"&gt;Jsonnet&lt;/a&gt;
+ and publish the source through
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+; &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ renders it into a
+Flux &lt;code&gt;ExternalArtifact&lt;/code&gt;, and a StageSet rolls it out with a readiness gate.&lt;/p&gt;
+&lt;p&gt;The chain is:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Jsonnet in Git/OCI/Bucket → JaaS (JsonnetSnippet) → ExternalArtifact → StageSet
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;This tutorial renders &lt;em&gt;Jsonnet&lt;/em&gt;, so it goes through JaaS: JaaS turns the Jsonnet
+into an &lt;code&gt;ExternalArtifact&lt;/code&gt; the stage consumes. (If your manifests were already plain
+YAML, a stage could read a &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt; directly — see
+&lt;a href="https://stageset.projects.metio.wtf/get-started/flux-sources/"&gt;Stage sources&lt;/a&gt;
+. The renderer is here because the input is
+Jsonnet, not because StageSet can&amp;rsquo;t read Git.)&lt;/p&gt;</description></item><item><title>Generating migrations with Jsonnet</title><link>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</guid><description>&lt;p&gt;A &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migration ladder&lt;/a&gt;
+ is just data — a list of
+version-gated actions. So you can &lt;em&gt;generate&lt;/em&gt; it with &lt;a href="https://jsonnet.org/"&gt;Jsonnet&lt;/a&gt;
+,
+publish it once as a Flux artifact with &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+,
+and have every StageSet that deploys the app consume it through
+&lt;code&gt;spec.migrationsSourceRef&lt;/code&gt;. One ladder, authored once, shared across namespaces.&lt;/p&gt;
+&lt;p&gt;The chain mirrors &lt;a href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/"&gt;From Jsonnet to a gated rollout&lt;/a&gt;
+,
+but the rendered artifact is the &lt;em&gt;migrations&lt;/em&gt; rather than the manifests:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Jsonnet ladder → JaaS (JsonnetSnippet) → ExternalArtifact → StageSet.migrationsSourceRef
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="prerequisites"&gt;Prerequisites&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Flux installed (with the &lt;code&gt;ExternalArtifact&lt;/code&gt; API — Flux ≥ v2.7.0).&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ installed in operator mode.&lt;/li&gt;
+&lt;li&gt;StageSet installed (see &lt;a href="https://stageset.projects.metio.wtf/get-started/kubernetes/"&gt;Installation&lt;/a&gt;
+).&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="1-write-the-ladder-in-jsonnet"&gt;1. Write the ladder in Jsonnet&lt;/h2&gt;
+&lt;p&gt;The snippet evaluates to a &lt;strong&gt;JSON array of migrations&lt;/strong&gt; — the same shape the
+ladder file uses, so JaaS&amp;rsquo;s &lt;code&gt;rendered.json&lt;/code&gt; &lt;em&gt;is&lt;/em&gt; the ladder. A small helper keeps
+each entry readable, and the file is trivially parameterizable (per app, per
+environment) with top-level args:&lt;/p&gt;</description></item><item><title>StageSet vs jsonnet-controller</title><link>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</guid><description>&lt;p&gt;&lt;a href="https://github.com/pelotech/jsonnet-controller"&gt;jsonnet-controller&lt;/a&gt;
+ (pelotech) is a
+Flux controller that evaluates Jsonnet (kubecfg- and Tanka-style) and applies the
+result to the cluster. Its &lt;code&gt;Konfiguration&lt;/code&gt; resource (&lt;code&gt;jsonnet.io/v1beta1&lt;/code&gt;) is, in
+effect, &lt;em&gt;kustomize-controller for Jsonnet&lt;/em&gt;: point it at a &lt;code&gt;GitRepository&lt;/code&gt; (or an
+HTTP(S) URL), and it builds the Jsonnet and reconciles the manifests — with
+pruning, health/revision tracking, TLA string/code variables, and &lt;code&gt;dependsOn&lt;/code&gt;
+ordering &lt;strong&gt;between&lt;/strong&gt; Konfigurations.&lt;/p&gt;
+&lt;p&gt;The two projects sit at &lt;strong&gt;different layers&lt;/strong&gt;, which is the whole comparison.&lt;/p&gt;</description></item><item><title>StageSet vs Tanka and kubecfg</title><link>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</guid><description>&lt;p&gt;&lt;a href="https://tanka.dev/"&gt;Tanka&lt;/a&gt;
+ and &lt;a href="https://github.com/kubecfg/kubecfg"&gt;kubecfg&lt;/a&gt;
+ are
+Jsonnet-based config tools: you express your resources in Jsonnet, the tool renders
+them, diffs against the cluster, and applies. They generate configuration and run a
+CLI-driven apply, but they are imperative tools you run, not controllers that
+reconcile.&lt;/p&gt;
+&lt;h2 id="what-tanka--kubecfg-give-you"&gt;What Tanka / kubecfg give you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Jsonnet-powered, DRY manifest generation (libraries, abstractions, environments).&lt;/li&gt;
+&lt;li&gt;A &lt;code&gt;diff&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; workflow with dependency-aware ordering of a single apply.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Reconciliation, not invocation.&lt;/strong&gt; Tanka/kubecfg apply when &lt;em&gt;you&lt;/em&gt; run them.
+&lt;code&gt;StageSet&lt;/code&gt; runs in-cluster and continuously reconciles, corrects drift, and
+prunes.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Staged, gated delivery.&lt;/strong&gt; They apply a rendered set (in dependency order);
+they don&amp;rsquo;t model multi-stage rollouts with readiness gates, update windows, or
+versioned migrations between stages.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;GitOps identity and tenancy.&lt;/strong&gt; &lt;code&gt;StageSet&lt;/code&gt; applies under a per-tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt; inside the cluster; Tanka/kubecfg use your local credentials.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;The Jsonnet &lt;em&gt;generation&lt;/em&gt; that Tanka and kubecfg do so well has a GitOps-native
+equivalent in two related projects:&lt;/p&gt;</description></item></channel></rss>

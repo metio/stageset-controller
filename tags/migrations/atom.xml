@@ -1,0 +1,712 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Migrations on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/migrations/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/migrations/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/migrations/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/migrations/</id><entry><title type="html">DowngradeRequiresMigration</title><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidversion/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidVersion"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><id>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The desired version is below the deployed version and a migration boundary blocks the downgrade.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=DowngradeRequiresMigration</code>. Terminal: the run does not requeue until the desired version is at or above <code>status.version</code>.</p>
+<h2 id="cause">Cause</h2>
+<p>The desired version (<code>spec.version</code>) is <strong>lower</strong> than the version the controller last recorded as deployed (<code>status.version</code>). Downgrades are refused by default: <a href="/gating/versioned-migrations/">migrations</a>
+ are forward-only action ladders, and replaying upgrade migrations in reverse is how data gets destroyed. The controller does not silently run a downgrade.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.version}&#39;</span>   <span class="c1"># deployed</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># desired: read spec.version.value, or the version file the artifact carries</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>Pick the intended direction:</p>
+<ul>
+<li><strong>You did not mean to downgrade</strong> (e.g. a source revert pulled an older version file): roll the source forward again so the desired version is <code>&gt;=</code> the deployed version. The StageSet converges normally.</li>
+<li><strong>You genuinely need to go back</strong>: a downgrade is an operational decision with potential data loss. Perform it deliberately — restore from backup or apply an explicit down-migration out of band — then set <code>status.version</code> to match. There is no automatic reverse-migration path by design.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Generating migrations with Jsonnet</title><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="related" type="text/html" title="Parameterizing a rollout"/><id>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Render a version-gated migration ladder with JaaS and consume it from a StageSet via migrationsSourceRef.</blockquote><p>A <a href="/gating/versioned-migrations/">migration ladder</a>
+ is just data — a list of
+version-gated actions. So you can <em>generate</em> it with <a href="https://jsonnet.org/">Jsonnet</a>
+,
+publish it once as a Flux artifact with <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+,
+and have every StageSet that deploys the app consume it through
+<code>spec.migrationsSourceRef</code>. One ladder, authored once, shared across namespaces.</p>
+<p>The chain mirrors <a href="/get-started/jsonnet-to-rollout/">From Jsonnet to a gated rollout</a>
+,
+but the rendered artifact is the <em>migrations</em> rather than the manifests:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Jsonnet ladder  →  JaaS (JsonnetSnippet)  →  ExternalArtifact  →  StageSet.migrationsSourceRef
+</span></span></code></pre></div><h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>Flux installed (with the <code>ExternalArtifact</code> API — Flux ≥ v2.7.0).</li>
+<li><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ installed in operator mode.</li>
+<li>StageSet installed (see <a href="/get-started/kubernetes/">Installation</a>
+).</li>
+</ul>
+<h2 id="1-write-the-ladder-in-jsonnet">1. Write the ladder in Jsonnet</h2>
+<p>The snippet evaluates to a <strong>JSON array of migrations</strong> — the same shape the
+ladder file uses, so JaaS&rsquo;s <code>rendered.json</code> <em>is</em> the ladder. A small helper keeps
+each entry readable, and the file is trivially parameterizable (per app, per
+environment) with top-level args:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-jsonnet" data-lang="jsonnet"><span class="line"><span class="cl"><span class="c1">// migrations/main.jsonnet
+</span></span></span><span class="line"><span class="cl"><span class="k">local</span><span class="w"> </span><span class="nf">del</span><span class="p">(</span><span class="nv">name</span><span class="p">,</span><span class="w"> </span><span class="nv">kind</span><span class="p">,</span><span class="w"> </span><span class="nv">obj</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">delete</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">target</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;v1&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">kind</span><span class="p">,</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">obj</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">};</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">[</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;drop-legacy-config&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">to</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;2.0.0&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">from</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;&gt;=1.0.0&#39;</span><span class="p">,</span><span class="w">            </span><span class="c1">// explicit operator — a bare &#34;1.0.0&#34; is rejected
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">stage</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;db-pre&#39;</span><span class="p">,</span><span class="w">           </span><span class="c1">// anchors by role; consuming stages declare it
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">actions</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="nf">del</span><span class="p">(</span><span class="s">&#39;drop-legacy&#39;</span><span class="p">,</span><span class="w"> </span><span class="s">&#39;ConfigMap&#39;</span><span class="p">,</span><span class="w"> </span><span class="s">&#39;legacy-config&#39;</span><span class="p">)],</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">]</span><span class="w">
+</span></span></span></code></pre></div><p>Commit it to a Git repo (or push it to an OCI/Bucket source) JaaS can read.
+Validate it before publishing with the controller&rsquo;s own checks:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl lint-migrations migrations/  <span class="c1"># if you render locally; see lint-migrations</span>
+</span></span></code></pre></div><h2 id="2-render-it-with-jaas">2. Render it with JaaS</h2>
+<p>A <code>JsonnetSnippet</code> points JaaS at the source; JaaS publishes an <code>ExternalArtifact</code>
+of the same name carrying <code>rendered.json</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations-src</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">entryFile</span><span class="p">:</span><span class="w"> </span><span class="l">main.jsonnet</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl apply -f jsonnetsnippet.yaml
+</span></span><span class="line"><span class="cl">kubectl --namespace apps get externalartifact orders-migrations
+</span></span></code></pre></div><h2 id="3-consume-it-from-a-stageset">3. Consume it from a StageSet</h2>
+<p>Reference the <code>JsonnetSnippet</code> as the migrations source — StageSet resolves the
+producer to its <code>ExternalArtifact</code> — and declare the <code>db-pre</code> anchor role on the
+stage the ladder anchors to:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">orders-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrationsSourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">migrationAnchor: db-pre        # the ladder&#39;s stage</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre resolves here</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders</span><span class="w">
+</span></span></span></code></pre></div><p>When <code>orders</code> crosses into <code>2.0.0</code>, the rendered <code>drop-legacy-config</code> migration
+runs before the <code>app</code> stage. Every other namespace deploying orders references the
+<strong>same</strong> <code>orders-migrations</code> snippet output — the ladder lives once, in Jsonnet.</p>
+<h2 id="production-notes">Production notes</h2>
+<ul>
+<li><strong>Validate in CI</strong> with <a href="/cli/lint-migrations/"><code>stagesetctl lint-migrations</code></a>
+
+on the Jsonnet output before it&rsquo;s published, so authoring errors never reach a
+cluster.</li>
+<li><strong>Verify and pin</strong> the source in production — see
+<a href="/gating/versioned-migrations/#verifying-and-pinning-the-source">Verifying and pinning the source</a>
+.
+An OCI-published rendered ladder can be cosign-signed and digest-pinned.</li>
+<li><strong>Approve</strong> destructive transitions with <code>spec.version.requireApproval</code> if you
+want a human in the loop before they run.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/jsonnet" term="jsonnet" label="jsonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry><entry><title type="html">MigrationApprovalPending</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><id>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A version transition with pending migrations is held for operator approval; approve the target version to proceed.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationApprovalPending</code>. The Message names the target
+version and how many migrations await approval. <code>status.pendingMigrations</code> lists
+exactly what will run. Nothing is applied and <code>status.version</code> is not advanced —
+this is an intentional hold, not an error.</p>
+<h2 id="cause">Cause</h2>
+<p><code>spec.version.requireApproval</code> is set, and the current transition has pending
+migrations that have not been approved. So destructive migrations don&rsquo;t run
+unattended, the whole rollout (app and migrations) waits until an operator
+authorizes the target version.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Review <code>status.pendingMigrations</code> (or <code>stagesetctl diff</code>) to see what will run,
+then approve the target version by setting the annotation to it:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  stages.metio.wtf/approved-version<span class="o">=</span>2.0.0 --overwrite
+</span></span></code></pre></div><p>The controller proceeds on the next reconcile once the annotation equals the
+desired version. Because approval is tied to that exact version, a later
+transition to a different version holds again until you approve the new target —
+a stale approval never carries over.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/approvals" term="approvals" label="approvals"/></entry><entry><title type="html">MigrationArtifactInvalid</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A migration ladder sourced via spec.migrationsSourceRef could not be parsed or failed content validation; the version is held back until the artifact is fixed.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationArtifactInvalid</code>. The Message names the file and
+the parse or validation error. <code>status.version</code> is <strong>not</strong> advanced — the
+transition is held until the artifact is fixed and republished.</p>
+<h2 id="cause">Cause</h2>
+<p>The StageSet sources its migration ladder from <code>spec.migrationsSourceRef</code>, and
+the fetched artifact could not be turned into a valid ladder. Each
+<code>.yaml</code>/<code>.yml</code>/<code>.json</code> file in the artifact (under the optional <code>path</code>) must be a
+YAML or JSON document that is either a list of migrations or a single migration.
+Parsing is strict — a misspelled field is rejected rather than silently dropped,
+because a destructive ladder must not run a half-understood definition.</p>
+<p>Common causes:</p>
+<ul>
+<li>The artifact contains no <code>.yaml</code>/<code>.yml</code>/<code>.json</code> files (wrong <code>path</code>, or the
+source published something else).</li>
+<li>Malformed YAML/JSON, or a misspelled field (<code>acions:</code> for <code>actions:</code>).</li>
+<li>A migration with an empty <code>name</code> or <code>to</code>, an action that sets zero or more than
+one verb, an action with an empty or duplicate name, or two migrations sharing
+a name (names are the idempotency-ledger key and must be unique).</li>
+</ul>
+<p>This validates the same invariants the admission webhook enforces for inline
+<code>spec.migrations</code>; for a sourced ladder they can only be checked at fetch time,
+not at <code>kubectl apply</code>.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>
+<p>Fix the offending file in the source repository/registry and republish the
+artifact. Validate it the same way the controller does before publishing — the
+ladder format is one migration, or a list of them, per file:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">add-orders-table</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre         </span><span class="w"> </span><span class="c"># a stage name or a stage&#39;s migrationAnchor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">create-table</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apply</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="l">... }</span><span class="w">
+</span></span></span></code></pre></div></li>
+<li>
+<p>Check <code>spec.migrationsSourceRef.path</code> points at the file or directory that
+actually holds the ladder.</p>
+</li>
+</ul>
+<p>The condition clears and the version advances on the next reconcile once the
+republished artifact parses and validates.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationCoverageMissing</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidversion/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidVersion"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><id>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A major-version transition has no migration covering it, and requireMigrationCoverage is set; the version is held back.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationCoverageMissing</code>. The Message names the boundary
+(e.g. <code>1.4.0 → 2.0.0</code>). <code>status.version</code> is <strong>not</strong> advanced.</p>
+<h2 id="cause">Cause</h2>
+<p><code>spec.version.requireMigrationCoverage</code> is set, and the version transition crosses
+a <strong>major-version boundary</strong> (the major component increased) with <strong>no migration</strong>
+selected for it. A major bump usually implies breaking changes that need a
+migration, so rather than advance silently the controller fails closed and asks
+for an explicit decision.</p>
+<p>Minor and patch transitions are never gated by this — only a major boundary.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Either add a migration that covers the boundary:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">upgrade-to-2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">            </span><span class="c"># covers the 1.x → 2.0.0 major boundary</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&gt;=1.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="l">... ]</span><span class="w">
+</span></span></span></code></pre></div><p>…or, if the major bump genuinely needs no migration, drop
+<code>spec.version.requireMigrationCoverage</code> (or correct the version if the bump was
+unintended). The condition clears on the next reconcile once a covering migration
+exists or the flag is removed.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationDirty</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><id>https://stageset.projects.metio.wtf/runbooks/migrationdirty/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A migration failed repeatedly, so the controller halted auto-retry; clear the halt with a manual reconcile once the cause is fixed.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationDirty</code>. The Message names the migration that keeps
+failing. The controller has <strong>stopped auto-retrying</strong> — there is no backoff
+requeue — and <code>status.version</code> is not advanced. <code>status.migrationFailureCount</code> is
+at the threshold.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration failed repeatedly (the consecutive-failure threshold). Rather than
+keep re-attempting destructive work against an uncertain state, the controller
+halts and waits for a human — the golang-migrate &ldquo;dirty&rdquo; / Flyway &ldquo;repair&rdquo; model.
+A persistently-failing destructive migration usually means something needs
+fixing by hand (a bad action, a half-applied change, missing RBAC, a broken
+target) that retrying cannot resolve.</p>
+<h2 id="remediation">Remediation</h2>
+<ol>
+<li>
+<p>Diagnose the failure from the Message and the migration&rsquo;s Events; the earlier
+failures surfaced as <a href="/runbooks/migrationfailed/"><code>MigrationFailed</code></a>
+.</p>
+</li>
+<li>
+<p>Fix the underlying cause. If a destructive action partially applied, reconcile
+the real-world state by hand so the migration&rsquo;s actions can complete (the
+per-action ledger will skip the actions that already succeeded).</p>
+</li>
+<li>
+<p>Clear the halt with a manual reconcile, which resets the failure count and
+re-attempts the migration once:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">flux reconcile <span class="nb">source</span> ... <span class="o">&amp;&amp;</span> kubectl annotate stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span> --overwrite
+</span></span></code></pre></div></li>
+</ol>
+<p>The transition also resets the count to zero once it completes successfully.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationFailed</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><id>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A migration&rsquo;s action failed; the run halts at that stage and retries with backoff, skipping already-completed actions.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationFailed</code>. The Message names the migration and the
+failed action. The run halts at the anchoring stage; <code>status.version</code> is not
+advanced. The controller retries with backoff.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration anchored before a stage ran an action that failed (a <code>job</code> that
+errored, an <code>http</code> call that returned an error, a <code>wait</code> that timed out, an
+<code>apply</code>/<code>patch</code>/<code>delete</code> the apiserver rejected). This reason is distinct from
+<code>StageFailed</code> so you can tell a migration failure from the stage&rsquo;s own apply.</p>
+<p>Retries are safe for the actions that already completed: the per-action ledger
+(<code>status.executedMigrationActions</code>, keyed by migration content digest) records
+each finished action, so a retry resumes at the failed action rather than
+re-running destructive work from the top.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Read the Message and the migration&rsquo;s Events (<code>MigrationStarted</code> /
+<code>MigrationFailed</code>) to find the failed action and its error.</li>
+<li>Fix the underlying cause (the target object, RBAC for the action, the endpoint
+an <code>http</code> action calls, the image a <code>job</code> runs).</li>
+<li>The migration re-attempts automatically on the next retry. After repeated
+failures it escalates to <a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+, which halts
+auto-retry — see that page for the manual-recovery step.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationSourceNotPinned</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A sourced migration ladder&rsquo;s source is pinned to a mutable tag/branch instead of an immutable digest/commit, and pinning is required.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationSourceNotPinned</code>. The Message says the migrations
+source is pinned to a mutable tag/branch and <code>--require-pinned-migration-sources</code>
+is set. <code>status.version</code> is <strong>not</strong> advanced — the migration ladder does not run.</p>
+<p>When the flag is <em>off</em>, this does not block: the ladder runs, but a
+<code>Warning MigrationSourceMutable</code> event is emitted so the auto-rollout risk stays
+visible.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration ladder sourced from <code>spec.migrationsSourceRef</code> runs remote-authored,
+destructive instructions. If the source is pinned to a <strong>mutable</strong> revision — an
+<code>OCIRepository</code> <code>spec.ref.tag</code>/<code>spec.ref.semver</code>, or a <code>GitRepository</code>
+<code>spec.ref.branch</code>/<code>tag</code>/<code>semver</code> — an upstream overwrite of that tag/branch
+silently changes what runs on the next source reconcile. An immutable pin
+(<code>OCIRepository</code> <code>spec.ref.digest</code> or <code>GitRepository</code> <code>spec.ref.commit</code>) removes
+that auto-rollout window.</p>
+<p>A <code>Bucket</code> source is never pinned; an in-cluster <code>ExternalArtifact</code> is exempt
+(its producer owns the revision).</p>
+<h2 id="remediation">Remediation</h2>
+<p>Pin the source to an immutable revision. For an <code>OCIRepository</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">digest: sha256:abc123...   # instead of tag</span><span class="p">:</span><span class="w"> </span><span class="l">latest</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># ...</span><span class="w">
+</span></span></span></code></pre></div><p>For a <code>GitRepository</code>, set <code>spec.ref.commit</code>. To roll new migrations, bump the
+digest/commit in the source — a deliberate, reviewable change — rather than
+overwriting a tag.</p>
+<p><code>--require-pinned-migration-sources</code> is off by default but recommended in
+production for destructive ladders.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationSourceNotVerified</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A sourced migration ladder&rsquo;s source is not signature-verified; the destructive ladder is refused until verification passes.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationSourceNotVerified</code>. The Message says either
+verification failed (<code>SourceVerified=False</code>) or that verification is required but
+not configured. <code>status.version</code> is <strong>not</strong> advanced — the migration ladder does
+not run.</p>
+<h2 id="cause">Cause</h2>
+<p>Sourcing a migration ladder from <code>spec.migrationsSourceRef</code> runs remote-authored,
+destructive instructions, so the controller can require they be provenance-verified
+before executing. Verification state comes from the source CR&rsquo;s
+<code>status.conditions[SourceVerified]</code>, which Flux source-controller sets from the
+source&rsquo;s <code>spec.verify</code> (cosign or notation):</p>
+<ul>
+<li><strong><code>SourceVerified=False</code></strong> — the source configured <code>spec.verify</code>, but the
+artifact&rsquo;s signature did not pass. Always refused, regardless of flags — a
+tampered or unsigned-by-the-expected-identity artifact must not run.</li>
+<li><strong>No <code>SourceVerified</code> condition + <code>--require-verified-migration-sources</code></strong> — the
+controller requires verification, but the source configures none.</li>
+</ul>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>
+<p>Configure signature verification on the source. For an <code>OCIRepository</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">verify</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">cosign</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchOIDCIdentity</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subject</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github.com/your-org/.+$</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># ...</span><span class="w">
+</span></span></span></code></pre></div><p>Once source-controller sets <code>SourceVerified=True</code>, the ladder runs on the next
+reconcile.</p>
+</li>
+<li>
+<p>If verification genuinely failed, the published artifact is not signed by the
+expected identity — investigate the publishing pipeline before trusting it; do
+not work around it by disabling verification for a destructive ladder.</p>
+</li>
+<li>
+<p><code>--require-verified-migration-sources</code> is off by default but strongly
+recommended in production; a source whose verification <em>fails</em> is refused even
+with the flag off.</p>
+</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationStageNotFound</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A version-selected migration anchors to a stage that doesn&rsquo;t exist in this StageSet; the version is held back rather than skipping the migration.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationStageNotFound</code>. The Message names the migration
+and the anchor value it could not resolve. <code>status.version</code> is <strong>not</strong> advanced —
+the transition is held until the anchor resolves.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration that the version transition selected (<code>current &lt; to &lt;= desired</code>)
+anchors to a stage that this StageSet does not have. A migration&rsquo;s <code>stage</code> value
+resolves to the stage whose <code>migrationAnchor</code> (preferred) or <code>name</code> equals it;
+an empty <code>stage</code> anchors before the first stage. If none matches, the controller
+<strong>fails closed</strong> instead of silently never running the migration — the failure
+mode a shared, late-binding ladder must not have (a <code>DROP</code> that quietly never
+runs while the app advances to a schema that needs it).</p>
+<p>Common causes:</p>
+<ul>
+<li>A <strong>shared ladder</strong> (sourced via <code>spec.migrationsSourceRef</code>) anchors to a role
+like <code>db-pre</code>, but this StageSet&rsquo;s stages don&rsquo;t declare
+<code>migrationAnchor: db-pre</code>.</li>
+<li>A typo in a migration&rsquo;s <code>stage</code> value, or a stage was renamed without updating
+the anchor.</li>
+</ul>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>
+<p>If the migration should run before a particular stage, declare that role on
+the stage:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prepare</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">migrationAnchor: db-pre   # now `stage</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre` migrations anchor here</span><span class="w">
+</span></span></span></code></pre></div></li>
+<li>
+<p>Or point the migration&rsquo;s <code>stage</code> at an existing stage <code>name</code> (inline ladders),
+or leave it empty to anchor before the first stage.</p>
+</li>
+<li>
+<p>For a shared ladder, ensure every consuming StageSet declares the
+<code>migrationAnchor</code> roles the ladder references — that&rsquo;s how one ladder stays
+portable across StageSets whose stage names differ.</p>
+</li>
+</ul>
+<p>The condition clears and the version advances on the next reconcile once the
+anchor resolves.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">stagesetctl lint-migrations</title><link href="https://stageset.projects.metio.wtf/cli/lint-migrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/gating/versioned-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Versioned migrations"/><id>https://stageset.projects.metio.wtf/cli/lint-migrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Validate a migration ladder file or directory before publishing it to a source.</blockquote><p>Validate a <a href="/gating/versioned-migrations/">migration ladder</a>
+ — a single file, or a
+directory of <code>.yaml</code>/<code>.yml</code>/<code>.json</code> files — before publishing it to a source the
+controller will fetch. It runs the <strong>exact checks the controller runs</strong> at
+admission and at sourced-artifact fetch time, so a ladder that lints clean here
+won&rsquo;t fail closed later in the cluster.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl lint-migrations PATH
+</span></span></code></pre></div><p>It checks:</p>
+<ul>
+<li>strict parsing — a misspelled field (<code>acions:</code> for <code>actions:</code>) is rejected, not
+silently dropped;</li>
+<li>each migration has a name, a <code>to</code> that parses as a concrete semver, and an
+optional <code>from</code> that parses as a semver constraint;</li>
+<li>each action sets exactly one verb, with a unique, non-empty name;</li>
+<li>migration names are unique across the ladder.</li>
+</ul>
+<p>On success it prints the parsed ladder — each migration&rsquo;s boundary, anchor stage,
+and action verbs — so you can eyeball what will run:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">✓ 1 migration(s) valid
+</span></span><span class="line"><span class="cl">  drop-legacy  1.x → 2.0.0  before db-pre  delete
+</span></span></code></pre></div><h2 id="simulating-a-transition">Simulating a transition</h2>
+<p>The <code>from</code>/<code>to</code> selection math (<code>current &lt; to &lt;= desired</code> and the <code>from</code>
+constraint matching <code>current</code>) is otherwise invisible until a reconcile runs.
+Pass <code>--from</code> and <code>--to</code> to simulate a transition and see, using the controller&rsquo;s
+own selection logic, which migrations fire and why the rest are excluded:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">$ stagesetctl lint-migrations migrations/ --from 1.2.0 --to 2.0.0
+</span></span><span class="line"><span class="cl">✓ 3 migration(s) valid
+</span></span><span class="line"><span class="cl">  …
+</span></span><span class="line"><span class="cl">transition 1.2.0 → 2.0.0:
+</span></span><span class="line"><span class="cl">  drop-legacy     FIRES     delete
+</span></span><span class="line"><span class="cl">  add-2-1         excluded  to 2.1.0 is not in the crossed range (1.2.0, 2.0.0]
+</span></span><span class="line"><span class="cl">  backfill        excluded  from &#34;&gt;=1.5.0&#34; does not match current 1.2.0
+</span></span></code></pre></div><p>This is the quickest way to catch a migration that silently won&rsquo;t fire — for
+example a <code>from</code> constraint that excludes the version you&rsquo;re upgrading from.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Code</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>0</code></td>
+					<td>the ladder is valid</td>
+			</tr>
+			<tr>
+					<td><code>1</code></td>
+					<td>a validation problem was found (printed to stdout)</td>
+			</tr>
+			<tr>
+					<td><code>3</code></td>
+					<td>the path could not be read</td>
+			</tr>
+	</tbody>
+</table>
+<p>Wire it into CI on the repository that holds the ladder, before the artifact is
+published, so authoring problems surface in review rather than as a
+<code>MigrationArtifactInvalid</code> status across every consuming StageSet. This command
+needs no cluster connection.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry><entry><title type="html">Versioned migrations</title><link href="https://stageset.projects.metio.wtf/gating/versioned-migrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><id>https://stageset.projects.metio.wtf/gating/versioned-migrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-27T07:43:56+02:00</updated><content type="html"><![CDATA[<blockquote>Run migrations once, when the deployed version crosses a release boundary — inline, or sourced from a Flux artifact and shared across StageSets.</blockquote><p>Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of <a href="/defining-a-release/actions/">actions</a>
+ exactly when the
+deployed version steps over the boundary, and never again.</p>
+<p>Versioning is off until you set <code>spec.version</code>.</p>
+<h2 id="declaring-the-version">Declaring the version</h2>
+<p>The controller needs to know <em>what version is currently being deployed</em>. There are
+three ways to declare it; pick by <strong>where the version lives</strong>.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Source</th>
+					<th>The version lives…</th>
+					<th>Best for</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="#inline--versionvalue"><code>version.value</code></a>
+</td>
+					<td>on the <code>StageSet</code></td>
+					<td>environment-pinned versions, quick starts</td>
+			</tr>
+			<tr>
+					<td><a href="#from-a-rendered-object--versionfromobject"><code>version.fromObject</code></a>
+</td>
+					<td>inside the manifests</td>
+					<td><strong>any source, including JaaS</strong> — the recommended default</td>
+			</tr>
+			<tr>
+					<td><a href="#from-a-file-in-the-artifact--versionfromartifact"><code>version.fromArtifact</code></a>
+</td>
+					<td>a file in the artifact</td>
+					<td>Git/OCI/Bucket sources that can ship a <code>VERSION</code> file</td>
+			</tr>
+	</tbody>
+</table>
+<p>Whichever you choose, the resolved value is trimmed and parsed as semver (a leading
+<code>v</code> is accepted). A missing stage/object/file, an empty value, or an unparseable
+one fails terminally with the <code>InvalidVersion</code> reason (see its
+<a href="/runbooks/invalidversion/">runbook</a>
+) — a half-versioned system is worse than an
+unversioned one.</p>
+<h3 id="inline--versionvalue">Inline — <code>version.value</code></h3>
+<p>The <code>StageSet</code> author pins the version directly. Use this when the version is a
+property of the environment rather than of the content, or to get started quickly:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.1.0&#34;</span><span class="w">      </span><span class="c"># bump this when you cut a release</span><span class="w">
+</span></span></span></code></pre></div><p>The trade-off: the version is declared here, not carried by the content, so you
+bump it by editing the <code>StageSet</code>.</p>
+<h3 id="from-a-rendered-object--versionfromobject">From a rendered object — <code>version.fromObject</code></h3>
+<p>The recommended way to let the version travel with the content.
+<a href="https://kubernetes.io/docs/">Kubernetes</a>
+ has a standard place for an
+application&rsquo;s version: the <code>app.kubernetes.io/version</code> label. Well-formed manifests
+set it, so the version is already inside the manifests — <code>fromObject</code> reads it back.
+This works for every source kind, including a single-document renderer like
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ that has no room for a separate file.</p>
+<p>A StageSet has <strong>one</strong> version that all its stages converge on; <code>fromObject</code> only
+chooses <em>which</em> stage&rsquo;s rendered output to read it from. That stage is optional —
+omit it to read from the first (leading) stage, which carries the new version
+first.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># stage omitted → defaults to the first stage (here, app)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment     </span><span class="w"> </span><span class="c"># the object to read</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># fieldPath omitted → reads metadata.labels[&#39;app.kubernetes.io/version&#39;]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>The controller builds the <code>app</code> stage&rsquo;s manifests (the same render it applies),
+finds the <code>Deployment/web</code> object, and reads its <code>app.kubernetes.io/version</code> label.
+Because the label is part of the manifests, the version changes in lockstep with
+the content — no second file to keep in sync.</p>
+<p><strong>Reading a different field.</strong> Set <code>fieldPath</code> to a kubectl-style JSONPath that
+resolves to the bare version string. (It must be the version <em>only</em>; a JSONPath
+can&rsquo;t split an <code>image: web:2.1.0</code> value, so prefer the label.) <code>apiVersion</code> is
+optional and narrows the match when a <code>Kind</code>+<code>Name</code> pair would be ambiguous:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-meta</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">fieldPath</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;{.data.version}&#34;</span><span class="w">   </span><span class="c"># must resolve to a bare semver, e.g. 2.1.0</span><span class="w">
+</span></span></span></code></pre></div><p>This is the path the <a href="/get-started/jsonnet-to-rollout/">Jsonnet-to-rollout tutorial</a>
+
+uses: the snippet renders the version into the manifest&rsquo;s version label, and the
+StageSet reads it straight back.</p>
+<h3 id="from-a-file-in-the-artifact--versionfromartifact">From a file in the artifact — <code>version.fromArtifact</code></h3>
+<p>The version travels with the content as a <strong>dedicated file</strong> containing a single
+semver. This fits <strong>Git/OCI/Bucket</strong> sources, where you can ship an extra file
+beside the manifests. (It does <em>not</em> fit JaaS <code>rendered</code> output, which is a single
+<code>rendered.json</code>; use <code>fromObject</code> there.)</p>
+<p><strong>Who writes it, and where:</strong> the artifact&rsquo;s producer. For a Git source, commit a
+<code>VERSION</code> file in the repo; for an OCI/Bucket artifact, include it in the pushed
+tree. The file lives at <code>path</code> inside the named stage&rsquo;s artifact, relative to the
+artifact root:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl"># VERSION — committed alongside the manifests it versions
+</span></span><span class="line"><span class="cl">2.1.0
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromArtifact</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app         </span><span class="w"> </span><span class="c"># which stage&#39;s artifact carries the file</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">VERSION      </span><span class="w"> </span><span class="c"># the file&#39;s path inside that artifact (cleaned; no leading ./)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>The controller fetches the <code>app</code> stage&rsquo;s artifact and reads the file at <code>path</code>.</p>
+<h2 id="declaring-migrations">Declaring migrations</h2>
+<p>Each migration names the boundary it crosses (<code>to</code>, optionally <code>from</code>), the stage
+it anchors before, and the actions to run:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromArtifact</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">VERSION</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill-ledger-2-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1.*&#34;</span><span class="w">               </span><span class="c"># optional: only when coming from a 1.x</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w">   </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">             </span><span class="c"># the boundary this migration crosses</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app              </span><span class="w"> </span><span class="c"># runs before this stage&#39;s pre-actions</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ledger-backfill-job</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p><code>to</code> is an <strong>exact</strong> target version, the same kind of value <code>version.value</code>
+holds. <code>from</code> is a semver <strong>constraint</strong>, not an exact version: it is matched
+against the currently deployed version with the same grammar Helm and
+<code>flux</code>-style ranges use. So <code>from</code> accepts ranges like <code>&gt;=1.0.0, &lt;2.0.0</code>,
+<code>1.x</code>, or <code>^1.2</code> — the migration fires only when the deployed version satisfies
+that constraint <em>and</em> the run crosses up to <code>to</code>. A <code>from</code> of <code>&gt;=1.0.0, &lt;2.0.0</code>
+with <code>to: &quot;2.0.0&quot;</code> runs the migration on any 1.x → 2.0.0 transition; omit
+<code>from</code> to fire on every crossing up to <code>to</code> regardless of where you start.</p>
+<p>When the deployed version crosses from a <code>1.x</code> into <code>2.0.0</code>, the <code>backfill</code> job
+runs once, anchored before the <code>app</code> stage. The controller tracks progress so a
+retry doesn&rsquo;t re-run a completed migration:</p>
+<ul>
+<li><code>status.version</code> — the deployed version, written only after a fully successful
+run.</li>
+<li><code>status.pendingMigrations</code> — migrations the next run will execute.</li>
+<li><code>status.executedMigrations</code> / <code>status.executedMigrationActions</code> — the in-flight
+ledgers (per migration, and per action within a migration) for the current
+transition, cleared once the version advances.</li>
+</ul>
+<p>Migrations emit <code>MigrationStarted</code> / <code>MigrationCompleted</code> events. A downgrade that
+would skip a required migration is refused with the <code>DowngradeRequiresMigration</code>
+reason — see its <a href="/runbooks/downgraderequiresmigration/">runbook</a>
+. For the
+failure path, see <a href="#when-a-migration-fails">When a migration fails</a>
+.</p>
+<p><strong>First adoption (baselining).</strong> The first time a StageSet sets <code>spec.version</code> and
+has no <code>status.version</code> yet, the controller records the version and runs <strong>no</strong>
+migrations — an existing deployment is assumed to already be at that version. It
+emits a <code>MigrationsBaselined</code> event so you can tell this apart from a real no-op
+and confirm the deployment really is at the recorded version. Migrations run only
+on a subsequent transition that crosses their boundary.</p>
+<h2 id="sharing-one-ladder-across-stagesets">Sharing one ladder across StageSets</h2>
+<p>Deploying the same application into many namespaces — one <code>StageSet</code> each — means
+the same migration ladder in every one. Copying a destructive ladder into N specs
+and keeping them in sync is exactly where a missed edit becomes a data-loss
+incident. Author the ladder <strong>once</strong> as an artifact and point every StageSet at it
+with <code>migrationsSourceRef</code> instead:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrationsSourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path: migrations          # optional</span><span class="p">:</span><span class="w"> </span><span class="l">a file or directory within the artifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p><code>migrationsSourceRef</code> is <strong>mutually exclusive</strong> with the inline <code>spec.migrations</code>.
+The artifact holds the ladder as YAML or JSON — each <code>.yaml</code>, <code>.yml</code>, or <code>.json</code>
+file is one migration or a list of them, parsed strictly so a misspelled field is
+rejected rather than ignored. The ladder lives once in the registry; each
+namespace carries only a small Flux source plus an identical StageSet, and a new
+release is a push to the registry, not an edit to N specs.</p>
+<p>Sourcing reuses the same fetch path as stage sources — revision pinning, the SSRF
+guard, and the size caps all apply. A source that is not yet ready holds the
+transition (the version is not advanced) rather than running a half-loaded ladder;
+a malformed or oversized artifact fails terminally with the
+<code>MigrationArtifactInvalid</code> reason — see its
+<a href="/runbooks/migrationartifactinvalid/">runbook</a>
+.</p>
+<h3 id="anchoring-a-shared-ladder">Anchoring a shared ladder</h3>
+<p>A migration&rsquo;s <code>stage</code> says <em>where in the rollout it runs</em> — before that stage&rsquo;s
+pre-actions. A ladder shared across StageSets can&rsquo;t hard-code one StageSet&rsquo;s stage
+names, so give each stage an <strong>anchor role</strong> and let migrations reference the role:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prepare</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">migrationAnchor</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre    </span><span class="w"> </span><span class="c"># this stage plays the &#34;db-pre&#34; role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rollout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>A migration in the shared ladder anchors to <code>db-pre</code> and resolves to whichever
+stage declares that role — <code>prepare</code> here, <code>db-migrate</code> in another StageSet — so
+one ladder travels across differently-named stages. A migration&rsquo;s <code>stage</code> resolves
+to the stage whose <code>migrationAnchor</code> matches, then by stage <code>name</code>; omit it to
+anchor before the first stage. Anchor keys are unique across names and roles. A
+migration that resolves to no stage fails closed with <code>MigrationStageNotFound</code>
+(see its <a href="/runbooks/migrationstagenotfound/">runbook</a>
+) — never silently skipped.</p>
+<h2 id="verifying-and-pinning-the-source">Verifying and pinning the source</h2>
+<p>A sourced ladder runs remote-authored, destructive instructions, so the controller
+can require the source prove its provenance and immutability before running:</p>
+<ul>
+<li><strong>Signature verification.</strong> Configure <code>spec.verify</code> (cosign or notation) on the
+Flux source. A source whose verification <em>fails</em> is always refused
+(<code>MigrationSourceNotVerified</code>). The controller flag
+<code>--require-verified-migration-sources</code> additionally refuses a source that
+configures no verification at all. Off by default; recommended in production.</li>
+<li><strong>Immutable pinning.</strong> Pin the source to a digest (<code>OCIRepository</code>
+<code>spec.ref.digest</code>) or commit (<code>GitRepository</code> <code>spec.ref.commit</code>) so a tag
+overwrite can&rsquo;t auto-roll new destructive content. A mutable-pinned source emits
+a <code>Warning</code> event; <code>--require-pinned-migration-sources</code> makes it a hard refusal
+(<code>MigrationSourceNotPinned</code>). Off by default; recommended in production.</li>
+</ul>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">digest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:…           </span><span class="w"> </span><span class="c"># immutable; bump deliberately to ship new migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">verify</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">cosign</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchOIDCIdentity</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subject</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github.com/your-org/.+$</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># url, interval, …</span><span class="w">
+</span></span></span></code></pre></div><p>Two further guards apply to a sourced ladder: it is always resolved in the
+StageSet&rsquo;s own namespace (a cross-namespace <code>migrationsSourceRef</code> is rejected), and
+an <code>http</code> action requires the controller&rsquo;s <code>--allowed-action-hosts</code> allowlist to be
+set, so remote-authored calls cannot reach arbitrary in-cluster endpoints.</p>
+<h2 id="when-a-migration-fails">When a migration fails</h2>
+<p>A failed migration halts the run at its anchoring stage under the
+<code>MigrationFailed</code> reason — distinct from a stage&rsquo;s own <code>StageFailed</code> — then retries
+with backoff. Retries are safe: the per-action ledger records each completed
+action keyed by the migration&rsquo;s content digest, so a retry resumes at the failed
+action rather than re-running a destructive one.</p>
+<p>After repeated failures the migration escalates to <code>MigrationDirty</code>: the controller
+stops auto-retrying destructive work against an uncertain state. Fix the cause,
+then clear the halt with a manual reconcile:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset orders <span class="se">\
+</span></span></span><span class="line"><span class="cl">  reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span> --overwrite
+</span></span></code></pre></div><p>See the <a href="/runbooks/migrationfailed/"><code>MigrationFailed</code></a>
+ and
+<a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+ runbooks.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/></entry></feed>

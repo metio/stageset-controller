@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Restore on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/restore/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/restore/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/restore/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/restore/</id><entry><title type="html">Backup and disaster recovery</title><link href="https://stageset.projects.metio.wtf/running/disaster-recovery/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/defining-a-release/inventory/?utm_source=atom_feed" rel="related" type="text/html" title="Inventory and pruning"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="related" type="text/html" title="Production"/><link href="https://stageset.projects.metio.wtf/security/encryption/?utm_source=atom_feed" rel="related" type="text/html" title="Secrets encryption"/><id>https://stageset.projects.metio.wtf/running/disaster-recovery/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Back up the state the controller cannot fully reconstruct, and restore a cluster in the order that keeps pruning, teardown, and decryption safe.</blockquote><p>Back up the small set of state the controller cannot reconstruct, then rebuild a
+lost cluster by restoring that state in the right order. Most of what a <code>StageSet</code>
+manages is recomputed on the next reconcile from your Git repository and your Flux
+sources, so it needs no backup of its own. Three things are the exception, and
+losing any of them causes silent data damage rather than a clean failure.</p>
+<h2 id="what-the-controller-rebuilds-and-what-it-cannot">What the controller rebuilds, and what it cannot</h2>
+<p>A <code>StageSet</code> is a function of its source content: given the same spec and the same
+artifacts, a reconcile re-fetches, re-renders, and re-applies the same objects.
+The applied workloads, the <code>StageSet</code> status, the webhook&rsquo;s self-signed CA, and the
+leader lease are all reconstructed automatically. Three pieces of state need
+backup attention — two are unrecoverable if lost, and the third self-heals for the
+common case but is still worth backing up:</p>
+<ol>
+<li><strong><code>StageInventory</code> resources</strong> — the record of exactly which objects each stage
+owns, read to prune and to tear down. If it is lost while the stage&rsquo;s objects are
+still live, the controller <strong>self-heals</strong>: the next reconcile rebuilds the
+inventory from the objects&rsquo; owner and per-stage labels (across the GVKs the
+current render touches), emits an <code>InventoryReconstructed</code> event, and <strong>defers
+pruning that pass</strong> so it never deletes against a best-effort rebuild; the
+following reconcile prunes normally. The residual gap is a kind the current
+render no longer contains at all — those objects still carry the labels but
+aren&rsquo;t swept, so they stay orphaned. Back up the inventory so that gap, and
+reverse-order teardown, stay correct. It lives in <code>spec</code> precisely so a
+spec-restoring backup tool captures it.</li>
+<li><strong>Encryption key Secrets</strong> — the age or PGP private keys named by
+<code>spec.decryption.secretRef</code>. They are unrecoverable if lost. A
+<a href="/gating/rollback/">rollback</a>
+ that must re-decrypt a prior revision fails closed
+with reason <code>PreviousRevisionUnavailable</code>, and any new run that decrypts SOPS
+files fails until the keys are restored. Cloud-KMS keys live outside the cluster;
+back up the KMS key policy or ARN instead of the key material.</li>
+<li><strong>Rollback store contents</strong> — when <code>spec.rollbackOnFailure: true</code> and the
+producer retains only one revision, the <a href="/gating/rollback/">rollback store</a>
+ (a
+RWX <code>PersistentVolume</code> or an S3 bucket) holds the sole copy of the last-good
+rendered output. It is encrypted at rest because it contains decrypted Secrets.</li>
+</ol>
+<h2 id="state-inventory">State inventory</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Source of truth</th>
+					<th>Regeneratable?</th>
+					<th>Back up?</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSet</code> spec</td>
+					<td>your Git repository / Flux source</td>
+					<td>yes — re-applied by Flux</td>
+					<td>through the GitOps repo</td>
+			</tr>
+			<tr>
+					<td><code>StageSet</code> status</td>
+					<td>rebuilt by reconcile</td>
+					<td>yes — but <code>status.lastAppliedSnapshot</code> is the rollback target</td>
+					<td>via an etcd snapshot</td>
+			</tr>
+			<tr>
+					<td><strong><code>StageInventory</code></strong></td>
+					<td>the controller (cluster state only)</td>
+					<td><strong>best-effort self-heal from live objects</strong></td>
+					<td><strong>recommended (covers the residual-GVK gap + teardown)</strong></td>
+			</tr>
+			<tr>
+					<td><strong>Encryption key Secrets</strong></td>
+					<td><code>spec.decryption.secretRef</code></td>
+					<td><strong>no — unrecoverable</strong></td>
+					<td><strong>yes (critical)</strong></td>
+			</tr>
+			<tr>
+					<td><strong>Rollback store</strong></td>
+					<td>RWX PVC or S3 bucket</td>
+					<td><strong>no when it is the only copy</strong></td>
+					<td><strong>yes if <code>rollbackOnFailure</code> is used</strong></td>
+			</tr>
+			<tr>
+					<td>Applied workloads</td>
+					<td>stage sources</td>
+					<td>yes — re-applied from sources</td>
+					<td>no</td>
+			</tr>
+			<tr>
+					<td>Webhook self-signed CA</td>
+					<td>the controller</td>
+					<td>yes — regenerated on startup</td>
+					<td>no</td>
+			</tr>
+			<tr>
+					<td>Leader lease</td>
+					<td>the controller</td>
+					<td>yes — re-elected</td>
+					<td>no</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="what-to-back-up">What to back up</h2>
+<ul>
+<li><strong>Your GitOps repository.</strong> It holds every <code>StageSet</code> spec and the Flux source
+objects (<code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>, <code>ExternalArtifact</code>
+producers) the stages reference. This is the primary source of truth — keep it
+backed up the way you back up any Git repository.</li>
+<li><strong><code>StageInventory</code> resources.</strong> These are cluster state, not in Git. Capture them
+with a cluster backup tool (for example Velero) or an etcd snapshot. Because the
+inventory deliberately lives in <code>spec</code> — not <code>status</code> — any backup tool that
+restores <code>spec</code> captures the prune history. The relevant scope is every
+<code>StageInventory</code> in each <code>StageSet</code>&rsquo;s namespace.</li>
+<li><strong>Encryption key Secrets.</strong> Back up the Secrets named by
+<code>spec.decryption.secretRef</code> in each <code>StageSet</code>&rsquo;s namespace. For a cloud-KMS-only
+setup, back up the KMS key policy and ARN rather than key material.</li>
+<li><strong>Rollback-store contents and credentials</strong>, if <code>spec.rollbackOnFailure: true</code>.
+Snapshot the RWX volume or replicate the S3 bucket, and back up the bucket
+credentials Secret. Skip this if every producer retains more than one revision —
+rollback then re-fetches from the producer and the store is only a fast path.</li>
+</ul>
+<h2 id="rebuilding-a-cluster">Rebuilding a cluster</h2>
+<p>Restore in the order below. The order matters: the encryption keys and the
+inventory must exist <strong>before</strong> the controller reconciles a <code>StageSet</code>, or the first
+reconcile does damage.</p>
+<ol>
+<li><strong>Install the controller</strong> from the Helm chart. See
+<a href="/running/production/">Production</a>
+ for the hardened install.</li>
+<li><strong>Restore the encryption key Secrets.</strong> Keys must exist before any reconcile,
+because a stage that decrypts SOPS files fails until its <code>secretRef</code> Secret is
+present, and a <code>rollbackOnFailure</code> restore that re-decrypts a prior revision
+fails with <code>PreviousRevisionUnavailable</code> without them. See
+<a href="/security/encryption/">Secrets encryption</a>
+.</li>
+<li><strong>Restore the rollback-store credentials and contents</strong> if you use one, so a run
+that fails immediately after rebuild can still restore its last-good output. See
+<a href="/gating/rollback/">Rollback</a>
+.</li>
+<li><strong>Restore or re-sync the Flux sources.</strong> Let Flux reconcile the
+<code>GitRepository</code> / <code>OCIRepository</code> / <code>Bucket</code> objects and the producers so each
+stage&rsquo;s <code>ExternalArtifact</code> becomes <code>Ready</code> again.</li>
+<li><strong>Restore the <code>StageSet</code> resources</strong> — normally by letting Flux apply them from
+your GitOps repository.</li>
+<li><strong>Restore the <code>StageInventory</code> resources</strong> before the controller reconciles the
+<code>StageSet</code>s, so the first reconcile can prune correctly and a later deletion can
+tear down. Restoring the captured <code>spec</code> is sufficient — that is where the prune
+history lives. If a <code>StageSet</code> reconciles before its inventory is back, the run
+applies and verifies but cannot prune; objects a newer revision dropped are left
+orphaned until you restore the inventory and reconcile again.</li>
+</ol>
+<p>If you suspend each <code>StageSet</code> (<code>spec.suspend: true</code>) before step 5 and resume only
+after step 6, you remove the race entirely.</p>
+<h2 id="failure-modes">Failure modes</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Lost item</th>
+					<th>What happens</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageInventory</code></td>
+					<td>the next reconcile applies and verifies, but the prune step has nothing to diff against, so removed objects are <strong>orphaned</strong>; <code>StageSet</code> deletion cannot reverse-order tear stages down</td>
+			</tr>
+			<tr>
+					<td>Encryption key Secret</td>
+					<td>new runs that decrypt SOPS files fail; a <code>rollbackOnFailure</code> restore that must re-decrypt fails with reason <code>PreviousRevisionUnavailable</code></td>
+			</tr>
+			<tr>
+					<td>Rollback store</td>
+					<td>a rollback falls back to the producer&rsquo;s retained revisions; with single-revision retention there is nothing to restore and the rollback fails</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="verifying-recovery">Verifying recovery</h2>
+<p>After a rebuild, confirm the controller is back in a healthy steady state:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># Every StageSet reports Ready=True with reason Succeeded.</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace payments get stagesets
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># The inventory is present for each stage.</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace payments get stageinventories
+</span></span></code></pre></div><p>Then confirm pruning works end to end: change a stage&rsquo;s source so it renders one
+fewer object, let the <code>StageSet</code> reconcile, and check the dropped object is gone. A
+correct prune proves the restored inventory is intact — the controller&rsquo;s own
+<a href="/contributing/building/">disaster-recovery test</a>
+ pins exactly this guarantee: with
+the inventory restored, a removed object is pruned; with the inventory lost, the
+same removed object is orphaned.</p>
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="/defining-a-release/inventory/">Inventory and pruning</a>
+ — what the <code>StageInventory</code> records and how the prune diff works.</li>
+<li><a href="/security/encryption/">Secrets encryption</a>
+ — how <code>spec.decryption.secretRef</code> keys are read and used.</li>
+<li><a href="/gating/rollback/">Rollback</a>
+ — the rollback store and <code>rollbackOnFailure</code> behavior.</li>
+<li><a href="/running/production/">Production</a>
+ — hardening a production install.</li>
+<li><a href="/running/scale-and-capacity/">Scale and capacity</a>
+ — sizing replicas and the state a multi-replica install keeps reachable.</li>
+<li><a href="/runbooks/previousrevisionunavailable/"><code>PreviousRevisionUnavailable</code> runbook</a>
+ — remediating a rollback that cannot restore.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/backup" term="backup" label="backup"/><category scheme="https://stageset.projects.metio.wtf/tags/disaster-recovery" term="disaster-recovery" label="disaster-recovery"/><category scheme="https://stageset.projects.metio.wtf/tags/restore" term="restore" label="restore"/><category scheme="https://stageset.projects.metio.wtf/tags/inventory" term="inventory" label="inventory"/><category scheme="https://stageset.projects.metio.wtf/tags/encryption" term="encryption" label="encryption"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry></feed>

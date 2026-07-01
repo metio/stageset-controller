@@ -1,0 +1,445 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Comparison on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/comparison/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/comparison/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/comparison/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/comparison/</id><entry><title type="html">StageSet vs Argo Rollouts</title><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="related" type="text/html" title="Progressive delivery"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Kustomize"/><id>https://stageset.projects.metio.wtf/comparisons/argo-rollouts/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Different layers — staged multi-artifact delivery versus single-workload traffic shifting.</blockquote><p><a href="https://argoproj.github.io/argo-rollouts/">Argo Rollouts</a>
+ and <code>StageSet</code> are easy
+to mention in the same breath because both roll things out gradually, but they
+operate at different layers and are complementary rather than competing.</p>
+<h2 id="what-argo-rollouts-does">What Argo Rollouts does</h2>
+<p><code>Argo Rollouts</code> replaces a <code>Deployment</code> with a <code>Rollout</code> that shifts traffic to a new
+version <strong>progressively</strong> — canary or blue-green — pausing at weighted steps and
+promoting based on <strong>metric analysis</strong> (Prometheus queries, web/Job providers).
+Its unit of work is a <strong>single workload&rsquo;s</strong> version transition and the traffic in
+front of it.</p>
+<h2 id="what-stageset-does">What StageSet does</h2>
+<p><code>StageSet</code> orchestrates a <strong>whole release</strong> as an ordered list of stages, each built
+from a Flux <code>ExternalArtifact</code> — CRDs before the operator that needs them, a
+migration before the app, config before the workload — gating each stage on health
+and running typed <a href="/defining-a-release/actions/">actions</a>
+ between them. It does not shift
+traffic or run metric analysis; its unit of work is the <strong>multi-component release</strong>
+and the order things apply in.</p>
+<table>
+	<thead>
+			<tr>
+					<th></th>
+					<th>Argo Rollouts</th>
+					<th>StageSet</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Unit of work</td>
+					<td>one workload&rsquo;s version + its traffic</td>
+					<td>a multi-stage release of artifacts</td>
+			</tr>
+			<tr>
+					<td>Mechanism</td>
+					<td>weighted traffic shifting + metric analysis</td>
+					<td>ordered apply with readiness gates + actions</td>
+			</tr>
+			<tr>
+					<td>Promotion driver</td>
+					<td>analysis metrics (Prometheus, web, Job)</td>
+					<td>stage readiness (kstatus, CEL) and actions</td>
+			</tr>
+			<tr>
+					<td>Pruning / inventory</td>
+					<td>no (owns the Rollout&rsquo;s pods)</td>
+					<td>yes (StageInventory record, per-stage prune)</td>
+			</tr>
+			<tr>
+					<td>GitOps reconcile</td>
+					<td>via your GitOps tool (e.g. Argo CD)</td>
+					<td>native (Flux controller)</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="using-them-together">Using them together</h2>
+<p>A realistic setup uses both: <code>StageSet</code> rolls out the release in order, and a
+workload <em>inside</em> one stage is itself an Argo <code>Rollout</code> doing a canary. <code>StageSet</code>
+gets the supporting pieces (CRDs, config, migrations) in place and healthy;
+<code>Argo Rollouts</code> handles the fine-grained traffic progression for that one service.</p>
+<h2 id="integrating-them">Integrating them</h2>
+<p>Both directions are supported:</p>
+<ul>
+<li><strong>Argo gating on StageSet.</strong> The controller exports a
+<code>stageset_stage_ready{namespace,stageset,stage}</code> gauge that Argo&rsquo;s Prometheus
+metric reads directly, and the stage <a href="/guides/progressive-delivery/">gate endpoint</a>
+
+also answers JSON for Argo&rsquo;s web metric. So an Argo <code>Rollout</code> can hold its
+promotion until a <code>StageSet</code> stage is Ready — no Job bridge needed.</li>
+<li><strong>StageSet gating on Argo.</strong> A <code>StageSet</code> stage&rsquo;s <a href="/defining-a-release/ready-checks/">ready checks</a>
+
+can wait (via CEL) on an Argo <code>Rollout</code> reaching <code>Healthy</code> before the next stage
+runs.</li>
+</ul>
+<p>The full, worked examples for both are in the
+<a href="/guides/progressive-delivery/#argo-rollouts">progressive-delivery tutorial</a>
+.
+Where the gate&rsquo;s HTTP-status contract is a native fit for
+<a href="https://flagger.app/">Flagger</a>
+, the readiness gauge and JSON endpoint make
+<code>Argo Rollouts</code> a first-class consumer too.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/argo" term="argo" label="argo"/><category scheme="https://stageset.projects.metio.wtf/tags/progressive-delivery" term="progressive-delivery" label="progressive-delivery"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs Flux kustomize-controller</title><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs jsonnet-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Kustomize"/><id>https://stageset.projects.metio.wtf/comparisons/flux/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Intra-release stages and gates versus per-Kustomization ordering.</blockquote><p>This is the closest comparison — <code>StageSet</code> is built <em>for</em>
+<a href="https://fluxcd.io/">Flux</a>
+ and borrows its conventions. Flux&rsquo;s <code>kustomize-controller</code>
+(and <code>helm-controller</code>) reconcile a source into the cluster continuously, exactly
+like <code>StageSet</code>. The difference is granularity.</p>
+<h2 id="what-kustomize-controller-gives-you">What kustomize-controller gives you</h2>
+<ul>
+<li>Continuous reconciliation of a <code>Kustomization</code> from a Flux source, with pruning,
+health checks, drift correction, and <code>dependsOn</code> ordering <strong>between</strong>
+Kustomizations.</li>
+<li>Impersonation via <code>serviceAccountName</code>, <code>postBuild</code> substitution, patches — the
+same surface <code>StageSet</code> deliberately mirrors.</li>
+</ul>
+<h2 id="where-stageset-differs">Where StageSet differs</h2>
+<ul>
+<li><strong>Ordering within a release.</strong> <code>kustomize-controller</code> applies one Kustomization
+as a unit; ordering exists only <em>between</em> Kustomizations via <code>dependsOn</code>. To
+sequence three steps you create three Kustomizations and wire their
+dependencies. <code>StageSet</code> expresses that as one resource with ordered <code>stages</code> —
+and the controller waits for each stage&rsquo;s health before the next.</li>
+<li><strong>Typed actions between steps.</strong> Migrations, HTTP gates, waits, and transient
+applies are first-class <a href="/defining-a-release/actions/">actions</a>
+; in plain Flux you&rsquo;d model
+these as extra Kustomizations and Jobs.</li>
+<li><strong>Release-level features.</strong> <a href="/gating/update-windows/">Update windows</a>
+,
+<a href="/gating/versioned-migrations/">versioned migrations</a>
+, and
+<a href="/gating/rollback/">rollback</a>
+ operate across the whole staged release.</li>
+<li><strong>Source-native.</strong> A stage consumes a <code>GitRepository</code>/<code>OCIRepository</code>/<code>Bucket</code>
+directly (just like <code>kustomize-controller</code>), or an <code>ExternalArtifact</code> (RFC-0012),
+or a <em>producer</em> resolved to its artifact — which is how it also pairs with
+renderers like <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+.</li>
+<li><strong>SOPS parity.</strong> Encrypted Secrets in a source decrypt the same way, via
+<a href="/security/encryption/"><code>spec.decryption</code></a>
+ (age, PGP, or cloud KMS), so a SOPS-using
+repo ports across unchanged.</li>
+</ul>
+<h2 id="using-them-together">Using them together</h2>
+<p><code>StageSet</code> sits alongside the other Flux controllers and reuses Flux&rsquo;s source layer,
+notifications (<code>Alert</code>/<code>Provider</code> targeting <code>kind: StageSet</code>), and reconcile
+annotations. Use <code>kustomize-controller</code> for ordinary one-shot reconciliation and
+reach for <code>StageSet</code> when a release needs ordered, gated stages.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/flux" term="flux" label="flux"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs Flux Operator ResourceSet</title><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/integrations/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="Flux Operator (ResourceSet) integration"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Kustomize"/><id>https://stageset.projects.metio.wtf/comparisons/flux-operator/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Horizontal fan-out and scheduled discovery versus vertical, gated promotion.</blockquote><p><code>StageSet</code> and the <a href="https://fluxoperator.dev/">Flux Operator</a>
+&rsquo;s <code>ResourceSet</code>
+solve different axes of delivery, and they compose cleanly:</p>
+<ul>
+<li><strong><code>ResourceSet</code> is horizontal fan-out.</strong> It templates <em>N</em> instances of a set of
+resources from a matrix of inputs, and pairs with a
+<code>ResourceSetInputProvider</code> (RSIP) to <em>discover</em> those inputs — pull requests,
+branches, tags, OCI artifact tags — on a schedule.</li>
+<li><strong><code>StageSet</code> is vertical promotion.</strong> It moves <em>one</em> application through an
+ordered list of gated <a href="/defining-a-release/stages-and-sources/">stages</a>
+, with typed
+<a href="/defining-a-release/actions/">actions</a>
+, <a href="/gating/versioned-migrations/">versioned migrations</a>
+,
+and <a href="/gating/rollback/">rollback</a>
+ along the way.</li>
+</ul>
+<p>Reach for <code>ResourceSet</code> to stamp out many similar deployments from a changing set
+of inputs. Reach for <code>StageSet</code> to roll a single release out in order, gated at
+each step. To do both — discover a new version, then promote it through gated
+stages — run them together; see the
+<a href="/integrations/flux-operator/">Flux Operator integration</a>
+ page.</p>
+<h2 id="what-resourceset-gives-you">What ResourceSet gives you</h2>
+<p><code>ResourceSet</code> (<code>fluxcd.controlplane.io/v1</code>) renders Kubernetes resources from a
+template, fanned out over inputs:</p>
+<ul>
+<li><strong>Inputs.</strong> <code>spec.inputs</code> holds static key-value sets; <code>spec.inputsFrom</code>
+references one or more <code>ResourceSetInputProvider</code> objects that supply inputs
+dynamically. <code>spec.inputStrategy</code> combines them by <code>Flatten</code> or <code>Permute</code>.</li>
+<li><strong>Templating.</strong> <code>spec.resources</code> (or <code>spec.resourcesTemplate</code> for one YAML
+string) carries Go templates with <code>&lt;&lt; &gt;&gt;</code> delimiters, e.g. <code>&lt;&lt; inputs.tag &gt;&gt;</code>,
+plus sprig-style helpers.</li>
+<li><strong>Discovery.</strong> A <code>ResourceSetInputProvider</code> (<code>spec.type</code> of <code>Static</code>,
+<code>GitHubPullRequest</code>, <code>OCIArtifactTag</code>, and others) exports inputs to
+<code>status.exportedInputs</code>, optionally filtered by <code>spec.filter</code> (semver, regex,
+limit). Its <code>spec.schedule</code> (cron + <code>timeZone</code> + <code>window</code>) controls <em>when</em> it
+re-checks the source for new inputs — the Flux Operator&rsquo;s
+<a href="https://fluxoperator.dev/docs/resourcesets/time-based-delivery/">time-based delivery</a>
+.</li>
+<li><strong>Apply.</strong> <code>spec.dependsOn</code>, <code>spec.wait</code>, and <code>spec.serviceAccountName</code> govern
+ordering between objects, health waiting, and impersonation.</li>
+</ul>
+<p>What <code>ResourceSet</code> does not model is an ordered, gated rollout of a single app:
+there are no per-stage gates, no typed migrations crossing a version boundary, and
+no automatic rollback to a previous revision.</p>
+<h2 id="what-stageset-adds">What StageSet adds</h2>
+<ul>
+<li><strong>Ordered, gated stages.</strong> <code>spec.stages</code> runs top to bottom; each waits for the
+previous to report healthy via <a href="/defining-a-release/ready-checks/">ready checks</a>
+ before the
+next begins.</li>
+<li><strong>Typed actions between steps.</strong> <code>patch</code>, <code>http</code>, <code>wait</code>, <code>job</code>, <code>delete</code>, and
+<code>apply</code> <a href="/defining-a-release/actions/">actions</a>
+ run as <code>pre</code> / <code>post</code> / <code>onFailure</code> gates
+around a stage.</li>
+<li><strong>Version-gated migrations.</strong> <a href="/gating/versioned-migrations/"><code>spec.migrations</code></a>
+
+run an action ladder exactly once when crossing a version boundary.</li>
+<li><strong>Rollback.</strong> <a href="/gating/rollback/"><code>rollbackOnFailure</code></a>
+ restores the last good
+revisions when a run fails.</li>
+</ul>
+<h2 id="both-time-gate-delivery">Both time-gate delivery</h2>
+<p>Both tools can gate delivery on a clock, but at different layers:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Layer</th>
+					<th>Field</th>
+					<th>Gates</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ResourceSetInputProvider</code></td>
+					<td><code>spec.schedule</code> (cron, <code>timeZone</code>, <code>window</code>)</td>
+					<td><em>when inputs refresh</em> — how often a new version or PR is discovered</td>
+			</tr>
+			<tr>
+					<td><code>StageSet</code></td>
+					<td><a href="/gating/update-windows/"><code>spec.updateWindows</code></a>
+ (<code>Allow</code> / <code>Deny</code>)</td>
+					<td><em>when a discovered revision rolls out</em> through the stages</td>
+			</tr>
+	</tbody>
+</table>
+<p>When you combine them, gate at <strong>one</strong> layer to avoid double-gating. Either let the
+RSIP <code>schedule</code> constrain when a new version becomes visible and leave the
+<code>StageSet</code> always-open, or refresh inputs freely and let the <code>StageSet</code>
+<code>updateWindows</code> decide when the promotion happens. The
+<a href="/integrations/flux-operator/">integration page</a>
+ shows both.</p>
+<h2 id="using-them-together">Using them together</h2>
+<p>The two compose along their separate axes: a <code>ResourceSetInputProvider</code> discovers
+a new version on a schedule, a <code>ResourceSet</code> templates a <code>StageSet</code> pinned to that
+version, and the <code>StageSet</code> runs the ordered, gated promotion. The other direction
+fans a <code>ResourceSet</code> out into one <code>StageSet</code> per tenant, branch, or pull request.
+Both patterns, with complete manifests, are on the
+<a href="/integrations/flux-operator/">Flux Operator integration</a>
+ page.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/flux-operator" term="flux-operator" label="flux-operator"/><category scheme="https://stageset.projects.metio.wtf/tags/resourceset" term="resourceset" label="resourceset"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs Helm</title><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Kustomize"/><link href="https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Tanka and kubecfg"/><id>https://stageset.projects.metio.wtf/comparisons/helm/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>How StageSet relates to Helm&rsquo;s templating and hook ordering.</blockquote><p><a href="https://helm.sh/">Helm</a>
+ is two things: a templating engine (charts) and an
+imperative release tool (<code>helm upgrade</code>). <code>StageSet</code> is neither — it&rsquo;s a declarative
+delivery controller. The overlap is ordering: Helm&rsquo;s hooks and hook weights give you
+<em>some</em> sequencing inside a single chart&rsquo;s install/upgrade.</p>
+<h2 id="what-helm-gives-you">What Helm gives you</h2>
+<ul>
+<li>Templated, parameterized manifests (charts and values).</li>
+<li>Install/upgrade ordering via <code>helm.sh/hook</code> (pre-install, post-upgrade, …) and
+<code>hook-weight</code>.</li>
+<li>A release history you can roll back to with <code>helm rollback</code>.</li>
+</ul>
+<h2 id="where-stageset-differs">Where StageSet differs</h2>
+<ul>
+<li><strong>Continuous reconciliation.</strong> <code>helm upgrade</code> is a point-in-time, imperative
+action; nothing re-asserts the state afterward. <code>StageSet</code> reconciles on an
+interval, corrects drift, and prunes — it&rsquo;s GitOps, not a one-shot.</li>
+<li><strong>Ordering across artifacts, not just within one chart.</strong> Helm hooks order
+resources <em>inside</em> a release. <code>StageSet</code> orders whole <em>stages</em>, each its own
+artifact, with readiness gating between them.</li>
+<li><strong>Typed gates between steps.</strong> Hooks run Jobs; <code>StageSet</code> stages can run Jobs,
+HTTP gates, waits, patches, deletes, and transient applies, as pre/post/onFailure
+<a href="/defining-a-release/actions/">actions</a>
+.</li>
+<li><strong>Identity.</strong> A <code>StageSet</code> applies under a per-tenant <code>ServiceAccount</code>; <code>helm upgrade</code> runs as whoever ran it.</li>
+</ul>
+<h2 id="using-them-together">Using them together</h2>
+<p>Render a chart to manifests (e.g. via a producer that publishes an
+<code>ExternalArtifact</code>) and deliver it with <code>StageSet</code>. The controller understands
+<code>helm.sh/hook</code> resources: <code>applyHelmHookResources</code> (default <code>true</code>) applies them as
+ordinary objects, so a Helm-style chart&rsquo;s hook resources still get created, under
+<code>StageSet</code>&rsquo;s ordering and gating rather than Helm&rsquo;s.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/helm" term="helm" label="helm"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs jsonnet-controller</title><link href="https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Tanka and kubecfg"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><id>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A jsonnet-native Flux applier versus a renderer-agnostic staged-delivery layer.</blockquote><p><a href="https://github.com/pelotech/jsonnet-controller">jsonnet-controller</a>
+ (pelotech) is a
+Flux controller that evaluates Jsonnet (kubecfg- and Tanka-style) and applies the
+result to the cluster. Its <code>Konfiguration</code> resource (<code>jsonnet.io/v1beta1</code>) is, in
+effect, <em>kustomize-controller for Jsonnet</em>: point it at a <code>GitRepository</code> (or an
+HTTP(S) URL), and it builds the Jsonnet and reconciles the manifests — with
+pruning, health/revision tracking, TLA string/code variables, and <code>dependsOn</code>
+ordering <strong>between</strong> Konfigurations.</p>
+<p>The two projects sit at <strong>different layers</strong>, which is the whole comparison.</p>
+<h2 id="what-jsonnet-controller-gives-you">What jsonnet-controller gives you</h2>
+<ul>
+<li><strong>Jsonnet rendering and applying in one resource.</strong> A <code>Konfiguration</code> both
+evaluates the Jsonnet and applies the output — the rendering engine is part of
+the controller. If your goal is &ldquo;get this Jsonnet/Tanka tree into the cluster,&rdquo;
+it&rsquo;s a direct, single-resource answer.</li>
+<li>The familiar Flux applier surface: prune, health, interval reconciliation, TLAs,
+and <code>dependsOn</code> between Konfigurations.</li>
+</ul>
+<h2 id="where-stageset-differs">Where StageSet differs</h2>
+<ul>
+<li><strong>Renderer-agnostic.</strong> <code>StageSet</code> does <em>not</em> evaluate Jsonnet. A stage consumes a
+Flux source — <code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>, or an <code>ExternalArtifact</code>
+— so it rolls out plain manifests <em>or</em> the output of any renderer. For Jsonnet
+specifically, <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ does the evaluation
+(TLAs, ext vars, jb-vendored libraries, <a href="https://github.com/metio/jsonnet-oci-images">JOI</a>
+
+images) and publishes an <code>ExternalArtifact</code> that <code>StageSet</code> consumes. Rendering and
+delivery are separate concerns, owned by separate components.</li>
+<li><strong>Ordering and gating <em>within</em> a release.</strong> A <code>Konfiguration</code> applies as one unit;
+sequencing exists only <em>between</em> Konfigurations via <code>dependsOn</code>. <code>StageSet</code> expresses
+a release as ordered <a href="/defining-a-release/stages-and-sources/">stages</a>
+, each waiting on the
+previous stage&rsquo;s health, with typed <a href="/defining-a-release/actions/">actions</a>
+ (migration Jobs,
+HTTP gates, waits) <em>between</em> steps.</li>
+<li><strong>Release-level machinery</strong> jsonnet-controller doesn&rsquo;t carry:
+<a href="/gating/update-windows/">update windows</a>
+,
+<a href="/gating/versioned-migrations/">versioned migrations</a>
+,
+<a href="/defining-a-release/conflict-policies/">conflict policies</a>
+, and
+<a href="/gating/rollback/">rollback</a>
+ across the whole staged release.</li>
+</ul>
+<h2 id="which-to-reach-for">Which to reach for</h2>
+<ul>
+<li>You want <strong>Jsonnet rendered and applied as a single unit</strong>, no staging →
+jsonnet-controller is a clean fit (as is JaaS paired with Flux&rsquo;s
+<code>kustomize-controller</code>).</li>
+<li>You want <strong>ordered, gated, multi-stage delivery</strong> of manifests — whatever renders
+them → <code>StageSet</code>, with <code>JaaS</code> supplying the Jsonnet rendering when you need it.</li>
+</ul>
+<p>They are not mutually exclusive: jsonnet-controller answers <em>how Jsonnet becomes
+manifests</em>, <code>StageSet</code> answers <em>how a release is sequenced and gated</em>. You can pick a
+renderer independently — <code>JaaS</code> is one option that keeps the rendering reusable
+(local <code>jsonnet</code>-parity, OCI libraries) and hands <code>StageSet</code> an artifact like any
+other.</p>
+<h2 id="using-them-together">Using them together</h2>
+<p>Because a <code>Konfiguration</code> is a Kubernetes object, a <code>StageSet</code> stage can <strong>apply a
+<code>Konfiguration</code> and gate on it</strong> — letting jsonnet-controller do the Jsonnet
+rendering and applying while <code>StageSet</code> sequences it among other stages, with actions
+and gates in between.</p>
+<p>Put the <code>Konfiguration</code> manifest in a source the stage reads (here a
+<code>GitRepository</code>), then gate the stage on the <code>Konfiguration</code> reaching <code>Ready</code> for
+its current generation:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">platform</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">base                    </span><span class="w"> </span><span class="c"># render + apply the Jsonnet via jsonnet-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform-konfig       </span><span class="w"> </span><span class="c"># a repo holding the Konfiguration manifest</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readyChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">exprs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jsonnet.io/v1beta1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Konfiguration</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="c"># don&#39;t proceed until jsonnet-controller has reconciled THIS generation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">current</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.observedGeneration == metadata.generation &amp;&amp; status.conditions.exists(c, c.type == &#39;Ready&#39; &amp;&amp; c.status == &#39;True&#39;)&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">inProgress</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.conditions.exists(c, c.type == &#39;Ready&#39; &amp;&amp; c.status == &#39;Unknown&#39;)&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.conditions.exists(c, c.type == &#39;Ready&#39; &amp;&amp; c.status == &#39;False&#39;)&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">smoke                    </span><span class="w"> </span><span class="c"># only runs once the Konfiguration is Ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform-smoke</span><span class="w">
+</span></span></span></code></pre></div><p><code>StageSet</code> applies the <code>Konfiguration</code> and waits — the <code>current</code> expression holds the
+rollout until jsonnet-controller has observed the latest generation <em>and</em> reports
+<code>Ready</code>, so a later stage never starts against a half-rendered base.</p>
+<h3 id="ownership-differs-from-the-jaas-path">Ownership differs from the JaaS path</h3>
+<p>This is the important distinction, and it changes who prunes what:</p>
+<ul>
+<li><strong>Via jsonnet-controller (above).</strong> <code>StageSet</code>&rsquo;s inventory owns <strong>only the
+<code>Konfiguration</code> object</strong>. The workloads rendered from the Jsonnet are owned and
+<strong>pruned by jsonnet-controller</strong> — <code>StageSet</code> never sees them individually. Delete
+the stage and <code>StageSet</code> removes the <code>Konfiguration</code>; jsonnet-controller then
+cascades the prune of what it created. You get two nested owners.</li>
+<li><strong>Via <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ (or any source).</strong> <code>JaaS</code> only
+<em>renders</em> — it publishes an <code>ExternalArtifact</code> and owns nothing in the target
+cluster. <code>StageSet</code> fetches that artifact and applies the manifests itself, so
+<strong><code>StageSet</code>&rsquo;s inventory owns every rendered object directly</strong> and prunes them from
+its own <code>StageInventory</code> record. One owner, and <code>StageSet</code>&rsquo;s drift correction,
+<a href="/defining-a-release/conflict-policies/">conflict policies</a>
+, and <a href="/gating/rollback/">rollback</a>
+
+apply to the resources themselves.</li>
+</ul>
+<p>So if you want <code>StageSet</code> to be the single owner and pruner of the delivered
+resources, render with <code>JaaS</code> (or read plain manifests from a source). Reach for the
+<code>Konfiguration</code>-as-a-stage pattern when you specifically want jsonnet-controller to
+keep owning what it renders, and only need <code>StageSet</code> to sequence and gate it.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/jsonnet" term="jsonnet" label="jsonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/flux" term="flux" label="flux"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs Kustomize</title><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Tanka and kubecfg"/><id>https://stageset.projects.metio.wtf/comparisons/kustomize/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Why StageSet delivers what Kustomize only builds.</blockquote><p><a href="https://kustomize.io/">Kustomize</a>
+ (the <code>kustomize</code> CLI / <code>kubectl kustomize</code>) is a
+manifest <em>builder</em>: it composes bases and overlays, applies patches, and emits YAML.
+It does not apply anything, and it has no notion of ordering, readiness, or
+reconciliation — that&rsquo;s <code>kubectl apply</code>&rsquo;s job, and <code>kubectl</code> applies everything at
+once.</p>
+<h2 id="what-kustomize-gives-you">What Kustomize gives you</h2>
+<ul>
+<li>Overlay composition, strategic-merge and JSON6902 patches, variable replacement,
+generators.</li>
+<li>A pure transformation: in goes a kustomization, out come manifests.</li>
+</ul>
+<h2 id="where-stageset-differs">Where StageSet differs</h2>
+<ul>
+<li><strong>It delivers, not just builds.</strong> Kustomize stops at YAML. <code>StageSet</code> applies it,
+waits for health, prunes what&rsquo;s gone, and keeps doing so.</li>
+<li><strong>Ordering and gates.</strong> <code>kubectl apply -k</code> has no stages and no gates. <code>StageSet</code>
+sequences stages and runs <a href="/defining-a-release/actions/">actions</a>
+ between them.</li>
+<li><strong>Continuous reconciliation and drift correction</strong>, versus a one-shot <code>apply</code>.</li>
+</ul>
+<h2 id="using-them-together">Using them together</h2>
+<p><code>StageSet</code> <em>includes</em> the parts of Kustomize you reach for at delivery time: a stage
+has <code>path</code>, <code>patches</code>, and <code>postBuild</code> substitution
+(<a href="/defining-a-release/stages-and-sources/">stages and sources</a>
+). So you can keep authoring with
+Kustomize overlays and let a stage apply the right overlay, patched and
+substituted — then add the ordering, gating, and reconciliation Kustomize alone
+doesn&rsquo;t offer.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/kubernetes" term="kubernetes" label="kubernetes"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs Tanka and kubecfg</title><link href="https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs jsonnet-controller"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><id>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-17T22:52:43+02:00</updated><content type="html"><![CDATA[<blockquote>Reconciled, gated delivery versus CLI-driven Jsonnet apply.</blockquote><p><a href="https://tanka.dev/">Tanka</a>
+ and <a href="https://github.com/kubecfg/kubecfg">kubecfg</a>
+ are
+Jsonnet-based config tools: you express your resources in Jsonnet, the tool renders
+them, diffs against the cluster, and applies. They generate configuration and run a
+CLI-driven apply, but they are imperative tools you run, not controllers that
+reconcile.</p>
+<h2 id="what-tanka--kubecfg-give-you">What Tanka / kubecfg give you</h2>
+<ul>
+<li>Jsonnet-powered, DRY manifest generation (libraries, abstractions, environments).</li>
+<li>A <code>diff</code>/<code>apply</code> workflow with dependency-aware ordering of a single apply.</li>
+</ul>
+<h2 id="where-stageset-differs">Where StageSet differs</h2>
+<ul>
+<li><strong>Reconciliation, not invocation.</strong> Tanka/kubecfg apply when <em>you</em> run them.
+<code>StageSet</code> runs in-cluster and continuously reconciles, corrects drift, and
+prunes.</li>
+<li><strong>Staged, gated delivery.</strong> They apply a rendered set (in dependency order);
+they don&rsquo;t model multi-stage rollouts with readiness gates, update windows, or
+versioned migrations between stages.</li>
+<li><strong>GitOps identity and tenancy.</strong> <code>StageSet</code> applies under a per-tenant
+<code>ServiceAccount</code> inside the cluster; Tanka/kubecfg use your local credentials.</li>
+</ul>
+<h2 id="using-them-together">Using them together</h2>
+<p>The Jsonnet <em>generation</em> that Tanka and kubecfg do so well has a GitOps-native
+equivalent in two related projects:</p>
+<ul>
+<li><strong><a href="https://github.com/metio/jsonnet-oci-images">JOI</a>
+</strong> ships the Jsonnet
+libraries as OCI images.</li>
+<li><strong><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+</strong> evaluates the Jsonnet in-cluster
+and publishes the rendered result as an <code>ExternalArtifact</code> — the rendering step,
+as a service.</li>
+<li><strong><code>StageSet</code></strong> delivers that artifact in ordered, gated stages — the apply step,
+as a controller.</li>
+</ul>
+<p>So where you might run <code>tk apply</code> or <code>kubecfg update</code> from a laptop or CI, this
+approach splits the same job into a producer (<code>JaaS</code>, importing <code>JOI</code> libraries) and
+a delivery controller (<code>StageSet</code>), both reconciled by Flux. You can also keep using
+Tanka/kubecfg to author and publish artifacts, and let <code>StageSet</code> handle delivery.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/tanka" term="tanka" label="tanka"/><category scheme="https://stageset.projects.metio.wtf/tags/jsonnet" term="jsonnet" label="jsonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

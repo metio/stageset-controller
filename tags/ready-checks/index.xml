@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Ready-Checks on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/ready-checks/</link><description>Recent content in Ready-Checks on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/ready-checks/index.xml" rel="self" type="application/rss+xml"/><item><title>Actions</title><link>https://stageset.projects.metio.wtf/defining-a-release/actions/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/actions/</guid><description>&lt;p&gt;Actions are typed steps the controller runs around a stage&amp;rsquo;s apply. They turn an
+ordered apply into an orchestrated rollout — run a migration before the app, gate
+the stage on an external check, clean up on failure.&lt;/p&gt;
+&lt;p&gt;A stage has three action hooks:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;pre&lt;/code&gt;&lt;/strong&gt; — run before the manifests are built and applied. A failure aborts the
+stage with nothing applied.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;post&lt;/code&gt;&lt;/strong&gt; — run after the apply is verified. The stage is &lt;code&gt;Ready&lt;/code&gt; only if these
+all succeed.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;onFailure&lt;/code&gt;&lt;/strong&gt; — best-effort steps run on any failure from the apply onward.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Each action has a &lt;code&gt;name&lt;/code&gt;, optional &lt;code&gt;timeout&lt;/code&gt; and &lt;code&gt;retries&lt;/code&gt;, and &lt;strong&gt;exactly one&lt;/strong&gt;
+operation type (&lt;code&gt;patch&lt;/code&gt;, &lt;code&gt;http&lt;/code&gt;, &lt;code&gt;wait&lt;/code&gt;, &lt;code&gt;job&lt;/code&gt;, &lt;code&gt;delete&lt;/code&gt;, or &lt;code&gt;apply&lt;/code&gt;) — enforced
+by the validating admission webhook. Actions within a hook run in list order.&lt;/p&gt;</description></item><item><title>Ready checks</title><link>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</guid><description>&lt;p&gt;Ready checks decide when a stage is healthy enough to let the next stage start.
+They are purely observational — the controller waits and reports, but takes no
+action (active steps are &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+).&lt;/p&gt;
+&lt;p&gt;By default, with no &lt;code&gt;readyChecks&lt;/code&gt; block, the controller waits for &lt;strong&gt;every&lt;/strong&gt; object
+the stage applied to report ready via
+&lt;a href="https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus"&gt;kstatus&lt;/a&gt;
+.
+&lt;code&gt;readyChecks&lt;/code&gt; lets you narrow that to specific objects (&lt;code&gt;checks&lt;/code&gt;), add custom
+health for resources kstatus doesn&amp;rsquo;t understand (&lt;code&gt;exprs&lt;/code&gt;, &lt;a href="https://github.com/google/cel-spec"&gt;CEL&lt;/a&gt;
+),
+bound the wait (&lt;code&gt;timeout&lt;/code&gt;), or skip it entirely (&lt;code&gt;disableWait&lt;/code&gt;). &lt;code&gt;checks&lt;/code&gt; and
+&lt;code&gt;exprs&lt;/code&gt; may be set together.&lt;/p&gt;</description></item></channel></rss>

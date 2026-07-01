@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Update-Windows on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/update-windows/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/update-windows/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/update-windows/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/update-windows/</id><entry><title type="html">Update windows</title><link href="https://stageset.projects.metio.wtf/gating/update-windows/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/gating/stage-promotion/?utm_source=atom_feed" rel="related" type="text/html" title="Stage promotion"/><link href="https://stageset.projects.metio.wtf/runbooks/updatedeferred/?utm_source=atom_feed" rel="related" type="text/html" title="UpdateDeferred"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><id>https://stageset.projects.metio.wtf/gating/update-windows/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Allow or deny rollouts on a schedule, without pausing reconciliation.</blockquote><p>Update windows gate <em>when</em> new artifact revisions roll out, without pausing
+reconciliation. Drift correction keeps running; only the rollout of a <em>new</em>
+revision is held until a window allows it.</p>
+<h2 id="deny-a-recurring-window">Deny a recurring window</h2>
+<p>Freeze rollouts during business hours:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">updateWindows</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Deny</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0 9 * * MON-FRI&#34;</span><span class="w">   </span><span class="c"># 5-field cron: start of the window</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">duration</span><span class="p">:</span><span class="w"> </span><span class="l">8h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">timeZone</span><span class="p">:</span><span class="w"> </span><span class="l">Europe/Berlin</span><span class="w">
+</span></span></span></code></pre></div><p>A new revision that arrives inside the window is held; <code>status.pendingUpdate</code>
+records what is waiting and <code>nextWindowOpens</code> when it will ship. The controller
+emits an <code>UpdateDeferred</code> event and increments <code>stageset_update_deferred_total</code>.</p>
+<h2 id="allow-list-windows">Allow-list windows</h2>
+<p>If any <code>Allow</code> window exists, rollouts happen <strong>only</strong> inside an active Allow with
+no active Deny — <code>Deny</code> always wins. This expresses &ldquo;only deploy on Tuesday and
+Thursday afternoons&rdquo;:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">updateWindows</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Allow</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0 14 * * TUE,THU&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">duration</span><span class="p">:</span><span class="w"> </span><span class="l">3h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">timeZone</span><span class="p">:</span><span class="w"> </span><span class="l">America/New_York</span><span class="w">
+</span></span></span></code></pre></div><h2 id="a-one-off-freeze">A one-off freeze</h2>
+<p>Absolute windows use <code>from</code>/<code>to</code> instead of a schedule — for a planned event
+freeze:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">updateWindows</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Deny</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="ld">2026-12-24T00:00:00Z</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w">   </span><span class="ld">2026-12-27T00:00:00Z</span><span class="w">
+</span></span></span></code></pre></div><h2 id="what-a-closed-window-blocks">What a closed window blocks</h2>
+<p><code>windowScope</code> controls what a closed window holds back:</p>
+<ul>
+<li><strong><code>Updates</code></strong> (default) — hold only the rollout of a <em>new</em> artifact revision.
+Drift correction keeps re-applying the pinned state, so the live cluster stays
+on its last-approved revision but doesn&rsquo;t fall out of sync.</li>
+<li><strong><code>All</code></strong> — a hard freeze: also pause drift correction, so the controller
+applies nothing at all while the window is closed.</li>
+</ul>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">windowScope: Updates   # default</span><span class="p">:</span><span class="w"> </span><span class="l">hold new revisions, keep correcting drift</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># windowScope: All     # hard freeze: also pause drift correction</span><span class="w">
+</span></span></span></code></pre></div><h2 id="shipping-anyway">Shipping anyway</h2>
+<p>To push a held rollout through immediately, override the window with
+<a href="/cli/"><code>stagesetctl</code></a>
+:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile my-app --update-now
+</span></span></code></pre></div><p>This stamps the <code>stages.metio.wtf/update-now</code> annotation; the honored value is
+recorded in <code>status.lastHandledUpdateOverride</code>.</p>
+<h2 id="related-gates">Related gates</h2>
+<p>An update window gates <em>when</em> a new revision starts rolling out. Two other gates
+control <em>whether</em> a rollout proceeds, and combine with it:</p>
+<ul>
+<li><strong><a href="/gating/stage-promotion/">Stage promotion</a>
+</strong> — hold a stage with a soak
+window or a manual gate before it advances.</li>
+<li><strong><a href="/gating/error-budget/">Error-budget freeze</a>
+</strong> — pause new-revision rollouts
+while a service is out of its SLO error budget.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/update-windows" term="update-windows" label="update-windows"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">UpdateDeferred</title><link href="https://stageset.projects.metio.wtf/runbooks/updatedeferred/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><id>https://stageset.projects.metio.wtf/runbooks/updatedeferred/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A new revision is held by a closed update window.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=UpdateDeferred</code> (initial deploy held), or <code>READY=True</code> with a message noting a deferral and a populated <code>status.pendingUpdate</code> (an already-deployed StageSet with a held update).</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is time-based delivery working as configured. A new revision (or the first deploy) is being held because the StageSet&rsquo;s <a href="/gating/update-windows/"><code>spec.updateWindows</code></a>
+ do not currently permit a rollout: either a <code>Deny</code> window is active, or <code>Allow</code> windows are declared and none is active right now. With <code>spec.windowScope: All</code>, even drift correction is paused while a window is closed.</p>
+<p><code>status.pendingUpdate</code> shows the held revisions and <code>nextWindowOpens</code> (when delivery resumes); the controller requeues at that boundary.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.pendingUpdate}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.updateWindows}&#39;</span>
+</span></span></code></pre></div><p>Confirm the current time (in each window&rsquo;s <code>timeZone</code>) against the windows. An already-deployed StageSet stays <code>Ready=True</code> — the deployed version keeps running while the update waits.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Usually none — the update applies automatically when the next window opens. If you need it sooner:</p>
+<ul>
+<li>
+<p><strong>Force it through once</strong> (e.g. an emergency fix during a freeze):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; annotate --overwrite stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  stages.metio.wtf/update-now<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span>
+</span></span></code></pre></div><p>This applies the held rollout immediately, regardless of windows (one-shot per annotation value).</p>
+</li>
+<li>
+<p><strong>Adjust the windows</strong> if the schedule is wrong — check <code>type</code> (Allow vs Deny), the cron <code>schedule</code>/<code>duration</code> or absolute <code>from</code>/<code>to</code>, and especially the <code>timeZone</code>.</p>
+</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/update-windows" term="update-windows" label="update-windows"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry></feed>

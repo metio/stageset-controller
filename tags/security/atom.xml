@@ -1,0 +1,1510 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Security on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/security/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/security/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/security/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/security/</id><entry><title type="html">Admission webhook</title><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/security/network-policy/?utm_source=atom_feed" rel="related" type="text/html" title="Network policy"/><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="related" type="text/html" title="Production"/><link href="https://stageset.projects.metio.wtf/security/encryption/?utm_source=atom_feed" rel="related" type="text/html" title="Secrets encryption"/><id>https://stageset.projects.metio.wtf/security/admission-webhook/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The validating webhook for StageSet — the invariants it enforces, why it exists instead of CEL, the failure-policy trade-off, and the two TLS provisioning modes.</blockquote><p>A StageSet&rsquo;s spec carries invariants the CRD&rsquo;s structural schema cannot enforce
+cheaply, so the controller ships a <strong>validating admission webhook</strong> that rejects a
+bad StageSet at <code>kubectl apply</code> time — on <code>create</code> and <code>update</code> of
+<code>stages.metio.wtf/v1</code> StageSets — before it ever reaches a reconcile.</p>
+<h2 id="why-a-webhook-and-not-cel">Why a webhook and not CEL</h2>
+<p>The natural home for these rules is a CRD CEL validation. The catch: CEL cost is
+multiplied by the size of every enclosing array, and a StageSet&rsquo;s <code>spec.stages</code> and
+each stage&rsquo;s action lists are deliberately <strong>unbounded</strong>. A CEL rule over them
+makes the apiserver reject the CRD on cost grounds. Moving the checks into a webhook
+keeps the lists unbounded while still validating them.</p>
+<h2 id="what-it-validates">What it validates</h2>
+<p>A single <code>ValidateSpec</code> routine is the source of truth. It enforces:</p>
+<ul>
+<li><strong>One operation per action</strong> — every entry in <code>actions.pre</code>/<code>post</code>/<code>onFailure</code>
+(and a migration&rsquo;s actions) sets exactly one of <code>patch</code> / <code>http</code> / <code>wait</code> /
+<code>job</code> / <code>delete</code> / <code>apply</code>. Zero or two is rejected. See <a href="/defining-a-release/actions/">actions</a>
+.</li>
+<li><strong>One version source</strong> — when <code>spec.version</code> is set, exactly one of <code>value</code>,
+<code>fromObject</code>, or <code>fromArtifact</code> (see <a href="/gating/versioned-migrations/">versioned migrations</a>
+).</li>
+<li><strong>Coherent migrations</strong> — <code>spec.migrations</code> require a <code>spec.version</code>, each
+anchors to a real stage, and each migration action sets exactly one verb.</li>
+<li><strong>Decryption shape</strong> — <code>spec.decryption</code>, when set, names the only supported
+provider (<code>sops</code>), and a given <code>secretRef</code> carries a <code>name</code> (see
+<a href="/security/encryption/">secrets encryption</a>
+).</li>
+<li>Reserved post-v1 fields are rejected up front.</li>
+</ul>
+<p>The same <code>ValidateSpec</code> also runs <strong>inside the reconciler as a fallback</strong>, so a
+StageSet that slips past a disabled or bypassed webhook still fails loudly — it just
+fails at reconcile (<code>Ready=False</code>) instead of at admission.</p>
+<h2 id="failure-policy-trade-off">Failure-policy trade-off</h2>
+<p>The webhook is registered with <code>failurePolicy: Fail</code>: if its endpoint is
+unreachable, the apiserver <strong>rejects</strong> StageSet create/update rather than admit an
+unvalidated object. During a rolling update that window is brief — the next replica
+serves admission. If your GitOps tooling cannot tolerate even that, the
+reconciler-side fallback lets you run with the webhook <strong>disabled</strong>
+(<code>webhook.enabled: false</code>) and still catch invalid specs; they fail at reconcile
+instead of at admission.</p>
+<h2 id="tls-provisioning">TLS provisioning</h2>
+<p>The apiserver dials the webhook over TLS and verifies the serving certificate
+against the <code>caBundle</code> on the <code>ValidatingWebhookConfiguration</code>. Choose how that is
+provisioned with <code>--webhook-cert-mode</code> (<code>cert-manager</code> or <code>self-signed</code>; the binary
+defaults to <code>cert-manager</code>, while the chart value <code>webhook.certMode</code> defaults to
+<code>self-signed</code> for a no-prerequisite install):</p>
+<h3 id="cert-manager">cert-manager</h3>
+<p>The chart renders a <code>cert-manager.io/v1</code> Certificate; cert-manager issues the
+Secret, it is mounted at <code>--webhook-cert-dir</code>, and cert-manager renews it. The
+webhook server hot-reloads the rotated files. Requires
+<a href="https://cert-manager.io/">cert-manager</a>
+ in the cluster.</p>
+<h3 id="self-signed-chart-default">self-signed (chart default)</h3>
+<p>No cert-manager dependency: the controller generates an ECDSA CA and serving
+certificate in-pod, writes them to <code>--webhook-cert-dir</code>, and patches the named
+<code>ValidatingWebhookConfiguration</code>&rsquo;s <code>caBundle</code> so the apiserver trusts the chain
+(<code>--webhook-validating-config-name</code> is required). The <code>caBundle</code> is treated as a CA
+<strong>set</strong> — each replica unions its own CA in and prunes only its own expired blocks,
+so several replicas converge during a rolling update instead of clobbering each
+other&rsquo;s trust. A renewer goroutine regenerates at <code>validity/3</code>
+(<code>--webhook-cert-validity</code>, default one year) and the server hot-reloads without a
+restart.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Helm values</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">self-signed     </span><span class="w"> </span><span class="c"># chart default; or cert-manager</span><span class="w">
+</span></span></span></code></pre></div><p>The <a href="/reference/configuration/">configuration reference</a>
+ lists the full
+<code>--webhook-*</code> flag set.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/webhook" term="webhook" label="webhook"/><category scheme="https://stageset.projects.metio.wtf/tags/admission" term="admission" label="admission"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/tls" term="tls" label="tls"/></entry><entry><title type="html">MigrationSourceNotPinned</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A sourced migration ladder&rsquo;s source is pinned to a mutable tag/branch instead of an immutable digest/commit, and pinning is required.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationSourceNotPinned</code>. The Message says the migrations
+source is pinned to a mutable tag/branch and <code>--require-pinned-migration-sources</code>
+is set. <code>status.version</code> is <strong>not</strong> advanced — the migration ladder does not run.</p>
+<p>When the flag is <em>off</em>, this does not block: the ladder runs, but a
+<code>Warning MigrationSourceMutable</code> event is emitted so the auto-rollout risk stays
+visible.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration ladder sourced from <code>spec.migrationsSourceRef</code> runs remote-authored,
+destructive instructions. If the source is pinned to a <strong>mutable</strong> revision — an
+<code>OCIRepository</code> <code>spec.ref.tag</code>/<code>spec.ref.semver</code>, or a <code>GitRepository</code>
+<code>spec.ref.branch</code>/<code>tag</code>/<code>semver</code> — an upstream overwrite of that tag/branch
+silently changes what runs on the next source reconcile. An immutable pin
+(<code>OCIRepository</code> <code>spec.ref.digest</code> or <code>GitRepository</code> <code>spec.ref.commit</code>) removes
+that auto-rollout window.</p>
+<p>A <code>Bucket</code> source is never pinned; an in-cluster <code>ExternalArtifact</code> is exempt
+(its producer owns the revision).</p>
+<h2 id="remediation">Remediation</h2>
+<p>Pin the source to an immutable revision. For an <code>OCIRepository</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">digest: sha256:abc123...   # instead of tag</span><span class="p">:</span><span class="w"> </span><span class="l">latest</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># ...</span><span class="w">
+</span></span></span></code></pre></div><p>For a <code>GitRepository</code>, set <code>spec.ref.commit</code>. To roll new migrations, bump the
+digest/commit in the source — a deliberate, reviewable change — rather than
+overwriting a tag.</p>
+<p><code>--require-pinned-migration-sources</code> is off by default but recommended in
+production for destructive ladders.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationSourceNotVerified</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A sourced migration ladder&rsquo;s source is not signature-verified; the destructive ladder is refused until verification passes.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationSourceNotVerified</code>. The Message says either
+verification failed (<code>SourceVerified=False</code>) or that verification is required but
+not configured. <code>status.version</code> is <strong>not</strong> advanced — the migration ladder does
+not run.</p>
+<h2 id="cause">Cause</h2>
+<p>Sourcing a migration ladder from <code>spec.migrationsSourceRef</code> runs remote-authored,
+destructive instructions, so the controller can require they be provenance-verified
+before executing. Verification state comes from the source CR&rsquo;s
+<code>status.conditions[SourceVerified]</code>, which Flux source-controller sets from the
+source&rsquo;s <code>spec.verify</code> (cosign or notation):</p>
+<ul>
+<li><strong><code>SourceVerified=False</code></strong> — the source configured <code>spec.verify</code>, but the
+artifact&rsquo;s signature did not pass. Always refused, regardless of flags — a
+tampered or unsigned-by-the-expected-identity artifact must not run.</li>
+<li><strong>No <code>SourceVerified</code> condition + <code>--require-verified-migration-sources</code></strong> — the
+controller requires verification, but the source configures none.</li>
+</ul>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>
+<p>Configure signature verification on the source. For an <code>OCIRepository</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">verify</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">cosign</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchOIDCIdentity</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subject</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github.com/your-org/.+$</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># ...</span><span class="w">
+</span></span></span></code></pre></div><p>Once source-controller sets <code>SourceVerified=True</code>, the ladder runs on the next
+reconcile.</p>
+</li>
+<li>
+<p>If verification genuinely failed, the published artifact is not signed by the
+expected identity — investigate the publishing pipeline before trusting it; do
+not work around it by disabling verification for a destructive ladder.</p>
+</li>
+<li>
+<p><code>--require-verified-migration-sources</code> is off by default but strongly
+recommended in production; a source whose verification <em>fails</em> is refused even
+with the flag off.</p>
+</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Network policy</title><link href="https://stageset.projects.metio.wtf/security/network-policy/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/security/service-mesh/?utm_source=atom_feed" rel="related" type="text/html" title="Service mesh"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="related" type="text/html" title="Production"/><id>https://stageset.projects.metio.wtf/security/network-policy/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The opt-in NetworkPolicy the chart ships — pod-scoped allowlists vs. a namespace-wide default-deny, choosing a policy engine, the ingress and egress traffic the controller needs, and how to tighten each port.</blockquote><p>The Helm chart ships an opt-in <code>NetworkPolicy</code> for the controller pod. It is off by
+default and renders only when <code>networkPolicy.enabled</code> is <code>true</code>. Two independent
+layers are on offer: pod-scoped allowlists that lock down only the controller&rsquo;s own
+pods (the safe default), and an additional namespace-wide default-deny for a
+zero-trust namespace. The ingress and egress tables below describe exactly what
+traffic the controller depends on, so everything else can be denied.</p>
+<h2 id="two-layers-pod-scoped-allowlists-vs-namespace-default-deny">Two layers: pod-scoped allowlists vs. namespace default-deny</h2>
+<p><code>networkPolicy.enabled: true</code> renders per-workload, <strong>pod-scoped allowlist</strong>
+policies. They select only the controller&rsquo;s own pods through their selector labels
+and lock down just those pods to the required ports. This is the safe default and is
+fine in a shared namespace: co-located workloads — including anything in
+<code>flux-system</code> if the controller shares that namespace — are untouched.</p>
+<p><code>networkPolicy.defaultDeny.enabled</code> (default <code>false</code>) <strong>additionally</strong> renders a
+namespace-wide default-deny so every pod in the namespace is denied by default and
+the allowlists become the only exceptions (a zero-trust namespace). The default-deny
+sits at a lower precedence than the allowlists, so the allowlists always win for the
+controller pods while everything else is denied.</p>
+<p>Pick the layer that matches namespace ownership:</p>
+<ul>
+<li><strong><code>defaultDeny.enabled: false</code></strong> (default) — pod-scoped setup. Only the
+controller&rsquo;s pods are locked down; neighbours keep whatever posture their own
+policies give them.</li>
+<li><strong><code>defaultDeny.enabled: true</code></strong> — namespace zero-trust. Enable this <strong>only when
+the controller owns its namespace</strong>, because the deny-all also denies every
+co-located workload that does not have its own allowing policy.</li>
+</ul>
+<p><code>defaultDeny.order</code> (default <code>2000</code>) tunes the Calico <code>order</code> / ClusterNetworkPolicy
+<code>priority</code> that keeps the deny-all subordinate to the allowlists. The <code>kubernetes</code>
+and <code>cilium</code> engines have no precedence knob — deny and allow combine additively and
+allow wins — so the value matters only for the <code>calico</code> and <code>clusterNetworkPolicy</code>
+engines.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">defaultDeny</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">   </span><span class="c"># only when the controller owns this namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">order</span><span class="p">:</span><span class="w"> </span><span class="m">2000</span><span class="w">
+</span></span></span></code></pre></div><h2 id="choosing-a-policy-engine">Choosing a policy engine</h2>
+<p><code>networkPolicy.engine</code> selects which policy dialect the chart renders. It is
+explicit, not auto-detected: a chart that sniffed the running CNI would render
+different objects on different clusters from identical values, which breaks GitOps
+determinism. You name the engine, and the rendered manifest is the same everywhere.</p>
+<table>
+	<thead>
+			<tr>
+					<th><code>engine</code></th>
+					<th>Renders</th>
+					<th>API</th>
+					<th>FQDN egress</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>kubernetes</code> (default)</td>
+					<td><code>NetworkPolicy</code></td>
+					<td><code>networking.k8s.io/v1</code></td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td><code>cilium</code></td>
+					<td><code>CiliumNetworkPolicy</code></td>
+					<td><code>cilium.io/v2</code></td>
+					<td>Yes — free <code>toFQDNs</code> egress</td>
+			</tr>
+			<tr>
+					<td><code>calico</code></td>
+					<td><code>NetworkPolicy</code></td>
+					<td><code>projectcalico.org/v3</code></td>
+					<td>No — OSS Calico has no FQDN egress; that is Calico Enterprise only</td>
+			</tr>
+			<tr>
+					<td><code>clusterNetworkPolicy</code></td>
+					<td><code>ClusterNetworkPolicy</code></td>
+					<td><code>policy.networking.k8s.io/v1alpha2</code></td>
+					<td>No</td>
+			</tr>
+	</tbody>
+</table>
+<p><code>clusterNetworkPolicy</code> renders the SIG-Network <code>ClusterNetworkPolicy</code> that
+consolidates the deprecated <code>AdminNetworkPolicy</code> + <code>BaselineAdminNetworkPolicy</code>
+APIs into one resource. It is alpha, cluster-scoped, and rendered in the <code>Baseline</code>
+tier so a developer-authored <code>NetworkPolicy</code> still takes precedence over it.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">cilium</span><span class="w">
+</span></span></span></code></pre></div><p>The per-port <code>.from</code> knobs documented under <a href="#configuring-ingress">Configuring ingress</a>
+
+apply to the <code>kubernetes</code> engine only. For the other engines the allowlists are
+pod-scoped allow-all on the required ports, and you tighten them through that
+engine&rsquo;s native passthrough lists — <code>networkPolicy.&lt;engine&gt;.ingress</code> and
+<code>networkPolicy.&lt;engine&gt;.egress</code> — which are merged verbatim into the rendered
+policy&rsquo;s <code>spec</code>. For example, adding identity-based ingress and a <code>toFQDNs</code> egress
+under the Cilium engine:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">cilium</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cilium</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ingress</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">fromEndpoints</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">app.kubernetes.io/name</span><span class="p">:</span><span class="w"> </span><span class="l">flagger</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">egress</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">toFQDNs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">matchName</span><span class="p">:</span><span class="w"> </span><span class="l">bucket.example.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">toPorts</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">ports</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span>- <span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;443&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span><span class="w">
+</span></span></span></code></pre></div><h2 id="required-traffic">Required traffic</h2>
+<p>The two tables below are the engine-agnostic matrix of what the controller pod must
+be allowed to send and receive. Some peers are selectable by pod or namespace label;
+others — the kube-apiserver and out-of-cluster endpoints — have no label to select
+on and must be expressed as <code>ipBlock</code> CIDRs.</p>
+<h3 id="ingress">Ingress</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Port</th>
+					<th>Source</th>
+					<th>Mode</th>
+					<th>Selectable by label?</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Webhook (<code>ports.webhook</code>, <code>9443</code>)</td>
+					<td>The kube-apiserver, dialing the validating admission webhook</td>
+					<td>webhook</td>
+					<td>No — the apiserver is not a pod</td>
+			</tr>
+			<tr>
+					<td>Metrics (<code>ports.metrics</code>, <code>8080</code>)</td>
+					<td>Prometheus scraping <code>/metrics</code></td>
+					<td>always</td>
+					<td>Yes — by the scraper&rsquo;s pod or namespace</td>
+			</tr>
+			<tr>
+					<td>Gate (<code>ports.gate</code>, <code>8082</code>)</td>
+					<td>Flagger, polling the read-only gate endpoint for the promotion verdict</td>
+					<td>gate</td>
+					<td>Yes — by Flagger&rsquo;s namespace</td>
+			</tr>
+	</tbody>
+</table>
+<p>The metrics rule renders unconditionally, so the policy is never an empty-ingress
+deny-all by accident. The webhook rule renders only when <code>webhook.enabled</code>, and the
+gate rule only when <code>gate.enabled</code>.</p>
+<p>The apiserver sources traffic from an address that is not a pod, so the webhook rule
+cannot be narrowed with a <code>podSelector</code> or <code>namespaceSelector</code>. Leaving the webhook
+<code>from</code> list empty keeps the port reachable, which is what lets the apiserver reach
+the webhook. Authenticity on the webhook port is enforced by TLS and the CA bundle
+on the <code>ValidatingWebhookConfiguration</code>, not by the network layer — see the
+<a href="/security/admission-webhook/">admission webhook page</a>
+.</p>
+<h3 id="egress">Egress</h3>
+<p>Egress only matters when you opt into it (<code>networkPolicy.egress.enabled</code>). The
+controller needs the following outbound flows.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Destination</th>
+					<th>Purpose</th>
+					<th>Selectable by label?</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster DNS</td>
+					<td>Name resolution — without it every other egress flow fails</td>
+					<td>Yes — by the DNS namespace</td>
+			</tr>
+			<tr>
+					<td>Local kube-apiserver</td>
+					<td>All controller reads and writes go through the apiserver</td>
+					<td>No — <code>ipBlock</code> CIDR only</td>
+			</tr>
+			<tr>
+					<td>Remote-cluster apiserver</td>
+					<td>A StageSet&rsquo;s <code>spec.kubeConfig</code> points the apply at another cluster&rsquo;s apiserver</td>
+					<td>No — <code>ipBlock</code> CIDR only</td>
+			</tr>
+			<tr>
+					<td>source-controller / producer</td>
+					<td>Artifact fetch from Flux&rsquo;s source-controller or a producer&rsquo;s namespace</td>
+					<td>Yes — <code>flux-system</code> / the producer namespace</td>
+			</tr>
+			<tr>
+					<td>S3 rollback store</td>
+					<td>The S3-compatible bucket backing the rollback store, when configured</td>
+					<td>Depends — in-cluster MinIO is label-selectable; an external bucket is <code>ipBlock</code> only</td>
+			</tr>
+			<tr>
+					<td>OTLP collector</td>
+					<td>Shipping traces when an OTLP endpoint is configured</td>
+					<td>Depends — in-cluster collector is label-selectable; an external one is <code>ipBlock</code> only</td>
+			</tr>
+			<tr>
+					<td><code>http</code> action / direct <code>sourceRef</code> URLs</td>
+					<td>Targets reached by <code>http</code> actions and any direct <code>sourceRef</code> URL</td>
+					<td>No — <code>ipBlock</code> CIDR only</td>
+			</tr>
+	</tbody>
+</table>
+<p>The kube-apiserver is never label-selectable, so its egress rule must be an
+<code>ipBlock</code> CIDR. The same applies to any remote-cluster apiserver, S3 bucket, OTLP
+collector, or <code>http</code>-action target that lives outside the cluster. See
+<a href="/security/multi-cluster/">multi-cluster</a>
+, <a href="/gating/rollback/">rollback</a>
+,
+<a href="/integrations/producer-aware-sources/">producer-aware sources</a>
+, and
+<a href="/defining-a-release/actions/">actions</a>
+ for the flows behind each row.</p>
+<h2 id="configuring-ingress">Configuring ingress</h2>
+<p>Under the <code>kubernetes</code> engine, enable the policy and tighten each port through its
+<code>from</code> knob. An empty <code>from</code> list leaves that port open; a non-empty list restricts
+it to the listed peers.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># The apiserver dials the webhook and has no label to select on — leave open.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Scope metrics scraping to the monitoring namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">from</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">namespaceSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/metadata.name</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Scope the gate to Flagger&#39;s namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">gate</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">from</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">namespaceSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/metadata.name</span><span class="p">:</span><span class="w"> </span><span class="l">flagger-system</span><span class="w">
+</span></span></span></code></pre></div><p>Anything the per-port knobs do not cover goes into <code>additionalIngress</code>, which is
+merged verbatim into the policy:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">additionalIngress</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">ports</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">8080</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">namespaceSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kubernetes.io/metadata.name</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span></code></pre></div><h2 id="opt-in-egress">Opt-in egress</h2>
+<p>Egress is off by default, and deliberately so. Adding the <code>Egress</code> policy type flips
+the controller pod to default-deny for outbound traffic — everything not explicitly
+allowed is dropped. Getting the allow-list complete is the cluster operator&rsquo;s risk,
+because most of the controller&rsquo;s outbound peers — the kube-apiserver, any
+remote-cluster apiserver, S3, the OTLP collector, <code>http</code>-action targets — have no
+label to select on and so depend on <code>ipBlock</code> CIDRs that vary per cluster. An
+incomplete list does not fail loudly; it silently cuts that path off.</p>
+<blockquote>
+<p><strong>Warning:</strong> Enabling egress <strong>without</strong> an <code>ipBlock</code> for the kube-apiserver cuts
+the controller off from the cluster — it can no longer read or write any object,
+and every reconcile fails. Always include the apiserver CIDR before turning egress
+on.</p>
+</blockquote>
+<p>Find the apiserver&rsquo;s address with:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace default get endpointslice kubernetes --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.endpoints[*].addresses[*]}&#39;</span>
+</span></span></code></pre></div><p>Use that IP as a <code>/32</code> (or your control plane&rsquo;s CIDR for an HA apiserver). A
+complete controller egress block — DNS, the apiserver, source-controller, S3, and an
+OTLP collector — looks like this:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">egress</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># DNS to the cluster DNS namespace. Without this, every flow below</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># fails name resolution.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dns</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dnsNamespace</span><span class="p">:</span><span class="w"> </span><span class="l">kube-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">to</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># kube-apiserver — not label-selectable, so an ipBlock CIDR.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># Replace with the IP(s) from the command above.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">to</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">ipBlock</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="m">10.0.0.1</span><span class="l">/32</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ports</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">443</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># source-controller — artifact fetch from the flux-system namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">to</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">namespaceSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">kubernetes.io/metadata.name</span><span class="p">:</span><span class="w"> </span><span class="l">flux-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># S3 rollback store — an ipBlock CIDR for an external endpoint. For</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># in-cluster MinIO, use a namespaceSelector instead.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">to</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">ipBlock</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="m">198.51.100.0</span><span class="l">/24</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ports</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">443</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># OTLP collector — an ipBlock CIDR for an external endpoint. For an</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># in-cluster collector, use a namespaceSelector instead.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">to</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">ipBlock</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="m">203.0.113.10</span><span class="l">/32</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ports</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">4317</span><span class="w">
+</span></span></span></code></pre></div><p>Add an <code>ipBlock</code> peer for each remote-cluster apiserver named by a <code>spec.kubeConfig</code>
+and for each <code>http</code>-action / direct <code>sourceRef</code> host the controller reaches. Trim
+the rest to what your install actually uses: drop the S3 block when no rollback store
+is configured, and drop the OTLP block when tracing is off. The apiserver and DNS
+rules are non-negotiable for the controller.</p>
+<p>For the full set of chart values, see
+<a href="/reference/helm-values/">Helm chart values</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/network-policy" term="network-policy" label="network-policy"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/networking" term="networking" label="networking"/></entry><entry><title type="html">Production</title><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/running/disaster-recovery/?utm_source=atom_feed" rel="related" type="text/html" title="Backup and disaster recovery"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><id>https://stageset.projects.metio.wtf/running/production/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A decision-oriented checklist for hardening a stageset-controller install before it manages production releases.</blockquote><p>The chart&rsquo;s defaults bring up a hardened, lease-guarded controller, but a few
+decisions still belong to you before it manages production releases: whether
+rollback is enabled and where its store lives, how many replicas run, what the
+controller can reach, and how you observe and recover it. Work through these in
+order. Each step states what to set and why, and ends with the Helm values for
+that step. Every flag and its Helm value live in the <a href="/reference/configuration/">configuration
+reference</a>
+.</p>
+<h2 id="1-decide-on-rollback-and-pick-its-store">1. Decide on rollback and pick its store</h2>
+<p>Rollback is opt-in. With no store the controller leaves a failed run on the
+broken release; with one it restores the last successfully-applied artifact
+revisions. The store keeps bit-exact copies that outlive the producer&rsquo;s garbage
+collection, so it is the difference between a recoverable failure and a manual
+incident.</p>
+<p>Two mutually-exclusive backends are available — a <code>ReadWriteMany</code> PVC or an
+S3-compatible bucket. For HA the store must be reachable from whichever pod holds
+the lease, which rules out a <code>ReadWriteOnce</code> PVC. On-prem, use an RWX class (NFS,
+CephFS); on a cloud provider, use the object store. The decision, the keep-count,
+and how restore selects a revision are covered in <a href="/gating/rollback/">Rollback</a>
+.</p>
+<p>The store holds rendered <code>Secret</code> data, so encrypt it at rest. The S3 backend
+takes a server-side-encryption mode (SSE-S3 or SSE-KMS with your key); see
+<a href="/gating/rollback/#encryption-at-rest">encryption at rest</a>
+. This is distinct from
+SOPS decryption of a stage&rsquo;s own source, which is configured per stage in
+<a href="/security/encryption/">Secrets encryption</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Option A: RWX PVC (on-prem)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">pvc</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pvc</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">ReadWriteMany]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">storageClass</span><span class="p">:</span><span class="w"> </span><span class="l">nfs-client    </span><span class="w"> </span><span class="c"># your RWX class (NFS, CephFS, …)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="l">10Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># Option B: S3-compatible bucket (cloud)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">s3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">s3</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l">s3.eu-west-1.amazonaws.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bucket</span><span class="p">:</span><span class="w"> </span><span class="l">my-org-stageset-rollback</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">region</span><span class="p">:</span><span class="w"> </span><span class="l">eu-west-1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sse</span><span class="p">:</span><span class="w"> </span><span class="l">s3                     </span><span class="w"> </span><span class="c"># SSE-S3; or kms (+ sseKmsKeyId), or none</span><span class="w">
+</span></span></span></code></pre></div><h2 id="high-availability">2. Run leader-elected HA</h2>
+<p>The chart enables leader election by default, so even a single replica is
+lease-guarded. For HA, raise the replica floor above one: only the lease holder
+reconciles, while every replica answers admission webhook calls, so admission
+stays available during a leader handover. When the replica ceiling exceeds the
+floor the chart also renders a <code>HorizontalPodAutoscaler</code> (CPU target 80%) and a
+<code>PodDisruptionBudget</code> (<code>minAvailable: 1</code>).</p>
+<p>The lease is not released eagerly on shutdown, so after a rolling update the new
+leader takes over when the old lease expires — budget a few seconds of reconcile
+pause on restart. Admission and the gate endpoint stay available throughout,
+since every replica serves them. The HA model is detailed in
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">replicas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">                 </span><span class="c"># leader-elected HA; the non-leader still serves admission</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">                 </span><span class="c"># &gt; min renders an HPA (CPU 80%) and a PodDisruptionBudget</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">leaderElect</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><h2 id="3-choose-the-tenancy-model-and-scope-rbac">3. Choose the tenancy model and scope RBAC</h2>
+<p>The controller never applies your manifests as itself. Every cluster operation
+for a <code>StageSet</code> — building, applying, pruning, running actions — runs as the
+<code>StageSet</code>&rsquo;s <code>spec.serviceAccountName</code>, so a release can only do what its tenant
+<code>ServiceAccount</code> permits and an over-broad or missing SA fails closed. On the
+local cluster the controller assumes that identity by minting a short-lived
+TokenRequest token for the SA, so the chart grants it only <code>create</code> on
+<code>serviceaccounts/token</code> — not write access and not the <code>impersonate</code> verb. Give
+every production <code>StageSet</code> a scoped <code>ServiceAccount</code>.</p>
+<p>Pick the model that matches your cluster. Multi-tenant clusters keep
+impersonation on and may scope the controller to a namespace set — one instance
+per tenant group, which also pivots RBAC to per-namespace bindings. Single-tenant
+clusters can bind the controller to <code>cluster-admin</code> so StageSets apply without a
+<code>serviceAccountName</code>. Both models, and remote-cluster reconciliation, are in
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+. To hard-isolate namespaces,
+deny cross-namespace <code>sourceRef</code>/<code>dependsOn</code> references.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Multi-tenant: scope the controller to a namespace set (RBAC pivots to</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># per-namespace bindings) and hard-isolate cross-namespace references.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">watchNamespaces</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">team-a, team-b]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">noCrossNamespaceRefs</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># Single-tenant: bind the controller SA to cluster-admin so StageSets apply</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># without a per-release serviceAccountName.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rbac</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">clusterAdmin</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><h2 id="4-set-resources-for-your-release-sizes">4. Set resources for your release sizes</h2>
+<p>The chart constrains the pod with requests equal to limits, so it is fully
+bounded out of the box. The defaults suit ordinary workloads; raise them for very
+large inventories or very busy clusters. Ephemeral storage covers <code>/tmp</code> and the
+self-signed cert directory, both emptyDirs. The reconcile cadence StageSets
+inherit when they omit <code>spec.interval</code>, and the inventory mode and shard cap that
+govern how applied objects are tracked, are tuning knobs worth reviewing.
+<a href="/running/scale-and-capacity/">Scale and capacity</a>
+ covers the sizing drivers
+and these throughput knobs in depth.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l">50m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l">256Mi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ephemeralStorage</span><span class="p">:</span><span class="w"> </span><span class="l">32Mi  </span><span class="w"> </span><span class="c"># /tmp and the self-signed cert dir are emptyDirs</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">defaultInterval</span><span class="p">:</span><span class="w"> </span><span class="l">10m    </span><span class="w"> </span><span class="c"># cadence StageSets inherit when they omit spec.interval</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inventoryShardCap</span><span class="p">:</span><span class="w"> </span><span class="m">5000</span><span class="w">  </span><span class="c"># lower for smaller inventory objects on huge applies</span><span class="w">
+</span></span></span></code></pre></div><h2 id="network-policy">5. Fence the network and the gate</h2>
+<p>The gate endpoint is unauthenticated — a read-only <code>GET</code> that progressive-delivery
+tooling (Flagger, Argo Rollouts) polls. Turn on the ingress-only <code>NetworkPolicy</code>
+to fence the gate, webhook, and metrics ports to only the peers that need them.</p>
+<p>The policy is ingress-only and does not restrict egress. The controller still
+fetches stage artifacts over HTTP from source-controller, so if your cluster
+default-denies egress, add an egress allowance to source-controller and DNS. When
+a stage runs <code>http</code> <a href="/defining-a-release/actions/">actions</a>
+, the hosts those actions may reach
+are an explicit allow-list — loopback and link-local are always denied.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">              </span><span class="c"># admits the webhook (9443), metrics (8080), gate (8082)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">allowedActionHosts</span><span class="p">:</span><span class="w">        </span><span class="c"># host globs http actions may reach; loopback/link-local always denied</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;*.internal.example.com&#34;</span><span class="w">
+</span></span></span></code></pre></div><h2 id="admission-webhook-tls">6. Provision the admission webhook certificate</h2>
+<p>The webhook validates <code>StageSet</code> spec invariants at <code>kubectl apply</code> time instead
+of at reconcile time. It is wired by the chart; the one decision is how its
+serving certificate is obtained. The default <code>self-signed</code> mode generates an
+in-pod CA and serving cert and rotates them at a third of their validity with no
+external dependency. The <code>cert-manager</code> mode hands issuance and rotation to
+<a href="https://cert-manager.io/">cert-manager</a>
+, which must be installed in the cluster.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Option A: cert-manager (issues + rotates the cert; requires cert-manager)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">cert-manager</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">issuerRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ClusterIssuer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">letsencrypt-prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># Option B: self-signed (chart default: in-pod CA + serving cert, rotated at</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># validity/3, with no cert-manager dependency)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">self-signed</span><span class="w">
+</span></span></span></code></pre></div><h2 id="7-enable-observability-and-alerts">7. Enable observability and alerts</h2>
+<p>Turn on the <code>ServiceMonitor</code> if you scrape with the Prometheus operator, and the
+bundled <code>PrometheusRule</code> for the starter alert set. Match the Prometheus selector
+labels so your instance picks up each object. The exposed metrics, the shipped
+alerts, and the events the controller emits are documented in
+<a href="/running/operations/#metrics">Operations</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">additionalLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prom      </span><span class="w"> </span><span class="c"># match your Prometheus&#39;s serviceMonitorSelector</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">prometheusRule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prom      </span><span class="w"> </span><span class="c"># match your Prometheus&#39;s ruleSelector</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraAlertLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l">platform          </span><span class="w"> </span><span class="c"># Alertmanager routing label</span><span class="w">
+</span></span></span></code></pre></div><p>Every actionable Ready-condition reason has a <a href="/runbooks/">runbook</a>
+, and the
+controller appends a direct link to each Ready message
+(<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code>), so a
+<code>kubectl describe</code> on a failing StageSet routes straight to the fix. Healthy
+reasons get no link.</p>
+<h2 id="8-plan-for-upgrades-and-recovery">8. Plan for upgrades and recovery</h2>
+<p>Calendar-based releases run on a weekly cron. Chart upgrades are <code>helm upgrade --install</code>; the chart ships CRDs under <code>templates/</code>, so schema changes apply
+automatically. Read
+<a href="/reference/upgrading/">Upgrading</a>
+
+before each upgrade — a release that changes an immutable selector field requires
+a manual delete first. For day-two work — forcing a reconcile, drift correction,
+reading events, and following a runbook — see
+<a href="/running/operations/">Operations</a>
+.</p>
+<h2 id="a-complete-production-valuesyaml">A complete production values.yaml</h2>
+<p>Two HA setups share one backbone: a leader-elected pair (or trio), a rollback
+store reachable from whichever pod holds the lease, cert-manager for the webhook,
+a <code>NetworkPolicy</code> fencing the unauthenticated gate, and a <code>ServiceMonitor</code> for
+Prometheus. They differ only in where the rollback store lives.</p>
+<h3 id="on-prem-rwx-storage">On-prem (RWX storage)</h3>
+<p>Back the store with a <code>ReadWriteMany</code> PVC on your storage class (NFS, CephFS, …)
+so every replica mounts the same volume — the store must be reachable from the
+lease holder, and an RWO PVC cannot satisfy that under HA.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># values-onprem.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">replicas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">                 </span><span class="c"># leader-elected HA; the non-leader still serves admission</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">                 </span><span class="c"># &gt; min renders an HPA (CPU 80%) and a PodDisruptionBudget</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">leaderElect</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">pvc</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pvc</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">ReadWriteMany]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">storageClass</span><span class="p">:</span><span class="w"> </span><span class="l">nfs-client    </span><span class="w"> </span><span class="c"># your RWX class (NFS, CephFS, …)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="l">10Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">cert-manager        </span><span class="w"> </span><span class="c"># requires cert-manager in the cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">                  </span><span class="c"># fences the unauthenticated gate endpoint</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">helm upgrade --install stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://ghcr.io/metio/helm-charts/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace stageset-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -f values-onprem.yaml
+</span></span></code></pre></div><h3 id="aws--eks-s3--irsa">AWS / EKS (S3 + IRSA)</h3>
+<p>Back the store with S3 and let the controller assume an IAM role through
+<a href="https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html">IRSA</a>
+
+instead of static keys: annotate the controller&rsquo;s ServiceAccount with the role
+ARN and leave the S3 credentials empty, and the store&rsquo;s minio-go client picks the
+role up from the pod&rsquo;s web-identity token. Grant the role
+<code>s3:GetObject</code>/<code>PutObject</code>/<code>ListBucket</code>/<code>DeleteObject</code> on the bucket.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># values-eks.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">replicas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">leaderElect</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">serviceAccount</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># an IAM role granting s3:GetObject/PutObject/ListBucket/DeleteObject on the bucket</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">eks.amazonaws.com/role-arn</span><span class="p">:</span><span class="w"> </span><span class="l">arn:aws:iam::123456789012:role/stageset-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rollbackStore</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">s3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">s3</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l">s3.eu-west-1.amazonaws.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bucket</span><span class="p">:</span><span class="w"> </span><span class="l">my-org-stageset-rollback</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">region</span><span class="p">:</span><span class="w"> </span><span class="l">eu-west-1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sse</span><span class="p">:</span><span class="w"> </span><span class="l">s3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># no existingSecret → credentials come from the IRSA role above</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certMode</span><span class="p">:</span><span class="w"> </span><span class="l">cert-manager</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">helm upgrade --install stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://ghcr.io/metio/helm-charts/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace stageset-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -f values-eks.yaml
+</span></span></code></pre></div><h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="/reference/configuration/">Configuration reference</a>
+ — every flag, its
+default, and the Helm value that drives it.</li>
+<li><a href="/running/operations/">Operations</a>
+ — metrics, alerts, events, forcing a
+reconcile, drift correction.</li>
+<li><a href="/gating/rollback/">Rollback</a>
+ — store backends, keep-count, and revision
+selection.</li>
+<li><a href="/security/multi-cluster/">Multi-cluster and tenancy</a>
+ — tenant ServiceAccounts,
+namespace scoping, remote-cluster reconciliation.</li>
+<li><a href="/runbooks/">Runbooks</a>
+ — incident response.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/production" term="production" label="production"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/ha" term="ha" label="ha"/></entry><entry><title type="html">Secrets encryption</title><link href="https://stageset.projects.metio.wtf/security/encryption/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/running/disaster-recovery/?utm_source=atom_feed" rel="related" type="text/html" title="Backup and disaster recovery"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/security/network-policy/?utm_source=atom_feed" rel="related" type="text/html" title="Network policy"/><id>https://stageset.projects.metio.wtf/security/encryption/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Decrypt SOPS-encrypted files in a stage&rsquo;s source before they are applied.</blockquote><p>A stage&rsquo;s source can carry <a href="https://github.com/getsops/sops">SOPS</a>
+-encrypted
+files — typically a <code>Secret</code> whose values are encrypted — and the controller
+decrypts them in memory, before building and applying the manifests. This mirrors
+Flux&rsquo;s <code>kustomize-controller</code> decryption contract, so an existing SOPS-encrypted
+repository needs no migration.</p>
+<p>Set <code>spec.decryption</code> and point it at a Secret holding the keys:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">decryption</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">sops         </span><span class="w"> </span><span class="c"># the only provider</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sops-age       </span><span class="w"> </span><span class="c"># a Secret in this namespace holding the age key</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-config  </span><span class="w"> </span><span class="c"># contains an encrypted secret.yaml</span><span class="w">
+</span></span></span></code></pre></div><h2 id="walkthrough--age">Walkthrough — age</h2>
+<p><a href="https://age-encryption.org/">age</a>
+ is the simplest key type and needs no external
+service. Take a <code>Secret</code> from plaintext to a GitOps-safe rollout in four steps.</p>
+<p><strong>1. Generate an age key.</strong> The file holds the private key; the printed <code>age1…</code>
+line is the public recipient to encrypt to.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">age-keygen -o age.agekey
+</span></span><span class="line"><span class="cl"><span class="c1"># public key: age1qz…</span>
+</span></span></code></pre></div><p><strong>2. Encrypt a Secret.</strong> Encrypt only its values, so the file stays a valid
+Kubernetes object, then commit <code>secret.enc.yaml</code> (never the plaintext):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># secret.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Secret</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-db</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">stringData</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l">s3cr3t-do-not-commit-plaintext</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">sops --encrypt --age age1qz… <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --encrypted-regex <span class="s1">&#39;^(data|stringData)$&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  secret.yaml &gt; secret.enc.yaml
+</span></span></code></pre></div><p><strong>3. Put the private key in the cluster</strong> under a <code>.agekey</code> data entry. Store
+<code>age.agekey</code> itself somewhere safe — it is the only thing that can decrypt the
+Secret.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl create secret generic sops-age <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace payments <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --from-file<span class="o">=</span>keys.agekey<span class="o">=</span>age.agekey
+</span></span></code></pre></div><p><strong>4. Decrypt on rollout.</strong> Point a <code>StageSet</code> at the source holding
+<code>secret.enc.yaml</code> and set <code>spec.decryption</code> (as in the example above). On reconcile
+the controller fetches the source, decrypts every SOPS file in memory, builds, and
+applies — so the cluster holds the plaintext <code>payments-db</code> Secret while Git only
+ever held ciphertext. Grant the deployer ServiceAccount read access to the key
+Secret (see <a href="#how-keys-are-read--tenancy">tenancy</a>
+ below).</p>
+<h2 id="pairing-with-jaas-rendered-manifests">Pairing with JaaS-rendered manifests</h2>
+<p>A realistic app renders its config from Jsonnet with
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ and keeps only its Secret encrypted. The
+two compose cleanly because each owns one concern:</p>
+<ul>
+<li><strong>JaaS renders the non-secret manifests.</strong> It evaluates Jsonnet server-side and
+cannot hold secret values: SOPS ciphertext carries a MAC over the whole encrypted
+document, so it can&rsquo;t be authored in Jsonnet — and routing plaintext secrets
+through a render service is what you are avoiding.</li>
+<li><strong>The Secret stays SOPS-encrypted in Git</strong>, as in the walkthrough.</li>
+<li><strong>The controller decrypts and orders both</strong> under one <code>spec.decryption</code>:</li>
+</ul>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">decryption</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">sops</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sops-age</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">secrets                </span><span class="w"> </span><span class="c"># decrypt + apply the SOPS Secret first</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-secrets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app                    </span><span class="w"> </span><span class="c"># then the JaaS-rendered app that mounts it</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-app</span><span class="w">
+</span></span></span></code></pre></div><p>The <code>secrets</code> stage runs first; only once the <code>Secret</code> is applied does the <code>app</code>
+stage roll out the rendered manifests that mount it. The encrypted Secret and the
+rendered config live in separate sources, so the Jsonnet author never touches secret
+material.</p>
+<h2 id="the-fields">The fields</h2>
+<ul>
+<li><strong><code>provider</code></strong> — the decryption backend. Only <code>sops</code> is supported.</li>
+<li><strong><code>secretRef.name</code></strong> — a Secret in the <code>StageSet</code>&rsquo;s namespace holding the keys,
+using the SOPS conventions: age private keys under data entries ending in
+<code>.agekey</code>, armored PGP private keys under <code>.asc</code>. Optional — omit it for a
+<a href="#cloud-kms">cloud-KMS-only</a>
+ setup.</li>
+</ul>
+<h2 id="how-keys-are-read--tenancy">How keys are read — tenancy</h2>
+<p>The key Secret is read in the <code>StageSet</code>&rsquo;s namespace <strong>under its
+<code>serviceAccountName</code></strong>, exactly like the manifests it applies. A tenant can only
+decrypt with key material its own ServiceAccount is allowed to read, so a key in one
+namespace is never reachable from another. Grant the deployer SA <code>get</code> on the key
+Secret:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">rbac.authorization.k8s.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer-sops</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">apiGroups</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">secrets]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resourceNames</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">sops-age]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">verbs</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">get]</span><span class="w">
+</span></span></span></code></pre></div><p>In a <a href="/security/multi-cluster/#single-tenant-cluster-admin">single-tenant cluster-admin</a>
+
+install (no <code>serviceAccountName</code>), the controller reads the key Secret under its
+own identity instead.</p>
+<h2 id="decryption-and-the-rollback-store">Decryption and the rollback store</h2>
+<p>Decrypted bytes exist only in memory on the apply path. The one place rendered
+output is persisted is the optional <a href="/gating/rollback/">rollback store</a>
+, which is
+<strong>encrypted at rest</strong> (S3 SSE by default; an encrypted volume for the file store) —
+so a decrypted <code>Secret</code> never lands in plaintext on disk. See
+<a href="/gating/rollback/#encryption-at-rest">encryption at rest</a>
+.</p>
+<p>A rollback re-fetches the previous source and <strong>runs decryption again</strong> rather than
+restoring plaintext, so the key Secret must still exist when a rollback fires. If
+the key was rotated or deleted in the meantime, the rollback <strong>fails closed</strong> with
+<code>PreviousRevisionUnavailable</code> instead of applying a stale or unreadable Secret — an
+encrypted store cannot avoid this, and it is the safe failure direction.</p>
+<h2 id="cloud-kms">Cloud KMS</h2>
+<p>SOPS files encrypted with a cloud KMS key (AWS KMS, GCP KMS, Azure Key Vault, or
+HashiCorp Vault) decrypt through the <strong>controller&rsquo;s ambient credentials</strong> — e.g. an
+IRSA role on EKS, wired via <code>serviceAccount.annotations</code>. No in-cluster key Secret
+is needed, so <code>secretRef</code> may be omitted for a KMS-only <code>StageSet</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">decryption</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">sops         </span><span class="w"> </span><span class="c"># secretRef omitted; KMS uses the controller&#39;s identity</span><span class="w">
+</span></span></span></code></pre></div><p>One consequence to weigh in a multi-tenant cluster: unlike age (read under the
+tenant SA), <strong>cloud KMS uses the controller&rsquo;s identity</strong>, so any <code>StageSet</code> can
+decrypt a file encrypted with a KMS key the controller&rsquo;s role can access. This
+matches Flux&rsquo;s <code>kustomize-controller</code>. Scope the controller&rsquo;s KMS grant
+accordingly, use age keys for hard per-tenant isolation, or enable
+<a href="#per-tenant-kms-identity-object-level-kms">object-level KMS identity</a>
+ below.</p>
+<h3 id="per-tenant-kms-identity-object-level-kms">Per-tenant KMS identity (object-level KMS)</h3>
+<p>By default cloud KMS uses the controller&rsquo;s ambient credentials (above). Enabling
+the controller flag <code>--object-level-kms</code> instead decrypts each cloud KMS key with
+the <strong><code>StageSet</code>&rsquo;s <code>serviceAccountName</code> federated to a cloud identity</strong>, so KMS
+decryption is bounded by that tenant&rsquo;s cloud IAM grants rather than the
+controller&rsquo;s. The flag is off by default; leaving it off keeps the ambient
+behavior unchanged.</p>
+<p>When the flag is on and a <code>StageSet</code> sets <code>serviceAccountName</code>, the controller
+mints a projected token for that ServiceAccount and exchanges it with the cloud&rsquo;s
+STS — AWS IRSA, GCP Workload Identity, or Azure Workload Identity — exactly like
+the per-tenant cluster credentials used elsewhere. A <code>StageSet</code> with no
+<code>serviceAccountName</code> falls back to the ambient credentials (there is no tenant
+identity to assume). age and PGP decryption are unaffected by the flag — they
+always run tenant-scoped from <code>secretRef</code>.</p>
+<p>Trust model: the KMS call carries the tenant ServiceAccount&rsquo;s cloud identity, so
+one tenant can only decrypt with KMS keys its own cloud identity is granted —
+matching the isolation age already gives. The tenant ServiceAccount must be
+federated to a cloud identity (e.g. an IRSA-annotated ServiceAccount, a GKE
+Workload-Identity binding, or an Azure federated credential) that holds
+<code>kms:Decrypt</code> on the relevant key; without that federation the KMS decrypt fails.
+There is no spec field — the choice is a cluster-wide operator decision via the
+flag.</p>
+<h2 id="whats-supported">What&rsquo;s supported</h2>
+<ul>
+<li><strong>age</strong> keys via <code>secretRef</code> — read under the tenant SA. The resource-level
+pattern (<code>--encrypted-regex '^(data|stringData)$'</code>) is the tested path.</li>
+<li><strong>PGP</strong> keys via <code>secretRef</code> (<code>.asc</code> entries) — read under the tenant SA, pure
+Go, no <code>gpg</code> binary or keyring needed. See <a href="#pgp-keys">PGP keys</a>
+.</li>
+<li><strong>Cloud KMS</strong> (AWS/GCP/Azure/Vault) via the controller&rsquo;s ambient credentials,
+or via each tenant&rsquo;s federated cloud identity with
+<a href="#per-tenant-kms-identity-object-level-kms"><code>--object-level-kms</code></a>
+.</li>
+<li><strong>Encrypted files feeding a <code>secretGenerator</code></strong> — an encrypted <code>.env</code> (or other
+file) referenced by a kustomize <code>secretGenerator</code> is decrypted before the build,
+so the generated <code>Secret</code> carries the plaintext.</li>
+<li>A file with no SOPS metadata passes through untouched, so encrypted and plain
+manifests can sit side by side in one source.</li>
+</ul>
+<h2 id="pgp-keys">PGP keys</h2>
+<p>PGP works <strong>tenant-scoped</strong>, like age: put one or more armored private keys in the
+<code>secretRef</code> Secret under data entries suffixed <code>.asc</code>. The data key is decrypted in
+pure Go (<code>ProtonMail/go-crypto</code>) directly from those keys — <strong>no <code>gpg</code> binary, no
+GnuPG keyring, and no <code>GNUPGHOME</code></strong> — and the keys are read under the <code>StageSet</code>&rsquo;s
+<code>serviceAccountName</code>, so a tenant can only use material its ServiceAccount can read.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># export the armored private key and load it into the key Secret</span>
+</span></span><span class="line"><span class="cl">gpg --export-secret-keys --armor 0xYOURFINGERPRINT &gt; key.asc
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">kubectl create secret generic sops-keys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace payments <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --from-file<span class="o">=</span>pgp.asc<span class="o">=</span>key.asc
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">decryption</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">sops</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sops-keys     </span><span class="w"> </span><span class="c"># holds the *.asc private key(s)</span><span class="w">
+</span></span></span></code></pre></div><p>One Secret can carry both age (<code>*.agekey</code>) and PGP (<code>*.asc</code>) keys; the right one is
+used per file. For a fresh setup, age is simpler and the recommended default, but an
+existing PGP-encrypted repository needs no migration.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/secrets" term="secrets" label="secrets"/><category scheme="https://stageset.projects.metio.wtf/tags/encryption" term="encryption" label="encryption"/><category scheme="https://stageset.projects.metio.wtf/tags/sops" term="sops" label="sops"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/></entry><entry><title type="html">Security &amp; multi-tenancy</title><link href="https://stageset.projects.metio.wtf/security/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/security/multi-cluster/?utm_source=atom_feed" rel="related" type="text/html" title="Multi-cluster and tenancy"/><link href="https://stageset.projects.metio.wtf/security/network-policy/?utm_source=atom_feed" rel="related" type="text/html" title="Network policy"/><id>https://stageset.projects.metio.wtf/security/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Run the controller safely — SOPS decryption, tenant impersonation, remote clusters, admission validation, network policy, and service mesh.</blockquote><p>How to run StageSet without granting it broad cluster power, keep secrets
+encrypted, and constrain what it can reach. The controller applies as a tenant
+<code>ServiceAccount</code>, so a StageSet can do exactly what its RBAC allows and no more.</p>
+<ul>
+<li><strong><a href="/security/encryption/">Secrets encryption</a>
+</strong> — decrypt SOPS-encrypted files
+in memory during apply.</li>
+<li><strong><a href="/security/multi-cluster/">Multi-cluster and tenancy</a>
+</strong> — apply as a tenant
+<code>ServiceAccount</code> or to a remote cluster.</li>
+<li><strong><a href="/security/admission-webhook/">Admission webhook</a>
+</strong> — validate StageSets at
+admission time.</li>
+<li><strong><a href="/security/network-policy/">Network policy</a>
+</strong> — lock the controller&rsquo;s traffic
+down to what it needs.</li>
+<li><strong><a href="/security/service-mesh/">Service mesh</a>
+</strong> — run the controller inside a mesh.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/multi-tenancy" term="multi-tenancy" label="multi-tenancy"/><category scheme="https://stageset.projects.metio.wtf/tags/rbac" term="rbac" label="rbac"/></entry><entry><title type="html">Service mesh</title><link href="https://stageset.projects.metio.wtf/security/service-mesh/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/security/network-policy/?utm_source=atom_feed" rel="related" type="text/html" title="Network policy"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/running/production/?utm_source=atom_feed" rel="related" type="text/html" title="Production"/><id>https://stageset.projects.metio.wtf/security/service-mesh/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The opt-in service-mesh authorization the chart ships — Istio or Linkerd identity-based authorization and mTLS layered over networkPolicy, per-port allowed mesh identities, the non-mesh carve-outs for the apiserver and kubelet, and native passthrough.</blockquote><p>The Helm chart ships an opt-in service-mesh authorization layer for the controller
+pod. It is off by default and renders only when <code>serviceMesh.enabled</code> is <code>true</code>.
+Where the <a href="/security/network-policy/">network policy</a>
+ operates at L3/L4 — which pods and
+IP ranges may reach which ports — the service mesh operates at L7 with
+<strong>identity-based authorization</strong> and <strong>mTLS</strong>: it asks <em>which mesh identity</em> is
+calling, proven by a cryptographic workload certificate, not merely which IP the
+packet came from.</p>
+<p><code>serviceMesh</code> and <code>networkPolicy</code> are separate fields and compose additively. They
+solve different problems and are best enabled together: the network policy draws the
+L3/L4 perimeter, and the mesh authorizes meshed callers by SPIFFE identity on top of
+it. Enabling one does not require the other, and neither weakens the other.</p>
+<h2 id="opt-in-and-explicit-engine">Opt-in and explicit engine</h2>
+<p><code>serviceMesh.engine</code> selects which mesh dialect the chart renders. It is explicit,
+not auto-detected: a chart that sniffed the running mesh would render different
+objects on different clusters from identical values, which breaks GitOps determinism.
+You name the engine, and the rendered manifest is the same everywhere.</p>
+<table>
+	<thead>
+			<tr>
+					<th><code>engine</code></th>
+					<th>Renders</th>
+					<th>API</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>istio</code> (default)</td>
+					<td><code>AuthorizationPolicy</code> + (optional) <code>PeerAuthentication</code></td>
+					<td><code>security.istio.io/v1</code></td>
+			</tr>
+			<tr>
+					<td><code>linkerd</code></td>
+					<td><code>Server</code> + <code>AuthorizationPolicy</code> + <code>MeshTLSAuthentication</code></td>
+					<td><code>policy.linkerd.io</code></td>
+			</tr>
+	</tbody>
+</table>
+<p>The rendered objects are inert unless the named mesh is actually installed and the
+controller pod is injected into it. Enabling <code>serviceMesh</code> on an un-meshed pod renders
+the manifests but changes nothing about how traffic flows.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">serviceMesh</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">istio</span><span class="w">
+</span></span></span></code></pre></div><h2 id="per-port-authorization">Per-port authorization</h2>
+<p>Each mesh-reachable port carries a <code>from</code> list naming the mesh identities allowed to
+call it. An <strong>empty <code>from</code> list leaves that port open</strong> to any meshed caller,
+mirroring <code>networkPolicy</code>&rsquo;s empty-<code>from</code>-is-open semantics; a non-empty list
+restricts the port to the listed identities.</p>
+<p>The mesh-reachable ports are the gate port and the metrics port:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Port</th>
+					<th>Mode</th>
+					<th><code>from</code> restricts</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Gate (<code>ports.gate</code>, <code>8082</code>)</td>
+					<td>gate</td>
+					<td>Flagger polling the read-only gate endpoint</td>
+			</tr>
+			<tr>
+					<td>Metrics (<code>ports.metrics</code>, <code>8080</code>)</td>
+					<td>always</td>
+					<td>Prometheus scraping <code>/metrics</code></td>
+			</tr>
+	</tbody>
+</table>
+<p>A <code>from</code> entry is a source matcher with two fields:</p>
+<ul>
+<li><strong><code>principals</code></strong> — SPIFFE/mesh identities. On Istio these are
+<code>source.principals</code> (<code>cluster.local/ns/&lt;ns&gt;/sa/&lt;sa&gt;</code>). On Linkerd they map to
+<code>MeshTLSAuthentication</code> identities (<code>&lt;sa&gt;.&lt;ns&gt;.serviceaccount.identity.linkerd.cluster.local</code>,
+or <code>*</code>).</li>
+<li><strong><code>namespaces</code></strong> — source namespaces (Istio <code>source.namespaces</code>). <strong>Istio-only</strong> —
+Linkerd authenticates by workload identity, not by namespace, so this field is
+ignored under the <code>linkerd</code> engine.</li>
+</ul>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">serviceMesh</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">istio</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Restrict the gate to Flagger&#39;s identity.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">gate</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">from</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">principals</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="l">cluster.local/ns/flagger-system/sa/flagger</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Scope metrics scraping to the monitoring namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">from</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">namespaces</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="l">monitoring</span><span class="w">
+</span></span></span></code></pre></div><h2 id="non-mesh-clients-keep-working">Non-mesh clients keep working</h2>
+<p>The kube-apiserver (which dials the admission webhook) and the kubelet (which dials
+the readiness and liveness probes) are <strong>not part of the mesh</strong>. They carry no mesh
+identity and present no workload certificate, so any authorization rule that demanded
+one would reject them — admission would break and probes would fail.</p>
+<p>The chart deliberately leaves the <strong>webhook and health probe ports open</strong> so these
+non-mesh clients always connect:</p>
+<ul>
+<li><strong>Istio</strong> adds an allow-any rule covering the webhook (<code>9443</code>) and health (<code>8081</code>)
+ports, so no identity is required on them.</li>
+<li>With <strong><code>mtls: strict</code></strong>, the chart additionally sets <code>portLevelMtls: PERMISSIVE</code> on
+those two ports, so a plaintext connection from the apiserver or kubelet is still
+accepted even while every other port enforces mTLS.</li>
+<li><strong>Linkerd</strong> renders no <code>Server</code> for those ports, leaving them outside the mesh&rsquo;s
+authorization scope entirely.</li>
+</ul>
+<p>This is why admission and probes keep working with the mesh fully enabled.
+Authenticity on the webhook port is enforced by TLS and the CA bundle on the
+<code>ValidatingWebhookConfiguration</code>, not by the mesh — see the
+<a href="/security/admission-webhook/">admission webhook page</a>
+.</p>
+<h2 id="mtls">mTLS</h2>
+<p><code>serviceMesh.mtls</code> sets the mTLS posture and applies to the <strong>Istio engine only</strong>;
+Linkerd negotiates mTLS automatically between meshed pods, so the knob is ignored
+there.</p>
+<table>
+	<thead>
+			<tr>
+					<th><code>mtls</code></th>
+					<th>Effect (Istio)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>&quot;&quot;</code> (default)</td>
+					<td>Defers to the mesh&rsquo;s own default (mesh-wide <code>PeerAuthentication</code> / <code>MeshConfig</code>) — no <code>PeerAuthentication</code> is rendered</td>
+			</tr>
+			<tr>
+					<td><code>permissive</code></td>
+					<td>Renders a <code>PeerAuthentication</code> accepting both mTLS and plaintext</td>
+			</tr>
+			<tr>
+					<td><code>strict</code></td>
+					<td>Requires mTLS on the workload&rsquo;s ports, <strong>except</strong> the webhook and health ports, which get a port-level <code>PERMISSIVE</code> carve-out</td>
+			</tr>
+	</tbody>
+</table>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">serviceMesh</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">istio</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mtls</span><span class="p">:</span><span class="w"> </span><span class="l">strict</span><span class="w">
+</span></span></span></code></pre></div><p>Under <code>strict</code>, every mesh-reachable port enforces mTLS while the apiserver and
+kubelet still reach the webhook and probes over plaintext via the carve-out above.</p>
+<h2 id="default-deny">Default-deny</h2>
+<p><code>serviceMesh.defaultDeny.enabled</code> (default <code>false</code>) additionally renders a
+namespace-wide default-deny so every pod in the install namespace rejects
+unauthorized mesh traffic and the per-workload allows become the only exceptions (a
+zero-trust namespace).</p>
+<ul>
+<li><strong>Istio</strong> renders an empty-spec <code>AuthorizationPolicy</code> (deny-all) scoped to the
+whole namespace; it sits at lower precedence than the workload <code>ALLOW</code>, so the
+per-port allows always win for the controller pod while everything else is denied.</li>
+<li><strong>Linkerd</strong> has no per-object deny-all; the namespace default is set via the
+<code>config.linkerd.io/default-inbound-policy</code> annotation, stamped onto the
+chart-managed Namespace (requires <code>namespace.create=true</code>) — otherwise annotate the
+namespace out of band.</li>
+</ul>
+<p>Enable this <strong>only when the controller owns its namespace</strong>, because the deny-all
+also denies every co-located workload that does not have its own allowing
+authorization.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">serviceMesh</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">istio</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">defaultDeny</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">   </span><span class="c"># only when the controller owns this namespace</span><span class="w">
+</span></span></span></code></pre></div><h2 id="native-passthrough">Native passthrough</h2>
+<p>Anything the per-port <code>from</code> knobs cannot express goes into the engine&rsquo;s native
+passthrough list, merged verbatim into the rendered objects.</p>
+<p>Under the <code>istio</code> engine, <code>serviceMesh.istio.rules</code> are merged into the
+<code>AuthorizationPolicy</code>&rsquo;s <code>spec.rules</code> (the <code>security.istio.io/v1</code> rule schema) — use it
+for path/method matchers, <code>when</code> JWT-claim conditions, <code>ipBlocks</code>, and similar:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">serviceMesh</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">istio</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">istio</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">from</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">namespaces</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="l">flagger-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">to</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">operation</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">methods</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="l">GET</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">paths</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="l">/gate/*</span><span class="w">
+</span></span></span></code></pre></div><p>Under the <code>linkerd</code> engine, <code>serviceMesh.linkerd.authorizations</code> are appended verbatim
+as additional documents after the rendered <code>Server</code> / <code>AuthorizationPolicy</code> /
+<code>MeshTLSAuthentication</code> set — each entry must be a complete <code>policy.linkerd.io</code> object:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">serviceMesh</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l">linkerd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">linkerd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">authorizations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">policy.linkerd.io/v1beta3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">AuthorizationPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-extra</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">group</span><span class="p">:</span><span class="w"> </span><span class="l">policy.linkerd.io</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-gate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">requiredAuthenticationRefs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ServiceAccount</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">flagger</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">flagger-system</span><span class="w">
+</span></span></span></code></pre></div><h2 id="which-traffic-gets-authorized">Which traffic gets authorized</h2>
+<p>The mesh authorizes only meshed callers on the mesh-reachable ports; the non-mesh
+ports stay open by design so the control plane keeps working.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Port</th>
+					<th>Authorized by the mesh?</th>
+					<th>Why</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Gate (<code>8082</code>)</td>
+					<td>Yes — <code>serviceMesh.gate.from</code></td>
+					<td>Meshed Flagger polling the gate endpoint</td>
+			</tr>
+			<tr>
+					<td>Metrics (<code>8080</code>)</td>
+					<td>Yes — <code>serviceMesh.metrics.from</code></td>
+					<td>Meshed Prometheus scrapers</td>
+			</tr>
+			<tr>
+					<td>Webhook (<code>9443</code>)</td>
+					<td>No — open carve-out</td>
+					<td>The kube-apiserver is not in the mesh</td>
+			</tr>
+			<tr>
+					<td>Health probes (<code>8081</code>)</td>
+					<td>No — open carve-out</td>
+					<td>The kubelet is not in the mesh</td>
+			</tr>
+	</tbody>
+</table>
+<p>For the full set of chart values, see
+<a href="/reference/helm-values/">Helm chart values</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/service-mesh" term="service-mesh" label="service-mesh"/><category scheme="https://stageset.projects.metio.wtf/tags/istio" term="istio" label="istio"/><category scheme="https://stageset.projects.metio.wtf/tags/linkerd" term="linkerd" label="linkerd"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/networking" term="networking" label="networking"/></entry><entry><title type="html">Versioned migrations</title><link href="https://stageset.projects.metio.wtf/gating/versioned-migrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><id>https://stageset.projects.metio.wtf/gating/versioned-migrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-27T07:43:56+02:00</updated><content type="html"><![CDATA[<blockquote>Run migrations once, when the deployed version crosses a release boundary — inline, or sourced from a Flux artifact and shared across StageSets.</blockquote><p>Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of <a href="/defining-a-release/actions/">actions</a>
+ exactly when the
+deployed version steps over the boundary, and never again.</p>
+<p>Versioning is off until you set <code>spec.version</code>.</p>
+<h2 id="declaring-the-version">Declaring the version</h2>
+<p>The controller needs to know <em>what version is currently being deployed</em>. There are
+three ways to declare it; pick by <strong>where the version lives</strong>.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Source</th>
+					<th>The version lives…</th>
+					<th>Best for</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="#inline--versionvalue"><code>version.value</code></a>
+</td>
+					<td>on the <code>StageSet</code></td>
+					<td>environment-pinned versions, quick starts</td>
+			</tr>
+			<tr>
+					<td><a href="#from-a-rendered-object--versionfromobject"><code>version.fromObject</code></a>
+</td>
+					<td>inside the manifests</td>
+					<td><strong>any source, including JaaS</strong> — the recommended default</td>
+			</tr>
+			<tr>
+					<td><a href="#from-a-file-in-the-artifact--versionfromartifact"><code>version.fromArtifact</code></a>
+</td>
+					<td>a file in the artifact</td>
+					<td>Git/OCI/Bucket sources that can ship a <code>VERSION</code> file</td>
+			</tr>
+	</tbody>
+</table>
+<p>Whichever you choose, the resolved value is trimmed and parsed as semver (a leading
+<code>v</code> is accepted). A missing stage/object/file, an empty value, or an unparseable
+one fails terminally with the <code>InvalidVersion</code> reason (see its
+<a href="/runbooks/invalidversion/">runbook</a>
+) — a half-versioned system is worse than an
+unversioned one.</p>
+<h3 id="inline--versionvalue">Inline — <code>version.value</code></h3>
+<p>The <code>StageSet</code> author pins the version directly. Use this when the version is a
+property of the environment rather than of the content, or to get started quickly:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.1.0&#34;</span><span class="w">      </span><span class="c"># bump this when you cut a release</span><span class="w">
+</span></span></span></code></pre></div><p>The trade-off: the version is declared here, not carried by the content, so you
+bump it by editing the <code>StageSet</code>.</p>
+<h3 id="from-a-rendered-object--versionfromobject">From a rendered object — <code>version.fromObject</code></h3>
+<p>The recommended way to let the version travel with the content.
+<a href="https://kubernetes.io/docs/">Kubernetes</a>
+ has a standard place for an
+application&rsquo;s version: the <code>app.kubernetes.io/version</code> label. Well-formed manifests
+set it, so the version is already inside the manifests — <code>fromObject</code> reads it back.
+This works for every source kind, including a single-document renderer like
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ that has no room for a separate file.</p>
+<p>A StageSet has <strong>one</strong> version that all its stages converge on; <code>fromObject</code> only
+chooses <em>which</em> stage&rsquo;s rendered output to read it from. That stage is optional —
+omit it to read from the first (leading) stage, which carries the new version
+first.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># stage omitted → defaults to the first stage (here, app)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment     </span><span class="w"> </span><span class="c"># the object to read</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># fieldPath omitted → reads metadata.labels[&#39;app.kubernetes.io/version&#39;]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>The controller builds the <code>app</code> stage&rsquo;s manifests (the same render it applies),
+finds the <code>Deployment/web</code> object, and reads its <code>app.kubernetes.io/version</code> label.
+Because the label is part of the manifests, the version changes in lockstep with
+the content — no second file to keep in sync.</p>
+<p><strong>Reading a different field.</strong> Set <code>fieldPath</code> to a kubectl-style JSONPath that
+resolves to the bare version string. (It must be the version <em>only</em>; a JSONPath
+can&rsquo;t split an <code>image: web:2.1.0</code> value, so prefer the label.) <code>apiVersion</code> is
+optional and narrows the match when a <code>Kind</code>+<code>Name</code> pair would be ambiguous:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-meta</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">fieldPath</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;{.data.version}&#34;</span><span class="w">   </span><span class="c"># must resolve to a bare semver, e.g. 2.1.0</span><span class="w">
+</span></span></span></code></pre></div><p>This is the path the <a href="/get-started/jsonnet-to-rollout/">Jsonnet-to-rollout tutorial</a>
+
+uses: the snippet renders the version into the manifest&rsquo;s version label, and the
+StageSet reads it straight back.</p>
+<h3 id="from-a-file-in-the-artifact--versionfromartifact">From a file in the artifact — <code>version.fromArtifact</code></h3>
+<p>The version travels with the content as a <strong>dedicated file</strong> containing a single
+semver. This fits <strong>Git/OCI/Bucket</strong> sources, where you can ship an extra file
+beside the manifests. (It does <em>not</em> fit JaaS <code>rendered</code> output, which is a single
+<code>rendered.json</code>; use <code>fromObject</code> there.)</p>
+<p><strong>Who writes it, and where:</strong> the artifact&rsquo;s producer. For a Git source, commit a
+<code>VERSION</code> file in the repo; for an OCI/Bucket artifact, include it in the pushed
+tree. The file lives at <code>path</code> inside the named stage&rsquo;s artifact, relative to the
+artifact root:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl"># VERSION — committed alongside the manifests it versions
+</span></span><span class="line"><span class="cl">2.1.0
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromArtifact</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app         </span><span class="w"> </span><span class="c"># which stage&#39;s artifact carries the file</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">VERSION      </span><span class="w"> </span><span class="c"># the file&#39;s path inside that artifact (cleaned; no leading ./)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>The controller fetches the <code>app</code> stage&rsquo;s artifact and reads the file at <code>path</code>.</p>
+<h2 id="declaring-migrations">Declaring migrations</h2>
+<p>Each migration names the boundary it crosses (<code>to</code>, optionally <code>from</code>), the stage
+it anchors before, and the actions to run:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromArtifact</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">VERSION</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill-ledger-2-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1.*&#34;</span><span class="w">               </span><span class="c"># optional: only when coming from a 1.x</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w">   </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">             </span><span class="c"># the boundary this migration crosses</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app              </span><span class="w"> </span><span class="c"># runs before this stage&#39;s pre-actions</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ledger-backfill-job</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p><code>to</code> is an <strong>exact</strong> target version, the same kind of value <code>version.value</code>
+holds. <code>from</code> is a semver <strong>constraint</strong>, not an exact version: it is matched
+against the currently deployed version with the same grammar Helm and
+<code>flux</code>-style ranges use. So <code>from</code> accepts ranges like <code>&gt;=1.0.0, &lt;2.0.0</code>,
+<code>1.x</code>, or <code>^1.2</code> — the migration fires only when the deployed version satisfies
+that constraint <em>and</em> the run crosses up to <code>to</code>. A <code>from</code> of <code>&gt;=1.0.0, &lt;2.0.0</code>
+with <code>to: &quot;2.0.0&quot;</code> runs the migration on any 1.x → 2.0.0 transition; omit
+<code>from</code> to fire on every crossing up to <code>to</code> regardless of where you start.</p>
+<p>When the deployed version crosses from a <code>1.x</code> into <code>2.0.0</code>, the <code>backfill</code> job
+runs once, anchored before the <code>app</code> stage. The controller tracks progress so a
+retry doesn&rsquo;t re-run a completed migration:</p>
+<ul>
+<li><code>status.version</code> — the deployed version, written only after a fully successful
+run.</li>
+<li><code>status.pendingMigrations</code> — migrations the next run will execute.</li>
+<li><code>status.executedMigrations</code> / <code>status.executedMigrationActions</code> — the in-flight
+ledgers (per migration, and per action within a migration) for the current
+transition, cleared once the version advances.</li>
+</ul>
+<p>Migrations emit <code>MigrationStarted</code> / <code>MigrationCompleted</code> events. A downgrade that
+would skip a required migration is refused with the <code>DowngradeRequiresMigration</code>
+reason — see its <a href="/runbooks/downgraderequiresmigration/">runbook</a>
+. For the
+failure path, see <a href="#when-a-migration-fails">When a migration fails</a>
+.</p>
+<p><strong>First adoption (baselining).</strong> The first time a StageSet sets <code>spec.version</code> and
+has no <code>status.version</code> yet, the controller records the version and runs <strong>no</strong>
+migrations — an existing deployment is assumed to already be at that version. It
+emits a <code>MigrationsBaselined</code> event so you can tell this apart from a real no-op
+and confirm the deployment really is at the recorded version. Migrations run only
+on a subsequent transition that crosses their boundary.</p>
+<h2 id="sharing-one-ladder-across-stagesets">Sharing one ladder across StageSets</h2>
+<p>Deploying the same application into many namespaces — one <code>StageSet</code> each — means
+the same migration ladder in every one. Copying a destructive ladder into N specs
+and keeping them in sync is exactly where a missed edit becomes a data-loss
+incident. Author the ladder <strong>once</strong> as an artifact and point every StageSet at it
+with <code>migrationsSourceRef</code> instead:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrationsSourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path: migrations          # optional</span><span class="p">:</span><span class="w"> </span><span class="l">a file or directory within the artifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p><code>migrationsSourceRef</code> is <strong>mutually exclusive</strong> with the inline <code>spec.migrations</code>.
+The artifact holds the ladder as YAML or JSON — each <code>.yaml</code>, <code>.yml</code>, or <code>.json</code>
+file is one migration or a list of them, parsed strictly so a misspelled field is
+rejected rather than ignored. The ladder lives once in the registry; each
+namespace carries only a small Flux source plus an identical StageSet, and a new
+release is a push to the registry, not an edit to N specs.</p>
+<p>Sourcing reuses the same fetch path as stage sources — revision pinning, the SSRF
+guard, and the size caps all apply. A source that is not yet ready holds the
+transition (the version is not advanced) rather than running a half-loaded ladder;
+a malformed or oversized artifact fails terminally with the
+<code>MigrationArtifactInvalid</code> reason — see its
+<a href="/runbooks/migrationartifactinvalid/">runbook</a>
+.</p>
+<h3 id="anchoring-a-shared-ladder">Anchoring a shared ladder</h3>
+<p>A migration&rsquo;s <code>stage</code> says <em>where in the rollout it runs</em> — before that stage&rsquo;s
+pre-actions. A ladder shared across StageSets can&rsquo;t hard-code one StageSet&rsquo;s stage
+names, so give each stage an <strong>anchor role</strong> and let migrations reference the role:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prepare</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">migrationAnchor</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre    </span><span class="w"> </span><span class="c"># this stage plays the &#34;db-pre&#34; role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rollout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><p>A migration in the shared ladder anchors to <code>db-pre</code> and resolves to whichever
+stage declares that role — <code>prepare</code> here, <code>db-migrate</code> in another StageSet — so
+one ladder travels across differently-named stages. A migration&rsquo;s <code>stage</code> resolves
+to the stage whose <code>migrationAnchor</code> matches, then by stage <code>name</code>; omit it to
+anchor before the first stage. Anchor keys are unique across names and roles. A
+migration that resolves to no stage fails closed with <code>MigrationStageNotFound</code>
+(see its <a href="/runbooks/migrationstagenotfound/">runbook</a>
+) — never silently skipped.</p>
+<h2 id="verifying-and-pinning-the-source">Verifying and pinning the source</h2>
+<p>A sourced ladder runs remote-authored, destructive instructions, so the controller
+can require the source prove its provenance and immutability before running:</p>
+<ul>
+<li><strong>Signature verification.</strong> Configure <code>spec.verify</code> (cosign or notation) on the
+Flux source. A source whose verification <em>fails</em> is always refused
+(<code>MigrationSourceNotVerified</code>). The controller flag
+<code>--require-verified-migration-sources</code> additionally refuses a source that
+configures no verification at all. Off by default; recommended in production.</li>
+<li><strong>Immutable pinning.</strong> Pin the source to a digest (<code>OCIRepository</code>
+<code>spec.ref.digest</code>) or commit (<code>GitRepository</code> <code>spec.ref.commit</code>) so a tag
+overwrite can&rsquo;t auto-roll new destructive content. A mutable-pinned source emits
+a <code>Warning</code> event; <code>--require-pinned-migration-sources</code> makes it a hard refusal
+(<code>MigrationSourceNotPinned</code>). Off by default; recommended in production.</li>
+</ul>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">digest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:…           </span><span class="w"> </span><span class="c"># immutable; bump deliberately to ship new migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">verify</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">cosign</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchOIDCIdentity</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subject</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github.com/your-org/.+$</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># url, interval, …</span><span class="w">
+</span></span></span></code></pre></div><p>Two further guards apply to a sourced ladder: it is always resolved in the
+StageSet&rsquo;s own namespace (a cross-namespace <code>migrationsSourceRef</code> is rejected), and
+an <code>http</code> action requires the controller&rsquo;s <code>--allowed-action-hosts</code> allowlist to be
+set, so remote-authored calls cannot reach arbitrary in-cluster endpoints.</p>
+<h2 id="when-a-migration-fails">When a migration fails</h2>
+<p>A failed migration halts the run at its anchoring stage under the
+<code>MigrationFailed</code> reason — distinct from a stage&rsquo;s own <code>StageFailed</code> — then retries
+with backoff. Retries are safe: the per-action ledger records each completed
+action keyed by the migration&rsquo;s content digest, so a retry resumes at the failed
+action rather than re-running a destructive one.</p>
+<p>After repeated failures the migration escalates to <code>MigrationDirty</code>: the controller
+stops auto-retrying destructive work against an uncertain state. Fix the cause,
+then clear the halt with a manual reconcile:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset orders <span class="se">\
+</span></span></span><span class="line"><span class="cl">  reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span> --overwrite
+</span></span></code></pre></div><p>See the <a href="/runbooks/migrationfailed/"><code>MigrationFailed</code></a>
+ and
+<a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+ runbooks.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/></entry><entry><title type="html">Webhook cert renewal failing</title><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><id>https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The self-signed admission webhook certificate is not being rotated.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>stageset_webhook_cert_renewal_failures_total</code> is increasing; the
+<code>StageSetWebhookCertRenewalFailing</code> alert fires (see
+<a href="/running/operations/">operations</a>
+ for the alert set and its thresholds).
+The current certificate keeps working until its natural expiry — that expiry is
+the deadline, after which cluster-wide <code>StageSet</code> admission breaks.</p>
+<h2 id="cause">Cause</h2>
+<p>Only applies in <code>--webhook-cert-mode=self-signed</code>. The in-pod renewer regenerates
+the serving cert every <code>validity/3</code> and patches the
+<code>ValidatingWebhookConfiguration</code>&rsquo;s <code>caBundle</code>. It fails when:</p>
+<ul>
+<li>the controller lost <code>update</code> (or <code>get</code>) on the named
+<code>ValidatingWebhookConfiguration</code> (<code>--webhook-validating-config-name</code>),</li>
+<li>the VWC was renamed and the flag/<code>resourceNames</code> weren&rsquo;t updated,</li>
+<li>the cert directory (<code>--webhook-cert-dir</code>) became read-only.</li>
+</ul>
+<p>In <code>cert-manager</code> mode this metric is irrelevant — <a href="https://cert-manager.io/">cert-manager</a>
+ owns renewal.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller <span class="p">|</span> grep -i <span class="s1">&#39;cert\|renew\|caBundle&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl get validatingwebhookconfiguration &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.webhooks[*].clientConfig.caBundle}&#39;</span> <span class="p">|</span> head -c <span class="m">40</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li>Restore <code>get</code>/<code>update</code> on the named VWC in the controller&rsquo;s ClusterRole
+(<code>resourceNames</code> must include it).</li>
+<li>Fix the <code>--webhook-validating-config-name</code> / <code>--webhook-cert-dir</code> flags if they
+drifted from the deployed VWC and mount.</li>
+<li>As a longer-term option, switch to <code>--webhook-cert-mode=cert-manager</code> so renewal
+is handled by cert-manager.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry></feed>

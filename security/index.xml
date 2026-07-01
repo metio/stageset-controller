@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Security &amp; multi-tenancy on StageSet Controller</title><link>https://stageset.projects.metio.wtf/security/</link><description>Recent content in Security &amp; multi-tenancy on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/security/index.xml" rel="self" type="application/rss+xml"/><item><title>Admission webhook</title><link>https://stageset.projects.metio.wtf/security/admission-webhook/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/admission-webhook/</guid><description>&lt;p&gt;A StageSet&amp;rsquo;s spec carries invariants the CRD&amp;rsquo;s structural schema cannot enforce
+cheaply, so the controller ships a &lt;strong&gt;validating admission webhook&lt;/strong&gt; that rejects a
+bad StageSet at &lt;code&gt;kubectl apply&lt;/code&gt; time — on &lt;code&gt;create&lt;/code&gt; and &lt;code&gt;update&lt;/code&gt; of
+&lt;code&gt;stages.metio.wtf/v1&lt;/code&gt; StageSets — before it ever reaches a reconcile.&lt;/p&gt;
+&lt;h2 id="why-a-webhook-and-not-cel"&gt;Why a webhook and not CEL&lt;/h2&gt;
+&lt;p&gt;The natural home for these rules is a CRD CEL validation. The catch: CEL cost is
+multiplied by the size of every enclosing array, and a StageSet&amp;rsquo;s &lt;code&gt;spec.stages&lt;/code&gt; and
+each stage&amp;rsquo;s action lists are deliberately &lt;strong&gt;unbounded&lt;/strong&gt;. A CEL rule over them
+makes the apiserver reject the CRD on cost grounds. Moving the checks into a webhook
+keeps the lists unbounded while still validating them.&lt;/p&gt;</description></item><item><title>Multi-cluster and tenancy</title><link>https://stageset.projects.metio.wtf/security/multi-cluster/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/multi-cluster/</guid><description>&lt;p&gt;There are two ways to run the controller, and they map onto two different trust
+models. Pick the one that matches your cluster:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Multi-tenant&lt;/strong&gt; — the controller holds no write access of its own and applies
+every &lt;code&gt;StageSet&lt;/code&gt; as that &lt;code&gt;StageSet&lt;/code&gt;&amp;rsquo;s &lt;code&gt;serviceAccountName&lt;/code&gt;. Each tenant&amp;rsquo;s RBAC
+bounds what its releases can touch. This is the chart default.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Single-tenant&lt;/strong&gt; — the cluster has one operator, so per-tenant isolation buys
+nothing. Run the controller under its own identity bound to &lt;code&gt;cluster-admin&lt;/code&gt; and
+skip impersonation entirely — the model Flux&amp;rsquo;s &lt;code&gt;helm-controller&lt;/code&gt; uses in its
+default install.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The two sections below set each one up. The optional
+&lt;a href="#scoping-the-controller-to-a-namespace-set"&gt;watch scoping&lt;/a&gt;
+ narrows &lt;em&gt;which&lt;/em&gt;
+namespaces a multi-tenant controller sees.&lt;/p&gt;</description></item><item><title>Network policy</title><link>https://stageset.projects.metio.wtf/security/network-policy/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/network-policy/</guid><description>&lt;p&gt;The Helm chart ships an opt-in &lt;code&gt;NetworkPolicy&lt;/code&gt; for the controller pod. It is off by
+default and renders only when &lt;code&gt;networkPolicy.enabled&lt;/code&gt; is &lt;code&gt;true&lt;/code&gt;. Two independent
+layers are on offer: pod-scoped allowlists that lock down only the controller&amp;rsquo;s own
+pods (the safe default), and an additional namespace-wide default-deny for a
+zero-trust namespace. The ingress and egress tables below describe exactly what
+traffic the controller depends on, so everything else can be denied.&lt;/p&gt;</description></item><item><title>Secrets encryption</title><link>https://stageset.projects.metio.wtf/security/encryption/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/encryption/</guid><description>&lt;p&gt;A stage&amp;rsquo;s source can carry &lt;a href="https://github.com/getsops/sops"&gt;SOPS&lt;/a&gt;
+-encrypted
+files — typically a &lt;code&gt;Secret&lt;/code&gt; whose values are encrypted — and the controller
+decrypts them in memory, before building and applying the manifests. This mirrors
+Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt; decryption contract, so an existing SOPS-encrypted
+repository needs no migration.&lt;/p&gt;
+&lt;p&gt;Set &lt;code&gt;spec.decryption&lt;/code&gt; and point it at a Secret holding the keys:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;payments&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;payments&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;serviceAccountName&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;payments-deployer&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;decryption&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;provider&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;sops &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# the only provider&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;secretRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;sops-age &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# a Secret in this namespace holding the age key&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;GitRepository&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;payments-config &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# contains an encrypted secret.yaml&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="walkthrough--age"&gt;Walkthrough — age&lt;/h2&gt;
+&lt;p&gt;&lt;a href="https://age-encryption.org/"&gt;age&lt;/a&gt;
+ is the simplest key type and needs no external
+service. Take a &lt;code&gt;Secret&lt;/code&gt; from plaintext to a GitOps-safe rollout in four steps.&lt;/p&gt;</description></item><item><title>Service mesh</title><link>https://stageset.projects.metio.wtf/security/service-mesh/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/service-mesh/</guid><description>&lt;p&gt;The Helm chart ships an opt-in service-mesh authorization layer for the controller
+pod. It is off by default and renders only when &lt;code&gt;serviceMesh.enabled&lt;/code&gt; is &lt;code&gt;true&lt;/code&gt;.
+Where the &lt;a href="https://stageset.projects.metio.wtf/security/network-policy/"&gt;network policy&lt;/a&gt;
+ operates at L3/L4 — which pods and
+IP ranges may reach which ports — the service mesh operates at L7 with
+&lt;strong&gt;identity-based authorization&lt;/strong&gt; and &lt;strong&gt;mTLS&lt;/strong&gt;: it asks &lt;em&gt;which mesh identity&lt;/em&gt; is
+calling, proven by a cryptographic workload certificate, not merely which IP the
+packet came from.&lt;/p&gt;</description></item></channel></rss>

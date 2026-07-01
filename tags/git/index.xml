@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Git on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/git/</link><description>Recent content in Git on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/git/index.xml" rel="self" type="application/rss+xml"/><item><title>Stage sources — Git, OCI, Bucket</title><link>https://stageset.projects.metio.wtf/get-started/flux-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/flux-sources/</guid><description>&lt;p&gt;A stage resolves its &lt;code&gt;sourceRef&lt;/code&gt; to a &lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ artifact. You have
+two routes:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;manifests in Git / OCI / Bucket ──────────────────────────► StageSet (direct)
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;manifests in Git / OCI / Bucket ──► a renderer (JaaS) ──► ExternalArtifact ──► StageSet
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Use the &lt;strong&gt;direct&lt;/strong&gt; route when the source already holds ready-to-apply manifests
+(the same thing Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt; consumes). Use the &lt;strong&gt;renderer&lt;/strong&gt; route
+when you generate manifests first — e.g. evaluating Jsonnet with
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+.&lt;/p&gt;
+&lt;p&gt;Copy-pasteable recipes follow, one per source kind. For how &lt;code&gt;sourceRef&lt;/code&gt;
+resolution works as a concept — and the &lt;code&gt;path&lt;/code&gt;, &lt;code&gt;prune&lt;/code&gt;, &lt;code&gt;patches&lt;/code&gt;, and
+&lt;code&gt;postBuild&lt;/code&gt; knobs that shape a stage — see
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages and sources&lt;/a&gt;
+.&lt;/p&gt;</description></item></channel></rss>

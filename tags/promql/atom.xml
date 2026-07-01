@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Promql on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/promql/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/promql/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/promql/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/promql/</id><entry><title type="html">Metrics</title><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><id>https://stageset.projects.metio.wtf/observability/metrics/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The controller&rsquo;s Prometheus metrics — the stageset_* custom series and controller-runtime signals, scraping with a ServiceMonitor or a plain config, querying with PromQL, and the chart values that drive them.</blockquote><p>The controller exports Prometheus metrics on an HTTP endpoint: a set of custom
+<code>stageset_*</code> series describing reconcile outcomes, stage applies, drift
+correction, deferred rollouts, webhook-cert renewals, and per-stage readiness —
+alongside the controller-runtime and workqueue series every controller-runtime
+manager exposes for free.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<p>The controller binds its metrics endpoint via <code>--metrics-bind-address</code>, defaulting
+to <code>:8080</code>. Setting it to <code>0</code> disables the endpoint. Every custom metric is
+registered against controller-runtime&rsquo;s registry, so it rides the same endpoint as
+the built-in series.</p>
+<p>All counters and the readiness gauge are labelled by <code>namespace</code> and the StageSet
+<code>name</code> so a single StageSet&rsquo;s behaviour is isolatable.</p>
+<h3 id="reconcile-outcomes">Reconcile outcomes</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_reconcile_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>reason</code></td>
+					<td>Reconciles by their terminal Ready-condition reason. The <code>reason</code> label is one of the wire-stable Ready reasons.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_update_deferred_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td>Reconciles that held a rollout because an update window was closed.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="stage-progress">Stage progress</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_stage_applied_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Stages that applied and verified successfully.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_drift_corrected_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Objects whose out-of-band drift the apply corrected on a steady-state reconcile (same revision as last applied).</td>
+			</tr>
+			<tr>
+					<td><code>stageset_stage_ready</code></td>
+					<td>Gauge</td>
+					<td><code>namespace</code>, <code>stageset</code>, <code>stage</code></td>
+					<td>Whether a stage is Ready (<code>1</code>) or not (<code>0</code>) at the current observed state. A metrics-gated progressive-delivery controller — Argo Rollouts&rsquo; Prometheus metric provider, for example — can hold a rollout directly on this gauge. The series is deleted when a StageSet or one of its stages goes away, so a removed stage leaves no stale gauge.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="webhook">Webhook</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_webhook_cert_renewal_failures_total</code></td>
+					<td>Counter</td>
+					<td>—</td>
+					<td>Failed self-signed webhook certificate renewals in the background renewer goroutine. Meaningful only in self-signed webhook mode.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="controller-runtime-and-workqueue-metrics">Controller-runtime and workqueue metrics</h3>
+<p>The manager also exports the standard controller-runtime series without any extra
+configuration, all carrying <code>controller=&quot;stageset&quot;</code>:</p>
+<ul>
+<li><code>controller_runtime_reconcile_total</code>, <code>controller_runtime_reconcile_errors_total</code>,
+and the <code>controller_runtime_reconcile_time_seconds</code> histogram.</li>
+<li><code>workqueue_depth</code>, <code>workqueue_adds_total</code>, the <code>workqueue_queue_duration_seconds</code>
+and <code>workqueue_work_duration_seconds</code> histograms, and the retry counters.</li>
+</ul>
+<h3 id="querying-with-promql">Querying with PromQL</h3>
+<p>A few starting points once the series are scraped:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="c1"># Reconciles settling to a non-happy reason, per StageSet, over 5m.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">namespace</span><span class="p">,</span><span class="w"> </span><span class="nv">name</span><span class="p">,</span><span class="w"> </span><span class="nv">reason</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">stageset_reconcile_total</span><span class="p">{</span><span class="nl">reason</span><span class="o">!~</span><span class="p">&#34;</span><span class="s">Succeeded|Suspended</span><span class="p">&#34;}[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c1"># Stages currently not Ready.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nv">stageset_stage_ready</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c1"># Reconcile p99 latency for the controller.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="kr">histogram_quantile</span><span class="o">(</span><span class="mf">0.99</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">le</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">controller_runtime_reconcile_time_seconds_bucket</span><span class="p">{</span><span class="nl">controller</span><span class="o">=</span><span class="p">&#34;</span><span class="s">stageset</span><span class="p">&#34;}[</span><span class="s">10m</span><span class="p">]</span><span class="o">))</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">)</span><span class="w">
+</span></span></span></code></pre></div><p>The <a href="/observability/alerting/">alerting</a>
+ catalog builds on exactly these expressions.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>The chart binds the metrics port through <code>ports.metrics</code> (default <code>8080</code>) and
+always renders a ClusterIP <code>Service</code> named <code>&lt;release&gt;-metrics</code> exposing a <code>metrics</code>
+port that targets the container&rsquo;s <code>metrics</code> port, so any scrape mechanism has a
+stable target.</p>
+<h3 id="scrape-with-a-servicemonitor">Scrape with a ServiceMonitor</h3>
+<p>When the Prometheus operator is installed, opt into a <code>ServiceMonitor</code> that
+selects the metrics Service:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Extra labels so your Prometheus instance&#39;s serviceMonitorSelector picks it up.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">additionalLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prometheus-stack</span><span class="w">
+</span></span></span></code></pre></div><h3 id="scrape-without-the-prometheus-operator">Scrape without the Prometheus operator</h3>
+<p>Without the operator&rsquo;s CRDs, point a plain Prometheus scrape config at the metrics
+Service, or annotate the rendered Service for an annotation-driven scrape discovery
+setup:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate service &lt;release&gt;-metrics <span class="se">\
+</span></span></span><span class="line"><span class="cl">  prometheus.io/scrape<span class="o">=</span><span class="nb">true</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  prometheus.io/port<span class="o">=</span><span class="m">8080</span>
+</span></span></code></pre></div><p>For the full flag list with defaults, see the
+<a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/prometheus" term="prometheus" label="prometheus"/><category scheme="https://stageset.projects.metio.wtf/tags/promql" term="promql" label="promql"/></entry></feed>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Integration on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/integration/</link><description>Recent content in Integration on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/integration/index.xml" rel="self" type="application/rss+xml"/><item><title>Flux Operator (ResourceSet) integration</title><link>https://stageset.projects.metio.wtf/integrations/flux-operator/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/flux-operator/</guid><description>&lt;p&gt;Pair &lt;code&gt;StageSet&lt;/code&gt; with the &lt;a href="https://fluxoperator.dev/"&gt;Flux Operator&lt;/a&gt;
+&amp;rsquo;s
+&lt;code&gt;ResourceSet&lt;/code&gt; to combine &lt;em&gt;discovery&lt;/em&gt; and &lt;em&gt;fan-out&lt;/em&gt; with &lt;em&gt;ordered, gated
+promotion&lt;/em&gt;. &lt;code&gt;ResourceSet&lt;/code&gt; and &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; (RSIP) discover and
+template inputs; &lt;code&gt;StageSet&lt;/code&gt; rolls a single app through its stages. The two work on
+&lt;a href="https://stageset.projects.metio.wtf/comparisons/flux-operator/"&gt;complementary axes&lt;/a&gt;
+ — this page shows the two
+patterns where they meet.&lt;/p&gt;
+&lt;p&gt;Both patterns require the
+&lt;a href="https://fluxoperator.dev/docs/install/"&gt;Flux Operator installed&lt;/a&gt;
+ alongside
+Flux and the stageset-controller.&lt;/p&gt;
+&lt;h2 id="discovery-feeding-gated-promotion"&gt;Discovery feeding gated promotion&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; watches an OCI registry for new chart or image tags
+on a schedule, and a &lt;code&gt;ResourceSet&lt;/code&gt; templates a &lt;code&gt;StageSet&lt;/code&gt; pinned to whatever tag
+it discovers. The &lt;code&gt;StageSet&lt;/code&gt; then promotes that version through its ordered,
+gated stages.&lt;/p&gt;</description></item></channel></rss>

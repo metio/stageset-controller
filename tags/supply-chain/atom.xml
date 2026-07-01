@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Supply-Chain on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/supply-chain/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/supply-chain/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/supply-chain/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/supply-chain/</id><entry><title type="html">Verifying releases</title><link href="https://stageset.projects.metio.wtf/reference/verifying-releases/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><link href="https://stageset.projects.metio.wtf/reference/upgrading/?utm_source=atom_feed" rel="related" type="text/html" title="Upgrading"/><id>https://stageset.projects.metio.wtf/reference/verifying-releases/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Verify the signed container image, release archives, and stagesetctl CLI before you run them.</blockquote><p>Every release is signed with <a href="https://github.com/sigstore/cosign">cosign</a>
+ keyless
+signing. There is no GPG key to import and no public key to distribute — the
+signature&rsquo;s trust comes from the GitHub Actions workflow&rsquo;s OIDC identity, proven by
+a <a href="https://docs.sigstore.dev/">Fulcio</a>
+ certificate and logged in
+<a href="https://docs.sigstore.dev/logging/overview/">Rekor</a>
+. Verify the artifacts you pull
+before you run them.</p>
+<p>Install cosign from <a href="https://github.com/sigstore/cosign/releases">its releases</a>
+, or
+on most systems:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">go install github.com/sigstore/cosign/v2/cmd/cosign@latest
+</span></span></code></pre></div><p>Two values appear in every command below — the workflow identity and the OIDC
+issuer. They are the same for the image and the blobs:</p>
+<ul>
+<li><code>--certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/'</code></li>
+<li><code>--certificate-oidc-issuer https://token.actions.githubusercontent.com</code></li>
+</ul>
+<h2 id="verify-the-container-image">Verify the container image</h2>
+<p>Verify by digest for an exact, immutable match. Resolve the digest first, then
+verify it:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="nv">VERSION</span><span class="o">=</span>2026.6.15   <span class="c1"># the release you are installing</span>
+</span></span><span class="line"><span class="cl"><span class="nv">DIGEST</span><span class="o">=</span><span class="k">$(</span>cosign verify ghcr.io/metio/stageset-controller:<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --output json <span class="p">|</span> jq -r <span class="s1">&#39;.[0].critical.image.&#34;docker-manifest-digest&#34;&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">cosign verify ghcr.io/metio/stageset-controller@<span class="s2">&#34;</span><span class="si">${</span><span class="nv">DIGEST</span><span class="si">}</span><span class="s2">&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+</span></span></code></pre></div><p>A successful verification prints the certificate&rsquo;s subject and issuer and confirms
+the signature is recorded in the transparency log. A failure exits non-zero — do not
+run an image that fails to verify.</p>
+<h2 id="inspect-the-sbom-and-provenance">Inspect the SBOM and provenance</h2>
+<p>Each image ships an SBOM and SLSA provenance attestation, attached at build time.
+Read them with cosign:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># Software bill of materials</span>
+</span></span><span class="line"><span class="cl">cosign download sbom ghcr.io/metio/stageset-controller@<span class="s2">&#34;</span><span class="si">${</span><span class="nv">DIGEST</span><span class="si">}</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Build provenance (who built it, from which commit, in which workflow)</span>
+</span></span><span class="line"><span class="cl">cosign verify-attestation ghcr.io/metio/stageset-controller@<span class="s2">&#34;</span><span class="si">${</span><span class="nv">DIGEST</span><span class="si">}</span><span class="s2">&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --type slsaprovenance <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+</span></span></code></pre></div><h2 id="verify-the-release-archives-and-cli">Verify the release archives and CLI</h2>
+<p>The GitHub release attaches one archive per platform for both binaries — the
+<code>stageset-controller</code> daemon and the <code>stagesetctl</code> CLI — plus a single
+<code>stageset-controller_&lt;version&gt;_SHA256SUMS</code> file covering every archive and a cosign
+bundle signing that checksum file. Verify the checksum file&rsquo;s signature, then check
+your downloads against it.</p>
+<p>Download the archive(s) you need, the <code>SHA256SUMS</code> file, and its <code>.bundle</code> from the
+<a href="https://github.com/metio/stageset-controller/releases">release page</a>
+, then:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="nv">VERSION</span><span class="o">=</span>2026.6.15
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 1. Verify the checksum file&#39;s signature. The newer cosign bundle format carries</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#    the signature, certificate, and Rekor proof in one file.</span>
+</span></span><span class="line"><span class="cl">cosign verify-blob stageset-controller_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_SHA256SUMS <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --bundle stageset-controller_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_SHA256SUMS.bundle <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 2. Check your downloaded archives against the verified checksums.</span>
+</span></span><span class="line"><span class="cl">sha256sum -c stageset-controller_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_SHA256SUMS
+</span></span></code></pre></div><p><code>sha256sum -c</code> reports <code>OK</code> for every archive listed in the file that is present in
+the current directory and skips the rest, so you only need to download the platforms
+you use. Once an archive verifies, unpack it and run the binary:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">tar xf stagesetctl_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_linux_amd64.tar.gz
+</span></span><span class="line"><span class="cl">./stagesetctl_v<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span> version
+</span></span></code></pre></div><p>The CLI doubles as a <code>kubectl</code> plugin: rename it to <code>kubectl-stageset</code> on your
+<code>PATH</code> and call it as <code>kubectl stageset …</code>.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/installation" term="installation" label="installation"/><category scheme="https://stageset.projects.metio.wtf/tags/supply-chain" term="supply-chain" label="supply-chain"/><category scheme="https://stageset.projects.metio.wtf/tags/cosign" term="cosign" label="cosign"/><category scheme="https://stageset.projects.metio.wtf/tags/sigstore" term="sigstore" label="sigstore"/><category scheme="https://stageset.projects.metio.wtf/tags/signing" term="signing" label="signing"/><category scheme="https://stageset.projects.metio.wtf/tags/verification" term="verification" label="verification"/></entry></feed>

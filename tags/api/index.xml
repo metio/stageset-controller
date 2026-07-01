@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Api on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/api/</link><description>Recent content in Api on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/api/index.xml" rel="self" type="application/rss+xml"/><item><title>API reference</title><link>https://stageset.projects.metio.wtf/api/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/api/</guid><description>&lt;p&gt;The controller serves two custom resources in the &lt;code&gt;stages.metio.wtf/v1&lt;/code&gt; API
+group.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href="https://stageset.projects.metio.wtf/api/stageset/"&gt;&lt;code&gt;StageSet&lt;/code&gt;&lt;/a&gt;
+ — the resource you author: an ordered set of
+stages, with scheduling, security, gating, versioning, and rollback.&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/"&gt;&lt;code&gt;StageInventory&lt;/code&gt;&lt;/a&gt;
+ — controller-managed; it records the
+objects each stage applied so the controller can prune precisely.&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>InvalidSpec</title><link>https://stageset.projects.metio.wtf/runbooks/invalidspec/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/invalidspec/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=InvalidSpec&lt;/code&gt;. The Message names the offending field or action. Terminal: the controller does not requeue until the spec changes.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The spec failed validation that the CRD schema cannot express cheaply, normally one of:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;an &lt;strong&gt;action sets zero or more than one verb&lt;/strong&gt; — each action must set exactly one of &lt;code&gt;patch&lt;/code&gt;, &lt;code&gt;http&lt;/code&gt;, &lt;code&gt;wait&lt;/code&gt;, &lt;code&gt;job&lt;/code&gt;, &lt;code&gt;delete&lt;/code&gt;, &lt;code&gt;apply&lt;/code&gt; (see &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+);&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;spec.migrations&lt;/code&gt; without &lt;code&gt;spec.version&lt;/code&gt;&lt;/strong&gt;, or a migration anchored to a stage name that does not exist (see &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+);&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;spec.version&lt;/code&gt; does not name exactly one source&lt;/strong&gt; — set one of &lt;code&gt;value&lt;/code&gt;, &lt;code&gt;fromObject&lt;/code&gt;, or &lt;code&gt;fromArtifact&lt;/code&gt;;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;spec.decryption.provider&lt;/code&gt; is not &lt;code&gt;sops&lt;/code&gt;&lt;/strong&gt;, or a &lt;code&gt;secretRef&lt;/code&gt; is given without a &lt;code&gt;name&lt;/code&gt; (see &lt;a href="https://stageset.projects.metio.wtf/security/encryption/"&gt;encryption&lt;/a&gt;
+);&lt;/li&gt;
+&lt;li&gt;an &lt;strong&gt;invalid update window&lt;/strong&gt; — a malformed &lt;code&gt;schedule&lt;/code&gt;, &lt;code&gt;duration&lt;/code&gt;, or &lt;code&gt;timeZone&lt;/code&gt; (see &lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;update windows&lt;/a&gt;
+).&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The admission webhook normally rejects these at write time; seeing this on the object means the webhook was bypassed or disabled and the reconciler caught it.&lt;/p&gt;</description></item><item><title>StageInventory</title><link>https://stageset.projects.metio.wtf/api/stageinventory/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/api/stageinventory/</guid><description>&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageInventory&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;A &lt;code&gt;StageInventory&lt;/code&gt; records the set of objects a single stage has applied, so the
+controller can prune precisely and tear stages down in reverse order. &lt;strong&gt;You do not
+author these&lt;/strong&gt; — the controller creates, updates, and deletes them. The fields
+below let you read inventory state when debugging and back it up.&lt;/p&gt;
+&lt;p&gt;One stage may be backed by several &lt;code&gt;StageInventory&lt;/code&gt; shards once it exceeds
+&lt;code&gt;--inventory-shard-cap&lt;/code&gt; entries (default 5000), so a single object never grows
+unbounded.&lt;/p&gt;</description></item><item><title>StageSet</title><link>https://stageset.projects.metio.wtf/api/stageset/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/api/stageset/</guid><description>&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;A &lt;code&gt;StageSet&lt;/code&gt; is a namespaced &lt;a href="https://kubernetes.io/docs/"&gt;Kubernetes&lt;/a&gt;
+ resource
+describing an ordered set of stages. Only &lt;code&gt;spec.stages&lt;/code&gt; is required; everything else
+refines scheduling, security, gating, versioning, and rollback. Every field below is
+shown in YAML at least once.&lt;/p&gt;
+&lt;p&gt;The smallest valid StageSet:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;hr&gt;
+&lt;h2 id="scheduling"&gt;Scheduling&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;interval: 5m # optional: reconcile cadence (default&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;--&lt;span class="l"&gt;default-interval)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;retryInterval: 1m # cadence after a failed run (default&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;interval)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;driftDetectionInterval&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;2m &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# faster drift correction than interval (optional)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;timeout&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;5m &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# default per-stage timeout (optional)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;suspend&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;false&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# pause reconciliation without deleting (default false)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;interval&lt;/code&gt;&lt;/strong&gt; (optional) — steady-state reconcile cadence; each reconcile
+re-resolves sources, re-asserts desired state (correcting drift), and prunes.
+&lt;strong&gt;When omitted, the controller&amp;rsquo;s &lt;code&gt;--default-interval&lt;/code&gt; is used&lt;/strong&gt; (the chart&amp;rsquo;s
+&lt;code&gt;controller.defaultInterval&lt;/code&gt;, default &lt;code&gt;10m&lt;/code&gt;), so most StageSets can leave it out.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;retryInterval&lt;/code&gt;&lt;/strong&gt; — retry cadence after a failure; falls back to &lt;code&gt;interval&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;driftDetectionInterval&lt;/code&gt;&lt;/strong&gt; — a shorter cadence dedicated to healing out-of-band
+drift when you need it tighter than &lt;code&gt;interval&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;timeout&lt;/code&gt;&lt;/strong&gt; — how long any one stage may take before it fails; override per
+stage with &lt;code&gt;stages[].timeout&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;suspend&lt;/code&gt;&lt;/strong&gt; — short-circuits to &lt;code&gt;Ready=False / Suspended&lt;/code&gt;, leaving applied state
+running. Use &lt;a href="https://stageset.projects.metio.wtf/cli/reconcile/"&gt;&lt;code&gt;stagesetctl reconcile --force&lt;/code&gt;&lt;/a&gt;
+ to run once while
+suspended. See the &lt;a href="https://stageset.projects.metio.wtf/runbooks/suspended/"&gt;&lt;code&gt;Suspended&lt;/code&gt; runbook&lt;/a&gt;
+.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="ordering-between-stagesets"&gt;Ordering between StageSets&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;dependsOn&lt;/code&gt; gates this StageSet on others being Ready at their observed generation
+— cross-release ordering. (Ordering &lt;em&gt;within&lt;/em&gt; a StageSet is the order of &lt;code&gt;stages&lt;/code&gt;.)&lt;/p&gt;</description></item></channel></rss>

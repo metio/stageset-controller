@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Metrics on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/metrics/</link><description>Recent content in Metrics on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/metrics/index.xml" rel="self" type="application/rss+xml"/><item><title>BudgetSourceUnavailable</title><link>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;BudgetSourceUnavailable&lt;/code&gt; Warning event, the &lt;code&gt;stageset_metric_source_errors_total&lt;/code&gt; counter rising, and — when a gate&amp;rsquo;s &lt;code&gt;onSourceError&lt;/code&gt; is &lt;code&gt;Hold&lt;/code&gt; — &lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=BudgetSourceUnavailable&lt;/code&gt;. With &lt;code&gt;onSourceError: Allow&lt;/code&gt; the rollout proceeds and only the event and metric fire, so the condition may not show the reason.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A metric source (the &lt;a href="https://stageset.projects.metio.wtf/gating/error-budget/"&gt;error-budget freeze&lt;/a&gt;
+ or a &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;promotion analysis&lt;/a&gt;
+ check) was unreachable or returned no usable scalar: the Prometheus endpoint was down or returned a non-2xx, the query evaluated to an error, an empty or multi-sample vector, or &lt;code&gt;NaN&lt;/code&gt; (the shape a wrong query takes). This is treated as &lt;em&gt;transient&lt;/em&gt; — the controller keeps retrying.&lt;/p&gt;</description></item><item><title>Error-budget freeze</title><link>https://stageset.projects.metio.wtf/gating/error-budget/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/error-budget/</guid><description>&lt;p&gt;An error-budget freeze holds new-revision rollouts while a service is out of its
+SLO error budget, and resumes them on its own once the budget recovers — the
+Google SRE error-budget policy: when the budget is spent, stop shipping feature
+changes until reliability is back. The controller does no SLO math; it reads one
+number (the remaining budget) from a metric source you already run and compares
+it to a threshold.&lt;/p&gt;</description></item><item><title>Metrics</title><link>https://stageset.projects.metio.wtf/observability/metrics/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/metrics/</guid><description>&lt;p&gt;The controller exports Prometheus metrics on an HTTP endpoint: a set of custom
+&lt;code&gt;stageset_*&lt;/code&gt; series describing reconcile outcomes, stage applies, drift
+correction, deferred rollouts, webhook-cert renewals, and per-stage readiness —
+alongside the controller-runtime and workqueue series every controller-runtime
+manager exposes for free.&lt;/p&gt;
+&lt;h2 id="the-controller-binary"&gt;The controller binary&lt;/h2&gt;
+&lt;p&gt;The controller binds its metrics endpoint via &lt;code&gt;--metrics-bind-address&lt;/code&gt;, defaulting
+to &lt;code&gt;:8080&lt;/code&gt;. Setting it to &lt;code&gt;0&lt;/code&gt; disables the endpoint. Every custom metric is
+registered against controller-runtime&amp;rsquo;s registry, so it rides the same endpoint as
+the built-in series.&lt;/p&gt;</description></item><item><title>Observability</title><link>https://stageset.projects.metio.wtf/observability/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/</guid><description>&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Status Conditions and Kubernetes Events are the primary status surface&lt;/strong&gt; —
+&lt;code&gt;kubectl describe&lt;/code&gt;, &lt;code&gt;kubectl wait --for=condition&lt;/code&gt;, and Flux&amp;rsquo;s
+notification-controller all read them. The four pillars below are additive
+operator-side detail; they explain how a reconcile behaved, but the condition
+on the StageSet is what tells you whether it is Ready.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;The controller surfaces its behaviour through four pillars, each configured by a
+small set of binary flags that the Helm chart drives from values:&lt;/p&gt;</description></item><item><title>Operations</title><link>https://stageset.projects.metio.wtf/running/operations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/operations/</guid><description>&lt;h2 id="metrics"&gt;Metrics&lt;/h2&gt;
+&lt;p&gt;The controller registers custom metrics on the controller-runtime registry, served
+on &lt;code&gt;--metrics-bind-address&lt;/code&gt; (&lt;code&gt;:8080&lt;/code&gt;) alongside the standard
+&lt;code&gt;controller_runtime_*&lt;/code&gt; and &lt;code&gt;workqueue_*&lt;/code&gt; series. Enable scraping with the chart&amp;rsquo;s
+opt-in &lt;code&gt;ServiceMonitor&lt;/code&gt; (&lt;code&gt;metrics.serviceMonitor.enabled&lt;/code&gt;):&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c"&gt;# values.yaml&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metrics&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;serviceMonitor&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;enabled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# needs the Prometheus operator CRDs&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Metric&lt;/th&gt;
+					&lt;th&gt;Type&lt;/th&gt;
+					&lt;th&gt;Labels&lt;/th&gt;
+					&lt;th&gt;Meaning&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_reconcile_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;, &lt;code&gt;reason&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reconciles, by terminal Ready reason.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_stage_applied_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;, &lt;code&gt;stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Stages applied and verified.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_drift_corrected_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;, &lt;code&gt;stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Out-of-band drift re-asserted on a steady-state reconcile.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_update_deferred_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Rollouts held by a closed update window.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_webhook_cert_renewal_failures_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(none)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Failed self-signed webhook cert renewals.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_teardown_force_drop_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Finalizers force-dropped after &lt;code&gt;--max-teardown-wait&lt;/code&gt; of failing teardown; sustained non-zero values flag an unreachable target and orphaned objects. See &lt;a href="https://stageset.projects.metio.wtf/runbooks/teardown-forced/"&gt;TeardownForced&lt;/a&gt;
+.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_stage_ready&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;gauge&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;stageset&lt;/code&gt;, &lt;code&gt;stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;1&lt;/code&gt; when a stage is Ready, else &lt;code&gt;0&lt;/code&gt; — for metric-based &lt;a href="https://stageset.projects.metio.wtf/guides/progressive-delivery/#argo-rollouts"&gt;progressive delivery&lt;/a&gt;
+.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="alerts"&gt;Alerts&lt;/h2&gt;
+&lt;p&gt;The chart ships an opt-in &lt;code&gt;PrometheusRule&lt;/code&gt; with a starter alert set, gated on
+&lt;code&gt;metrics.prometheusRule.enabled&lt;/code&gt; (requires the
+&lt;a href="https://prometheus-operator.dev/"&gt;Prometheus operator&lt;/a&gt;
+ CRDs). It covers the
+custom &lt;code&gt;stageset_*&lt;/code&gt; metrics plus controller-runtime signals:&lt;/p&gt;</description></item><item><title>PromotionBlocked</title><link>https://stageset.projects.metio.wtf/runbooks/promotionblocked/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/promotionblocked/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=PromotionBlocked&lt;/code&gt;. &lt;code&gt;status.stages[].promotionState&lt;/code&gt; shows &lt;code&gt;phase: Blocked&lt;/code&gt;, an &lt;code&gt;analysisFailures&lt;/code&gt; count, and &lt;code&gt;lastAnalysis&lt;/code&gt; with each check&amp;rsquo;s observed value and verdict. When the stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; is &lt;code&gt;Rollback&lt;/code&gt;, a Warning event records the revert and &lt;code&gt;promotionState.abortedRevision&lt;/code&gt; names the revision that was rolled back.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;promotion analysis&lt;/a&gt;
+ on the named stage failed: one or more checks read a metric outside its threshold for more than &lt;code&gt;failureLimit&lt;/code&gt; consecutive evaluations. The stage applied and became Ready, but its &lt;em&gt;observed behavior&lt;/em&gt; — error rate, latency, SLO burn, whatever the checks measure — is out of bounds, so the rollout is not advanced to the next stage.&lt;/p&gt;</description></item><item><title>Reconcile latency high</title><link>https://stageset.projects.metio.wtf/runbooks/reconcile-latency/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/reconcile-latency/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;controller_runtime_reconcile_time_seconds&lt;/code&gt; p99 for &lt;code&gt;controller=&amp;quot;stageset&amp;quot;&lt;/code&gt; exceeds
+the configured threshold; the &lt;code&gt;StageSetReconcileLatencyHigh&lt;/code&gt; alert fires (see
+&lt;a href="https://stageset.projects.metio.wtf/running/operations/"&gt;operations&lt;/a&gt;
+ for the alert set and its thresholds).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A single reconcile does a lot of work — resolve and fetch every stage&amp;rsquo;s artifact,
+kustomize-build, server-side apply, prune, verify readiness, and run actions — all
+impersonating the tenant &lt;code&gt;ServiceAccount&lt;/code&gt;. Latency climbs when any of those is slow:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;large artifacts or slow artifact servers,&lt;/li&gt;
+&lt;li&gt;many objects per stage (apply + prune scale with object count),&lt;/li&gt;
+&lt;li&gt;readiness waits and &lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt; actions with long timeouts,&lt;/li&gt;
+&lt;li&gt;apiserver or tenant-authorization slowness.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt; &lt;span class="p"&gt;|&lt;/span&gt; grep -i &lt;span class="s1"&gt;&amp;#39;slow\|timeout\|took&amp;#39;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Break the latency down by stage count and artifact size; a single StageSet with
+many large stages dominates p99.&lt;/p&gt;</description></item><item><title>Service level objectives</title><link>https://stageset.projects.metio.wtf/observability/slos/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/slos/</guid><description>&lt;p&gt;The StageSet controller tracks two service-level objectives. Each is an objective
+on a service-level indicator (SLI) computed from the
+&lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+, measured over a rolling window. The published
+&lt;a href="https://stageset.projects.metio.wtf/observability/dashboard/"&gt;dashboard&lt;/a&gt;
+ renders them, and the Helm chart can alert
+on them.&lt;/p&gt;
+&lt;h2 id="slo-1--reconcile-availability"&gt;SLO 1 — reconcile availability&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Objective:&lt;/strong&gt; ≥ &lt;strong&gt;99%&lt;/strong&gt; of syncing reconciles reach &lt;code&gt;Ready=True&lt;/code&gt; (reason
+&lt;code&gt;Succeeded&lt;/code&gt;), over a &lt;strong&gt;28-day&lt;/strong&gt; window.&lt;/p&gt;
+&lt;p&gt;The SLI counts only reconciles that were actually trying to sync. The intentional
+and upstream-waiting reasons are excluded from the failure half — a paused
+StageSet (&lt;code&gt;Suspended&lt;/code&gt;), a rollout held by an update window (&lt;code&gt;UpdateDeferred&lt;/code&gt;), and
+a wait on an upstream artifact or dependency (&lt;code&gt;SourceNotReady&lt;/code&gt;,
+&lt;code&gt;DependencyNotReady&lt;/code&gt;) are not failures and must not burn the budget:&lt;/p&gt;</description></item><item><title>Workqueue saturation</title><link>https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;workqueue_depth{controller=&amp;quot;stageset&amp;quot;}&lt;/code&gt; stays high; StageSets reconcile slowly or
+lag behind their &lt;code&gt;spec.interval&lt;/code&gt;. The &lt;code&gt;StageSetControllerWorkqueueDepthHigh&lt;/code&gt; alert
+fires (see &lt;a href="https://stageset.projects.metio.wtf/running/operations/"&gt;operations&lt;/a&gt;
+ for the alert set and its
+thresholds).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;The controller is enqueuing reconcile requests faster than it completes them.
+Common causes:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;apiserver slowness&lt;/strong&gt; — applies, dry-runs, and status writes all block on the
+apiserver (or the impersonated tenant&amp;rsquo;s authorization).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;slow sources&lt;/strong&gt; — a stage waiting on a large artifact fetch or a source that is
+slow to become Ready holds a worker.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;a stuck stage&lt;/strong&gt; — an action with a long timeout (a &lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt; that
+never completes) pins a worker for the whole timeout.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;too few workers for the StageSet count&lt;/strong&gt; — many StageSets reconciling on short
+intervals.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# which StageSets are churning?&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl get stagesets --all-namespaces --sort-by&lt;span class="o"&gt;=&lt;/span&gt;.status.observedGeneration
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# controller logs for slow operations / retries&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Correlate with &lt;code&gt;controller_runtime_reconcile_time_seconds&lt;/code&gt; (see
+&lt;a href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/"&gt;reconcile latency&lt;/a&gt;
+) and apiserver latency.&lt;/p&gt;</description></item></channel></rss>

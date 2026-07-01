@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Actions on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/actions/</link><description>Recent content in Actions on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/actions/index.xml" rel="self" type="application/rss+xml"/><item><title>Actions</title><link>https://stageset.projects.metio.wtf/defining-a-release/actions/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/actions/</guid><description>&lt;p&gt;Actions are typed steps the controller runs around a stage&amp;rsquo;s apply. They turn an
+ordered apply into an orchestrated rollout — run a migration before the app, gate
+the stage on an external check, clean up on failure.&lt;/p&gt;
+&lt;p&gt;A stage has three action hooks:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;pre&lt;/code&gt;&lt;/strong&gt; — run before the manifests are built and applied. A failure aborts the
+stage with nothing applied.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;post&lt;/code&gt;&lt;/strong&gt; — run after the apply is verified. The stage is &lt;code&gt;Ready&lt;/code&gt; only if these
+all succeed.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;onFailure&lt;/code&gt;&lt;/strong&gt; — best-effort steps run on any failure from the apply onward.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Each action has a &lt;code&gt;name&lt;/code&gt;, optional &lt;code&gt;timeout&lt;/code&gt; and &lt;code&gt;retries&lt;/code&gt;, and &lt;strong&gt;exactly one&lt;/strong&gt;
+operation type (&lt;code&gt;patch&lt;/code&gt;, &lt;code&gt;http&lt;/code&gt;, &lt;code&gt;wait&lt;/code&gt;, &lt;code&gt;job&lt;/code&gt;, &lt;code&gt;delete&lt;/code&gt;, or &lt;code&gt;apply&lt;/code&gt;) — enforced
+by the validating admission webhook. Actions within a hook run in list order.&lt;/p&gt;</description></item><item><title>MigrationFailed</title><link>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationFailed&lt;/code&gt;. The Message names the migration and the
+failed action. The run halts at the anchoring stage; &lt;code&gt;status.version&lt;/code&gt; is not
+advanced. The controller retries with backoff.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration anchored before a stage ran an action that failed (a &lt;code&gt;job&lt;/code&gt; that
+errored, an &lt;code&gt;http&lt;/code&gt; call that returned an error, a &lt;code&gt;wait&lt;/code&gt; that timed out, an
+&lt;code&gt;apply&lt;/code&gt;/&lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt; the apiserver rejected). This reason is distinct from
+&lt;code&gt;StageFailed&lt;/code&gt; so you can tell a migration failure from the stage&amp;rsquo;s own apply.&lt;/p&gt;</description></item><item><title>StageFailed</title><link>https://stageset.projects.metio.wtf/runbooks/stagefailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/stagefailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=StageFailed&lt;/code&gt;. The Message names the stage and the operation that failed (&lt;code&gt;fetch artifact&lt;/code&gt;, &lt;code&gt;build&lt;/code&gt;, &lt;code&gt;apply&lt;/code&gt;, &lt;code&gt;verify&lt;/code&gt;, a pre/post action, or &lt;code&gt;connect to target cluster&lt;/code&gt;). The run halts at that stage; later stages keep their previous revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage failed during execution. By operation:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;fetch artifact&lt;/strong&gt; — the artifact URL was unreachable, or its bytes failed digest verification. Transient fetch failures (network, 5xx, source not ready) back off and retry. Terminal ones — a digest mismatch, an oversized tarball, or a URL the SSRF guard rejects — stop requeuing, since the same fetch would fail the same way; the next genuine watch event or interval tick re-runs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply RBAC / missing CRD&lt;/strong&gt; — a &lt;code&gt;Forbidden&lt;/code&gt; apply, or a manifest whose kind the apiserver doesn&amp;rsquo;t know, is reported as &lt;a href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/"&gt;&lt;code&gt;RBACDenied&lt;/code&gt;&lt;/a&gt;
+ (terminal), not &lt;code&gt;StageFailed&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;build&lt;/strong&gt; — kustomize build or post-build substitution failed (a missing &lt;code&gt;substituteFrom&lt;/code&gt; source, an invalid patch, a malformed manifest).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply&lt;/strong&gt; — the server-side apply was rejected: an immutable-field conflict, or an &lt;strong&gt;RBAC denial&lt;/strong&gt; under the impersonated &lt;code&gt;serviceAccountName&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;verify&lt;/strong&gt; — applied objects did not become Ready within the stage timeout (kstatus).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;pre/post action&lt;/strong&gt; — a &lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; action failed or timed out.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;connect to target cluster&lt;/strong&gt; — a &lt;code&gt;spec.kubeConfig&lt;/code&gt; Secret was missing, unparseable, or used the unsupported cloud-provider &lt;code&gt;configMapRef&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message: which stage + operation&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# For apply/verify failures, inspect what the stage tried to apply:&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageinventory &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --selector stages.metio.wtf/stage-set&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;name&amp;gt;,stages.metio.wtf/stage&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;stage&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Match the operation in the Message:&lt;/p&gt;</description></item><item><title>Versioned migrations</title><link>https://stageset.projects.metio.wtf/gating/versioned-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/versioned-migrations/</guid><description>&lt;p&gt;Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ exactly when the
+deployed version steps over the boundary, and never again.&lt;/p&gt;
+&lt;p&gt;Versioning is off until you set &lt;code&gt;spec.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="declaring-the-version"&gt;Declaring the version&lt;/h2&gt;
+&lt;p&gt;The controller needs to know &lt;em&gt;what version is currently being deployed&lt;/em&gt;. There are
+three ways to declare it; pick by &lt;strong&gt;where the version lives&lt;/strong&gt;.&lt;/p&gt;</description></item></channel></rss>

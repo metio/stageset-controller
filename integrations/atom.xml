@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Integrations &amp; tooling on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/integrations/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/integrations/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/integrations/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/integrations/</id><entry><title type="html">Claude Code skill</title><link href="https://stageset.projects.metio.wtf/integrations/claude-code/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/contributing/building/?utm_source=atom_feed" rel="related" type="text/html" title="Building and testing"/><link href="https://stageset.projects.metio.wtf/contributing/ci-and-release/?utm_source=atom_feed" rel="related" type="text/html" title="CI and releases"/><id>https://stageset.projects.metio.wtf/integrations/claude-code/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Install the StageSet plugin so Claude Code authors and operates StageSets.</blockquote><p>The repository ships a <a href="https://claude.com/claude-code">Claude Code</a>
+ skill that
+teaches the assistant to author and operate <code>StageSet</code> resources: writing and
+editing StageSet YAML, wiring a Flux source or a producer like
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ into staged rollouts, adding typed
+actions, ready checks, update windows, versioned migrations, and conflict
+policies, and driving a StageSet with the <code>stagesetctl</code> CLI. With it installed,
+Claude Code works against the real schema and defaults instead of guessing.</p>
+<h2 id="install-the-plugin">Install the plugin</h2>
+<p>The skill is packaged as a plugin in a marketplace. Add the marketplace from the
+repository, then install the plugin:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">/plugin marketplace add metio/stageset-controller
+</span></span><span class="line"><span class="cl">/plugin install stageset@stageset
+</span></span></code></pre></div><p>The first command registers the <code>stageset</code> marketplace from this repository; the
+second installs the <code>stageset</code> plugin from it. Restart Claude Code if prompted, and
+the skill activates automatically whenever a repository contains StageSet manifests
+or the stageset-controller is in play.</p>
+<h2 id="what-the-skill-knows">What the skill knows</h2>
+<ul>
+<li><strong>Authoring.</strong> It starts from a minimal StageSet (only <code>spec.stages</code> is
+required) and layers on options in order of need — more stages,
+<code>serviceAccountName</code> impersonation, <code>decryption</code>, per-stage build surface,
+actions, ready checks, conflict policies, update windows, versioned migrations,
+and rollback.</li>
+<li><strong>Source wiring.</strong> It knows <code>sourceRef.kind</code> defaults to <code>ExternalArtifact</code>, that
+a stage can point directly at a <code>GitRepository</code> / <code>OCIRepository</code> / <code>Bucket</code>, and
+when to use a producer such as a JaaS <code>JsonnetSnippet</code> instead.</li>
+<li><strong>Operating.</strong> It drives <code>stagesetctl</code> (also usable as <code>kubectl stageset</code>) to
+preview and reconcile — <code>diff</code>, <code>build</code>, <code>get</code>, <code>reconcile</code> — and previews
+changes before applying them.</li>
+<li><strong>Debugging.</strong> It maps <code>status.conditions[Ready].reason</code> to the matching
+<a href="/runbooks/">runbook</a>
+ and reads <code>status.stages[]</code> for per-stage phase, applied
+revision, and executed actions.</li>
+</ul>
+<p>The skill treats this site as its source of truth, fetching exact fields and
+defaults from the <a href="/api/stageset/">API reference</a>
+, the <a href="/defining-a-release/">usage</a>
+ pages, and
+the <a href="/cli/">CLI</a>
+ reference rather than relying on memory.</p>
+<h2 id="where-it-lives">Where it lives</h2>
+<p>The skill source is under <code>skills/stageset/</code> — <code>SKILL.md</code> plus a
+<code>references/reference.md</code> cheat-sheet — and the plugin and marketplace manifests
+are under <code>.claude-plugin/</code>. Edit those files to change what the assistant knows;
+the install commands above pull whatever the repository currently ships.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/contributing" term="contributing" label="contributing"/><category scheme="https://stageset.projects.metio.wtf/tags/claude-code" term="claude-code" label="claude-code"/><category scheme="https://stageset.projects.metio.wtf/tags/skill" term="skill" label="skill"/><category scheme="https://stageset.projects.metio.wtf/tags/plugin" term="plugin" label="plugin"/></entry><entry><title type="html">Flux Operator (ResourceSet) integration</title><link href="https://stageset.projects.metio.wtf/integrations/flux-operator/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/?utm_source=atom_feed" rel="related" type="text/html" title="Conflict policies"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><id>https://stageset.projects.metio.wtf/integrations/flux-operator/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Feed discovered versions into gated promotion, or fan out one StageSet per input.</blockquote><p>Pair <code>StageSet</code> with the <a href="https://fluxoperator.dev/">Flux Operator</a>
+&rsquo;s
+<code>ResourceSet</code> to combine <em>discovery</em> and <em>fan-out</em> with <em>ordered, gated
+promotion</em>. <code>ResourceSet</code> and <code>ResourceSetInputProvider</code> (RSIP) discover and
+template inputs; <code>StageSet</code> rolls a single app through its stages. The two work on
+<a href="/comparisons/flux-operator/">complementary axes</a>
+ — this page shows the two
+patterns where they meet.</p>
+<p>Both patterns require the
+<a href="https://fluxoperator.dev/docs/install/">Flux Operator installed</a>
+ alongside
+Flux and the stageset-controller.</p>
+<h2 id="discovery-feeding-gated-promotion">Discovery feeding gated promotion</h2>
+<p>A <code>ResourceSetInputProvider</code> watches an OCI registry for new chart or image tags
+on a schedule, and a <code>ResourceSet</code> templates a <code>StageSet</code> pinned to whatever tag
+it discovers. The <code>StageSet</code> then promotes that version through its ordered,
+gated stages.</p>
+<p>The RSIP discovers tags, filtered to a semver range, refreshing only inside a
+weekday morning window:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSetInputProvider</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-tags</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">OCIArtifactTag</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">oci://ghcr.io/example/my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">filter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">semver</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&gt;=1.0.0 &lt;2.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">limit</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">schedule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">cron</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0 8 * * 1-5&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">timeZone</span><span class="p">:</span><span class="w"> </span><span class="l">Europe/Berlin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">window</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span></code></pre></div><p>The <code>ResourceSet</code> consumes that provider&rsquo;s exported inputs and renders a
+<code>StageSet</code> pinned to the discovered <code>&lt;&lt; inputs.tag &gt;&gt;</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-stageset</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inputsFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSetInputProvider</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-tags</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">oci://ghcr.io/example/my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tag | quote &gt;&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">crds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./crds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">readyChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span></code></pre></div><p>The RSIP&rsquo;s <code>schedule.window</code> already constrains when a new tag becomes visible, so
+the <code>StageSet</code> here carries no <code>updateWindows</code> — gating lives at the discovery
+layer. A new tag inside the morning window re-renders the <code>OCIRepository</code> and
+<code>StageSet</code>, and the promotion runs CRDs before the app, waiting on the
+<code>Deployment</code>&rsquo;s health between stages.</p>
+<h2 id="fanning-out-one-stageset-per-input">Fanning out one StageSet per input</h2>
+<p>A single <code>ResourceSet</code> can stamp out one <code>StageSet</code> per input — per tenant,
+branch, or pull request — each promoted through the same stages independently.
+Here a <code>Static</code> provider lists the tenants:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSetInputProvider</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">tenants</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Static</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">defaultValues</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">region</span><span class="p">:</span><span class="w"> </span><span class="l">eu-central-1</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">tenant-stagesets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inputs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l">acme</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l">globex</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l">initech</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tenant &gt;&gt;-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tenant &gt;&gt;-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tenant &gt;&gt;-app  </span><span class="w"> </span><span class="c"># an ExternalArtifact per tenant</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">updateWindows</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Allow</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0 14 * * TUE,THU&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">duration</span><span class="p">:</span><span class="w"> </span><span class="l">3h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">timeZone</span><span class="p">:</span><span class="w"> </span><span class="l">Europe/Berlin</span><span class="w">
+</span></span></span></code></pre></div><p>Each rendered <code>StageSet</code> impersonates its own tenant ServiceAccount, so a tenant&rsquo;s
+rollout can only touch what that account allows. Adding a tenant is one more entry
+under <code>spec.inputs</code>; the <code>ResourceSet</code> reconciles the new <code>StageSet</code> into being.</p>
+<h2 id="choosing-where-to-time-gate">Choosing where to time-gate</h2>
+<p>Both tools can gate on a clock — the RSIP <code>spec.schedule</code> constrains <em>when inputs
+refresh</em>, while a <code>StageSet</code>&rsquo;s <a href="/gating/update-windows/">update windows</a>
+ constrain
+<em>when a revision rolls out</em>. Pick one layer per release so a rollout isn&rsquo;t gated
+twice:</p>
+<ul>
+<li>Gate at the <strong>RSIP</strong> when you want discovery itself to be periodic — a new
+version only ever appears during the schedule window (the first pattern above).</li>
+<li>Gate at the <strong>StageSet</strong> when inputs may refresh freely but promotion must wait
+for a maintenance window (the second pattern above).</li>
+</ul>
+<p>See the <a href="/comparisons/flux-operator/">comparison</a>
+ for how the two axes line up.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/flux-operator" term="flux-operator" label="flux-operator"/><category scheme="https://stageset.projects.metio.wtf/tags/resourceset" term="resourceset" label="resourceset"/><category scheme="https://stageset.projects.metio.wtf/tags/integration" term="integration" label="integration"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">MCP server</title><link href="https://stageset.projects.metio.wtf/integrations/mcp-server/?utm_source=atom_feed" rel="alternate" type="text/html"/><id>https://stageset.projects.metio.wtf/integrations/mcp-server/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Run the stageset-controller Model Context Protocol server so an agent reads StageSet status and drives reconciliation in-cluster.</blockquote><p>The controller exposes StageSet introspection — and, when opted in, control — as
+<a href="https://modelcontextprotocol.io/">Model Context Protocol</a>
+ tools, so an LLM
+agent (Claude Code, Claude Desktop, or any MCP client) calls them directly. The
+server runs inside the controller pod and serves over streamable HTTP; the tools
+read and patch StageSet resources as the controller&rsquo;s ServiceAccount, so an agent
+can never exceed the controller&rsquo;s own RBAC.</p>
+<h2 id="enable-the-server">Enable the server</h2>
+<p>Pass <code>--enable-mcp</code> to the controller to serve the read tools (off by default).
+It binds <code>--mcp-bind-address</code>, which defaults to <code>:8084</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stageset-controller --enable-mcp
+</span></span></code></pre></div><p>Reach it from your machine with a port-forward:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system port-forward deploy/stageset-controller 8084:8084
+</span></span></code></pre></div><p>The read tools:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Tool</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>list_stagesets</code></td>
+					<td>List StageSet resources with their Ready status, reason, suspend state, rolled-out version, and observed generation. Omit the namespace to list across every namespace the controller can read.</td>
+			</tr>
+			<tr>
+					<td><code>get_stageset</code></td>
+					<td>One StageSet&rsquo;s full status: the Ready condition (status, reason, message), the per-reason <a href="/runbooks/">runbook</a>
+ URL, suspend state, version, per-stage phases and applied revisions, and any pending migrations.</td>
+			</tr>
+			<tr>
+					<td><code>diff_revisions</code></td>
+					<td>A per-object unified diff of one stage&rsquo;s rendered manifests between two artifact revisions held in the <a href="/gating/rollback/">rollback store</a>
+. Pass the <code>stage</code> and the earlier <code>from</code> digest; <code>to</code> defaults to that stage&rsquo;s currently-applied digest. Secret values are masked. Needs the rollback store enabled and both revisions still retained in it.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="gated-mutations">Gated mutations</h2>
+<p>The server is read-only by default. Add <code>--mcp-allow-mutations</code> (which requires
+<code>--enable-mcp</code>) to also expose write tools:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stageset-controller --enable-mcp --mcp-allow-mutations
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Tool</th>
+					<th>Effect</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>reconcile_stageset</code></td>
+					<td>Stamp the <code>reconcile.fluxcd.io/requestedAt</code> annotation to request an immediate reconcile — the same trigger as <code>flux reconcile</code>.</td>
+			</tr>
+			<tr>
+					<td><code>suspend_stageset</code></td>
+					<td>Set <code>spec.suspend=true</code> so the controller stops reconciling the StageSet.</td>
+			</tr>
+			<tr>
+					<td><code>resume_stageset</code></td>
+					<td>Clear <code>spec.suspend</code> to resume reconciliation.</td>
+			</tr>
+	</tbody>
+</table>
+<p>These act on the StageSet as the controller&rsquo;s ServiceAccount, so they can never
+exceed the controller&rsquo;s own RBAC. Keep them off unless you intend the agent to
+drive reconciliation, and have your MCP client confirm each call. Like the
+<a href="/guides/progressive-delivery/">stage gate endpoint</a>
+, the server is
+best-effort: if its port can&rsquo;t bind the controller logs the failure and keeps
+reconciling.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/mcp" term="mcp" label="mcp"/><category scheme="https://stageset.projects.metio.wtf/tags/claude" term="claude" label="claude"/><category scheme="https://stageset.projects.metio.wtf/tags/operator" term="operator" label="operator"/></entry><entry><title type="html">Producer-aware sources</title><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stages and sources"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="related" type="text/html" title="ResolveFailed"/><id>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Reference a producer like JaaS and let the controller find its ExternalArtifact.</blockquote><p>Point a stage at the resource that <em>produces</em> an artifact, and the controller
+finds the <code>ExternalArtifact</code> that producer publishes. This is the third source
+route, alongside the two direct ones — an <code>ExternalArtifact</code> (the default
+<code>sourceRef.kind</code>) or a Flux <code>GitRepository</code>/<code>OCIRepository</code>/<code>Bucket</code> — covered in
+<a href="/defining-a-release/stages-and-sources/#source-kinds">stages and sources</a>
+. Reach for it when an
+operator publishes an <code>ExternalArtifact</code> from a custom resource (for example
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ rendering Jsonnet).</p>
+<h2 id="referencing-a-producer">Referencing a producer</h2>
+<p>Set <code>kind</code> (and <code>apiVersion</code>) to a producer resource, and the controller resolves
+it to the <code>ExternalArtifact</code> that producer publishes — the one whose
+<code>spec.sourceRef</code> back-references the producer (matched on group, kind, and name).
+For example, a <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ <code>JsonnetSnippet</code>
+renders Jsonnet and publishes an <code>ExternalArtifact</code>; reference the snippet and the
+controller follows the link:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">dashboards</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">grafana-dashboards</span><span class="w">
+</span></span></span></code></pre></div><p>The controller also watches the common Flux source kinds (<code>GitRepository</code>,
+<code>OCIRepository</code>, <code>Bucket</code>) so a stage re-reconciles when an upstream source
+changes.</p>
+<p>A producer can itself consume another producer first: a JaaS <code>JsonnetSnippet</code> can
+render from the artifact another snippet publishes. That chaining happens on the
+producer side — see
+<a href="https://jaas.projects.metio.wtf/defining-a-release/snippet-sources/#chaining-snippets">chaining snippets</a>
+.
+A stage references only the final producer and reads the <code>ExternalArtifact</code> it
+publishes.</p>
+<h2 id="related-projects">Related projects</h2>
+<p>JOI, JaaS, and <code>StageSet</code> compose end to end:</p>
+<ul>
+<li><strong><a href="https://github.com/metio/jsonnet-oci-images">JOI</a>
+</strong> publishes Jsonnet
+libraries as single-layer OCI images (usable both as image-volume mounts and as
+Flux <code>OCIRepository</code> sources).</li>
+<li><strong><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+</strong> evaluates Jsonnet — optionally
+importing those JOI libraries — and publishes the rendered JSON as an
+<code>ExternalArtifact</code>.</li>
+<li><strong><code>StageSet</code></strong> references the <code>JsonnetSnippet</code> (or its artifact) and rolls the
+result out in ordered, gated stages.</li>
+</ul>
+<p>Each project is independently useful; a stage reads straight from a
+<code>GitRepository</code>, <code>OCIRepository</code>, or <code>Bucket</code>, or from any <code>ExternalArtifact</code>
+regardless of what produced it.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

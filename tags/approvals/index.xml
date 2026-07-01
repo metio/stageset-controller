@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Approvals on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/approvals/</link><description>Recent content in Approvals on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/approvals/index.xml" rel="self" type="application/rss+xml"/><item><title>MigrationApprovalPending</title><link>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationapprovalpending/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationApprovalPending&lt;/code&gt;. The Message names the target
+version and how many migrations await approval. &lt;code&gt;status.pendingMigrations&lt;/code&gt; lists
+exactly what will run. Nothing is applied and &lt;code&gt;status.version&lt;/code&gt; is not advanced —
+this is an intentional hold, not an error.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.version.requireApproval&lt;/code&gt; is set, and the current transition has pending
+migrations that have not been approved. So destructive migrations don&amp;rsquo;t run
+unattended, the whole rollout (app and migrations) waits until an operator
+authorizes the target version.&lt;/p&gt;</description></item></channel></rss>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Stagesetctl on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/stagesetctl/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/stagesetctl/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/stagesetctl/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/stagesetctl/</id><entry><title type="html">CLI</title><link href="https://stageset.projects.metio.wtf/cli/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl apply"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/lint-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl lint-migrations"/><id>https://stageset.projects.metio.wtf/cli/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Install and use stagesetctl to preview, render, and drive StageSets from your own kubeconfig.</blockquote><p><code>stagesetctl</code> previews, renders, and drives StageSets without waiting for the next
+reconcile. It speaks to the cluster with your own kubeconfig — nothing about it runs
+in-cluster.</p>
+<p>Installed on your <code>PATH</code> as <code>kubectl-stageset</code>, it also works as a kubectl plugin:
+<code>kubectl stageset &lt;command&gt;</code> is equivalent to <code>stagesetctl &lt;command&gt;</code>.</p>
+<h2 id="installation">Installation</h2>
+<p><code>stagesetctl</code> ships as a standalone binary attached to every
+<a href="https://github.com/metio/stageset-controller/releases">GitHub release</a>
+ as
+<code>stagesetctl_&lt;version&gt;_&lt;os&gt;_&lt;arch&gt;.tar.gz</code> (<code>.zip</code> on Windows), for linux, darwin,
+and windows on amd64 and arm64. The binary inside the archive is named
+<code>stagesetctl_v&lt;version&gt;</code>.</p>
+<p>Download the archive for your platform, extract it, and install the binary onto your
+<code>PATH</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">tar -xzf stagesetctl_&lt;version&gt;_&lt;os&gt;_&lt;arch&gt;.tar.gz
+</span></span><span class="line"><span class="cl">install -m <span class="m">0755</span> stagesetctl_v&lt;version&gt; /usr/local/bin/stagesetctl
+</span></span></code></pre></div><p>To use it as a kubectl plugin, expose it on your <code>PATH</code> as <code>kubectl-stageset</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">ln -s <span class="s2">&#34;</span><span class="k">$(</span><span class="nb">command</span> -v stagesetctl<span class="k">)</span><span class="s2">&#34;</span> /usr/local/bin/kubectl-stageset
+</span></span></code></pre></div><p>After that, <code>kubectl stageset &lt;command&gt;</code> works.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Command</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/cli/get/"><code>get</code></a>
+</td>
+					<td>Print a StageSet&rsquo;s status, or list StageSets.</td>
+			</tr>
+			<tr>
+					<td><a href="/cli/build/"><code>build</code></a>
+</td>
+					<td>Render a StageSet&rsquo;s manifests to stdout.</td>
+			</tr>
+			<tr>
+					<td><a href="/cli/diff/"><code>diff</code></a>
+</td>
+					<td>Preview what a reconcile would change; usable as a CI gate.</td>
+			</tr>
+			<tr>
+					<td><a href="/cli/apply/"><code>apply</code></a>
+</td>
+					<td>Server-side-apply a StageSet&rsquo;s rendered manifests directly.</td>
+			</tr>
+			<tr>
+					<td><a href="/cli/reconcile/"><code>reconcile</code></a>
+</td>
+					<td>Force an out-of-band reconcile.</td>
+			</tr>
+			<tr>
+					<td><a href="/cli/lint-migrations/"><code>lint-migrations</code></a>
+</td>
+					<td>Validate a migration ladder before publishing it to a source.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="global-flags">Global flags</h2>
+<p>Every command accepts the standard kubectl connection flags
+(<code>genericclioptions.ConfigFlags</code>): <code>--kubeconfig</code>, <code>--context</code>, <code>-n/--namespace</code>,
+<code>--as</code>, <code>--as-group</code>, <code>--server</code>, <code>--token</code>, <code>--request-timeout</code>, and the rest.
+<code>--version</code> prints the binary version and commit (<code>&lt;version&gt; (commit &lt;commit&gt;)</code>).
+With no <code>-n/--namespace</code>, the command uses the namespace from your current
+kubeconfig context, falling back to <code>default</code>.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<p>Every command shares the same baseline:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Code</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>0</code></td>
+					<td>Success.</td>
+			</tr>
+			<tr>
+					<td><code>2</code></td>
+					<td>Usage or flag error.</td>
+			</tr>
+			<tr>
+					<td><code>3</code></td>
+					<td>Runtime error.</td>
+			</tr>
+	</tbody>
+</table>
+<p>Two commands exit <code>1</code> for their own reason, so they can gate a CI pipeline:
+<a href="/cli/diff/"><code>diff</code></a>
+ when it finds changes (the <code>diff(1)</code> convention), and
+<a href="/cli/lint-migrations/"><code>lint-migrations</code></a>
+ when it finds a validation problem in
+a migration ladder.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stagesetctl" term="stagesetctl" label="stagesetctl"/><category scheme="https://stageset.projects.metio.wtf/tags/kubectl-plugin" term="kubectl-plugin" label="kubectl-plugin"/></entry></feed>

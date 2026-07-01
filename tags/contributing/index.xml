@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Contributing on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/contributing/</link><description>Recent content in Contributing on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/contributing/index.xml" rel="self" type="application/rss+xml"/><item><title>Building and testing</title><link>https://stageset.projects.metio.wtf/contributing/building/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/contributing/building/</guid><description>&lt;p&gt;The controller is a standard Go module. With a Go toolchain installed:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;go build ./...
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;go &lt;span class="nb"&gt;test&lt;/span&gt; -race -cover ./...
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="test-layers"&gt;Test layers&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Unit tests&lt;/strong&gt; sit next to the code across &lt;code&gt;internal/...&lt;/code&gt; and &lt;code&gt;api/v1/&lt;/code&gt;. Several
+are drift gates — e.g. &lt;code&gt;conditions_test.go&lt;/code&gt; asserts every Ready &lt;code&gt;Reason&lt;/code&gt; has a
+matching runbook page under &lt;code&gt;docs/content/runbooks/&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;envtest-backed tests&lt;/strong&gt; (&lt;code&gt;envtest_*_test.go&lt;/code&gt;) boot a real kube-apiserver + etcd
+via controller-runtime&amp;rsquo;s &lt;code&gt;envtest&lt;/code&gt;. They &lt;code&gt;t.Skip&lt;/code&gt; unless &lt;code&gt;KUBEBUILDER_ASSETS&lt;/code&gt;
+points at an asset bundle — install it with
+&lt;a href="https://book.kubebuilder.io/reference/envtest.html"&gt;&lt;code&gt;setup-envtest&lt;/code&gt;&lt;/a&gt;
+.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Fuzz tests&lt;/strong&gt; (&lt;code&gt;FuzzXxx&lt;/code&gt;) harden the parsing-heavy paths; their seed corpus runs
+as ordinary unit tests, and &lt;code&gt;-fuzz&lt;/code&gt; fuzzes for real.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Kind smoke&lt;/strong&gt; scenarios under &lt;code&gt;hack/smoke/&lt;/code&gt; run the controller end to end
+against a real kind cluster.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="static-analysis"&gt;Static analysis&lt;/h2&gt;
+&lt;p&gt;A pull request must be clean under each of these — run them locally before
+pushing:&lt;/p&gt;</description></item><item><title>CI and releases</title><link>https://stageset.projects.metio.wtf/contributing/ci-and-release/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/contributing/ci-and-release/</guid><description>&lt;h2 id="continuous-integration"&gt;Continuous integration&lt;/h2&gt;
+&lt;p&gt;Every pull request runs &lt;code&gt;verify.yml&lt;/code&gt;, which fans out into one job per concern so a
+failure points straight at the cause:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;test&lt;/strong&gt; — &lt;code&gt;go build&lt;/code&gt; then the full &lt;code&gt;go test&lt;/code&gt; suite.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;lint-go&lt;/strong&gt; — &lt;code&gt;go vet&lt;/code&gt;, &lt;code&gt;staticcheck&lt;/code&gt;, &lt;code&gt;gosec&lt;/code&gt;, and a &lt;code&gt;gofumpt&lt;/code&gt; formatting check.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;vulnerabilities&lt;/strong&gt; — &lt;code&gt;govulncheck&lt;/code&gt; (a reachable advisory is a hard gate).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;architecture&lt;/strong&gt; — &lt;code&gt;arch-go&lt;/code&gt; against &lt;code&gt;arch-go.yml&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;reuse&lt;/strong&gt; — SPDX/REUSE compliance on every file.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;text linters&lt;/strong&gt; — &lt;code&gt;yamllint&lt;/code&gt;, &lt;code&gt;actionlint&lt;/code&gt;, &lt;code&gt;markdownlint&lt;/code&gt;, &lt;code&gt;typos&lt;/code&gt;, and Vale
+prose linting.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;docs-lint&lt;/strong&gt; — builds the Hugo site and lints the rendered output.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;container-image&lt;/strong&gt; — a buildx image build plus a Trivy scan.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;dco&lt;/strong&gt; — every non-bot commit carries a &lt;code&gt;Signed-off-by&lt;/code&gt; trailer.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A single &lt;strong&gt;all-green&lt;/strong&gt; job depends on every other job and is the only required
+check, so new jobs are covered automatically. A separate &lt;code&gt;kind-smoke.yml&lt;/code&gt; runs the
+operator end to end against a real kind cluster, and &lt;code&gt;fuzz.yml&lt;/code&gt; exercises the fuzz
+targets.&lt;/p&gt;</description></item><item><title>Claude Code skill</title><link>https://stageset.projects.metio.wtf/integrations/claude-code/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/claude-code/</guid><description>&lt;p&gt;The repository ships a &lt;a href="https://claude.com/claude-code"&gt;Claude Code&lt;/a&gt;
+ skill that
+teaches the assistant to author and operate &lt;code&gt;StageSet&lt;/code&gt; resources: writing and
+editing StageSet YAML, wiring a Flux source or a producer like
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ into staged rollouts, adding typed
+actions, ready checks, update windows, versioned migrations, and conflict
+policies, and driving a StageSet with the &lt;code&gt;stagesetctl&lt;/code&gt; CLI. With it installed,
+Claude Code works against the real schema and defaults instead of guessing.&lt;/p&gt;
+&lt;h2 id="install-the-plugin"&gt;Install the plugin&lt;/h2&gt;
+&lt;p&gt;The skill is packaged as a plugin in a marketplace. Add the marketplace from the
+repository, then install the plugin:&lt;/p&gt;</description></item><item><title>Contributing</title><link>https://stageset.projects.metio.wtf/contributing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/contributing/</guid><description>&lt;p&gt;Contributions are welcome. Build and test the controller locally, satisfy the
+checks every pull request must pass, and see how releases are cut.&lt;/p&gt;
+&lt;h2 id="developer-certificate-of-origin"&gt;Developer Certificate of Origin&lt;/h2&gt;
+&lt;p&gt;Every commit must be signed off under the
+&lt;a href="https://developercertificate.org/"&gt;Developer Certificate of Origin&lt;/a&gt;
+ — it
+certifies you wrote the patch or otherwise have the right to contribute it. Add
+the sign-off automatically with:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;git commit --signoff
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;This appends a &lt;code&gt;Signed-off-by: Your Name &amp;lt;you@example.com&amp;gt;&lt;/code&gt; line to the commit
+message. The DCO check on each pull request enforces it; unsigned commits block
+the merge. Amend an existing commit with &lt;code&gt;git commit --amend --signoff&lt;/code&gt;.&lt;/p&gt;</description></item></channel></rss>

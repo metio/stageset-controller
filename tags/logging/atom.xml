@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Logging on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/logging/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/logging/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/logging/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/logging/</id><entry><title type="html">Logging</title><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/observability/tracing/?utm_source=atom_feed" rel="related" type="text/html" title="Tracing"/><id>https://stageset.projects.metio.wtf/observability/logging/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-18T20:07:19+02:00</updated><content type="html"><![CDATA[<blockquote>The controller&rsquo;s structured slog output, the &ndash;log-level and &ndash;log-format flags, reading logs with kubectl and jq, and the chart values that drive them.</blockquote><p>The controller logs through Go&rsquo;s <code>log/slog</code>. Controller-runtime&rsquo;s own logs flow
+through the same handler via the logr bridge, so the manager, the cache, and the
+reconciler all share one consistent output stream — there is no second logger to
+configure.</p>
+<blockquote>
+<p><strong>Status Conditions and Kubernetes Events stay the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. Logs are additive operator-side detail
+for tracing what a reconcile did, not a replacement for the condition that
+tells you whether a StageSet is Ready.</p>
+</blockquote>
+<p>Each reconcile seeds its log lines with <code>namespace</code>, <code>name</code>, and <code>reconcileID</code>,
+so every line from one pass is correlatable. The reconciler&rsquo;s own outcome lines
+add fields describing what happened — <code>stages</code> (the stage count), <code>ready</code>, and
+<code>requeueAfter</code> on synced and deferred runs, and <code>stage</code> plus <code>op</code> on a stage
+failure — which is what the <code>jq</code> filters below select on.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<p>Two flags govern logging:</p>
+<ul>
+<li><code>--log-level</code> — one of <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>. Defaults to <code>info</code>.</li>
+<li><code>--log-format</code> — <code>json</code> or <code>text</code>. Defaults to <code>json</code>.</li>
+</ul>
+<p><code>json</code> emits one structured object per line, which is what you want for any log
+pipeline (Loki, Elasticsearch, Cloud Logging). <code>text</code> is the human-readable
+<code>key=value</code> form, handy when tailing logs locally.</p>
+<h3 id="reading-logs">Reading logs</h3>
+<p>Tail the controller&rsquo;s logs with <code>kubectl</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller --follow
+</span></span></code></pre></div><p>With <code>--log-format=json</code> every line is a JSON object, so <code>jq</code> filters and
+reshapes them. Show only warnings and errors:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq <span class="s1">&#39;select(.level == &#34;WARN&#34; or .level == &#34;ERROR&#34;)&#39;</span>
+</span></span></code></pre></div><p>Project just the fields you care about onto one compact line:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;{t: .time, level, msg, namespace, name, reconcileID, stages, ready, requeueAfter}&#39;</span>
+</span></span></code></pre></div><p>Follow a single StageSet by <code>namespace</code> and <code>name</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller --follow <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;select(.namespace == &#34;apps&#34; and .name == &#34;checkout&#34;)&#39;</span>
+</span></span></code></pre></div><p>Pull every line from one reconcile pass by its <code>reconcileID</code> to read a single
+run end to end:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;select(.reconcileID == &#34;a1b2c3d4-...&#34;)&#39;</span>
+</span></span></code></pre></div><p>Surface only stage failures, which carry the failing <code>stage</code> and <code>op</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;select(.msg == &#34;stage failed&#34;) | {namespace, name, stage, op, error}&#39;</span>
+</span></span></code></pre></div><p>Turning <code>--log-level=debug</code> on raises the volume considerably — controller-runtime
+logs every reconcile request at debug. Use it to diagnose a specific issue, then
+return to <code>info</code>.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>Two values map directly onto the flags:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">logLevel</span><span class="p">:</span><span class="w"> </span><span class="l">info  </span><span class="w"> </span><span class="c"># debug | info | warn | error  -&gt; --log-level</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">logFormat</span><span class="p">:</span><span class="w"> </span><span class="l">json </span><span class="w"> </span><span class="c"># json | text                  -&gt; --log-format</span><span class="w">
+</span></span></span></code></pre></div><p>Both are enum-validated in the chart&rsquo;s values schema, so a typo fails the install
+rather than reaching the binary as an unknown level. The defaults (<code>info</code> / <code>json</code>)
+are production-ready; lower the level only while investigating, and switch to
+<code>text</code> only for ad-hoc local runs where a human reads the stream directly.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/logging" term="logging" label="logging"/><category scheme="https://stageset.projects.metio.wtf/tags/slog" term="slog" label="slog"/></entry><entry><title type="html">Observability</title><link href="https://stageset.projects.metio.wtf/observability/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><id>https://stageset.projects.metio.wtf/observability/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The four observability pillars for the controller — structured logging, OTLP tracing, Prometheus metrics, and the opt-in alert catalog — plus service level objectives and a ready-made dashboard.</blockquote><blockquote>
+<p><strong>Status Conditions and Kubernetes Events are the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. The four pillars below are additive
+operator-side detail; they explain how a reconcile behaved, but the condition
+on the StageSet is what tells you whether it is Ready.</p>
+</blockquote>
+<p>The controller surfaces its behaviour through four pillars, each configured by a
+small set of binary flags that the Helm chart drives from values:</p>
+<ul>
+<li><strong><a href="/observability/logging/">Logging</a>
+</strong> — structured <code>log/slog</code> output (JSON or text)
+for the controller and, through the logr bridge, controller-runtime itself.
+Read it with <code>kubectl logs</code> and filter with <code>jq</code>.</li>
+<li><strong><a href="/observability/tracing/">Tracing</a>
+</strong> — OpenTelemetry spans exported over OTLP gRPC to
+a collector you point the controller at. Off until you set an endpoint.</li>
+<li><strong><a href="/observability/metrics/">Metrics</a>
+</strong> — a <code>stageset_*</code> family of Prometheus series on
+reconcile outcomes, stage applies, drift correction, deferred rollouts, and
+per-stage readiness, alongside the controller-runtime and workqueue series.
+Scrape with a <code>ServiceMonitor</code> or a plain scrape config and query with PromQL.</li>
+<li><strong><a href="/observability/alerting/">Alerting</a>
+</strong> — an opt-in <code>PrometheusRule</code> with a starter
+alert set whose thresholds are tunable values, plus the Kubernetes Events the
+controller emits on StageSet transitions. Every alert links to a
+<a href="/runbooks/">runbook</a>
+.</li>
+</ul>
+<p>Two further pages build on the metrics:</p>
+<ul>
+<li><strong><a href="/observability/slos/">Service level objectives</a>
+</strong> — the controller&rsquo;s own
+reconcile-availability and reconcile-latency SLOs, computed from the
+<code>stageset_*</code> series, with their targets and error budgets.</li>
+<li><strong><a href="/observability/dashboard/">Dashboard</a>
+</strong> — a ready-made Grafana dashboard
+over the controller and workqueue series.</li>
+</ul>
+<p>For each pillar you configure the controller binary&rsquo;s flags, read or query its
+output, and drive both from the Helm chart values. The full flag list with
+defaults is on the <a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/logging" term="logging" label="logging"/><category scheme="https://stageset.projects.metio.wtf/tags/tracing" term="tracing" label="tracing"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/slos" term="slos" label="slos"/><category scheme="https://stageset.projects.metio.wtf/tags/dashboard" term="dashboard" label="dashboard"/></entry></feed>

@@ -1,0 +1,1236 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Chart on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/chart/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/chart/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/chart/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/chart/</id><entry><title type="html">Helm chart values</title><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/reference/upgrading/?utm_source=atom_feed" rel="related" type="text/html" title="Upgrading"/><link href="https://stageset.projects.metio.wtf/reference/verifying-releases/?utm_source=atom_feed" rel="related" type="text/html" title="Verifying releases"/><id>https://stageset.projects.metio.wtf/reference/helm-values/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Complete reference for every value the stageset-controller Helm chart exposes, generated from the chart&rsquo;s values.schema.json.</blockquote><p>The stageset-controller Helm chart lives in the
+<a href="https://github.com/metio/helm-charts/tree/main/charts/stageset-controller">metio/helm-charts</a>
+
+monorepo and is published at <code>oci://ghcr.io/metio/helm-charts/stageset-controller</code>.
+The table below is generated from the chart&rsquo;s <code>values.schema.json</code>, so it tracks
+the chart&rsquo;s current schema rather than a hand-maintained copy.</p>
+<p>For how the values map onto the binary&rsquo;s runtime behaviour, see the
+<a href="/reference/configuration/">Configuration reference</a>
+ — every <code>controller.*</code>
+value drives the corresponding <code>--flag</code>.</p>
+<table>
+  <thead>
+    <tr><th>Value</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>affinity</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Affinity rules for scheduling.</td>
+    </tr>
+    <tr>
+      <td><code>autoscaling</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>HorizontalPodAutoscaler (rendered only when replicas.max &gt; replicas.min).</td>
+    </tr>
+    <tr>
+      <td><code>autoscaling.targetCPUUtilizationPercentage</code></td>
+      <td><code>integer</code></td>
+      <td><code>80</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Pre-delete cleanup hook. StageSets carry a finalizer (stages.metio.wtf/finalizer) that tears down the objects a StageSet applied. A plain `helm uninstall` removes the controller while StageSets still hold that finalizer, so their delete never completes and uninstall hangs. When enabled, a pre-delete Job bulk-deletes every StageSet so the controller&#39;s finalizer runs (tearing down applied objects) BEFORE Helm removes the controller itself.  Disable when uninstall is driven by something other than Helm (e.g., ArgoCD with hooks off) — the manual cleanup pattern is:    kubectl delete stageset --all -A --wait=true --timeout=2m   helm uninstall stageset-controller -n &lt;ns&gt;</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.activeDeadlineSeconds</code></td>
+      <td><code>integer</code></td>
+      <td><code>600</code></td>
+      <td>Job-level safety net. activeDeadlineSeconds caps the Job&#39;s total runtime; if the controller is wedged, Helm won&#39;t be blocked forever.</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.backoffLimit</code></td>
+      <td><code>integer</code></td>
+      <td><code>2</code></td>
+      <td>backoffLimit on the pre-delete Job.</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.image</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Image for the pre-delete cleanup Job (a kubectl image).</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.image.pullPolicy</code></td>
+      <td><code>string</code></td>
+      <td><code>IfNotPresent</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.image.registry</code></td>
+      <td><code>string</code></td>
+      <td><code>registry.k8s.io</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.image.repository</code></td>
+      <td><code>string</code></td>
+      <td><code>kubectl</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.image.tag</code></td>
+      <td><code>string</code></td>
+      <td><code>v1.34.0</code></td>
+      <td>renovate: datasource=docker depName=registry.k8s.io/kubectl</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.kubectlTimeout</code></td>
+      <td><code>string</code></td>
+      <td><code>2m</code></td>
+      <td>Maximum wall-clock time the pre-delete Job waits for StageSet finalizers to run before it strips them forcibly and proceeds. Bigger when StageSets tear down many objects or talk to slow remote clusters.</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.resources</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Resource requests/limits for the cleanup Job container.</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.resources.cpu</code></td>
+      <td><code>string</code></td>
+      <td><code>100m</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.resources.ephemeralStorage</code></td>
+      <td><code>string</code></td>
+      <td><code>16Mi</code></td>
+      <td>Ephemeral-storage requests/limits. The cleanup Job runs a few `kubectl` calls then exits — disk usage is negligible. Sized small to satisfy kube-score&#39;s resource-completeness check without crowding cluster ephemeral-storage budgets.</td>
+    </tr>
+    <tr>
+      <td><code>cleanupOnDelete.resources.memory</code></td>
+      <td><code>string</code></td>
+      <td><code>64Mi</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>controller</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Controller behaviour (maps onto the binary&#39;s flags).</td>
+    </tr>
+    <tr>
+      <td><code>controller.allowedActionHosts</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Host globs permitted for http actions (SSRF guard). Loopback/link-local are always denied unless explicitly listed here.</td>
+    </tr>
+    <tr>
+      <td><code>controller.defaultInterval</code></td>
+      <td><code>string</code></td>
+      <td><code>10m</code></td>
+      <td>Reconcile cadence for StageSets that omit spec.interval. Most StageSets can leave spec.interval unset and inherit this.</td>
+    </tr>
+    <tr>
+      <td><code>controller.inventoryShardCap</code></td>
+      <td><code>integer</code></td>
+      <td><code>5000</code></td>
+      <td>Maximum entries per StageInventory shard.</td>
+    </tr>
+    <tr>
+      <td><code>controller.leaderElect</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td>Leader election for HA replicas. Keep on; harmless single-replica.</td>
+    </tr>
+    <tr>
+      <td><code>controller.logFormat</code></td>
+      <td><code>string</code></td>
+      <td><code>json</code></td>
+      <td>Log output format for the controller binary (json, text).</td>
+    </tr>
+    <tr>
+      <td><code>controller.logLevel</code></td>
+      <td><code>string</code></td>
+      <td><code>info</code></td>
+      <td>Log verbosity for the controller binary (debug, info, warn, error).</td>
+    </tr>
+    <tr>
+      <td><code>controller.noCrossNamespaceRefs</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Deny cross-namespace sourceRef / dependsOn references.</td>
+    </tr>
+    <tr>
+      <td><code>controller.objectLevelKMS</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Decrypt SOPS cloud KMS keys under each StageSet&#39;s serviceAccountName federated to a cloud identity, instead of the controller&#39;s ambient credentials. Opt-in per-tenant KMS identity: the tenant ServiceAccount must be federated (IRSA / Workload Identity) to a cloud identity granted KMS decrypt. Off by default (ambient credentials).</td>
+    </tr>
+    <tr>
+      <td><code>controller.requirePinnedMigrationSources</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Require a spec.migrationsSourceRef source to be pinned to an immutable revision (OCIRepository spec.ref.digest / GitRepository spec.ref.commit) before its destructive migration ladder runs, so a tag/branch overwrite can&#39;t auto-roll new destructive content. When off, a mutable-pinned source still runs but emits a Warning event. Recommended in production.</td>
+    </tr>
+    <tr>
+      <td><code>controller.requireVerifiedMigrationSources</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Require a spec.migrationsSourceRef source to be signature-verified (status.conditions[SourceVerified]=True from the source&#39;s spec.verify cosign/notation config) before its destructive migration ladder runs. A source whose verification FAILED is always refused; this additionally refuses sources that configure no verification at all. Recommended in production.</td>
+    </tr>
+    <tr>
+      <td><code>controller.tracing</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>OpenTelemetry tracing for the controller. When endpoint is empty (the default), no spans are emitted and the OTel SDK is in no-op mode. Set the endpoint to ship spans to an OTLP gRPC collector:   tracing:     endpoint: otel-collector.observability.svc:4317     insecure: true</td>
+    </tr>
+    <tr>
+      <td><code>controller.tracing.endpoint</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td>OTLP gRPC collector host:port. Empty disables tracing entirely.</td>
+    </tr>
+    <tr>
+      <td><code>controller.tracing.insecure</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Skip TLS when dialing the OTLP collector. Use only for in-cluster collectors that don&#39;t terminate TLS themselves.</td>
+    </tr>
+    <tr>
+      <td><code>controller.tracing.sampleRatio</code></td>
+      <td><code>number</code></td>
+      <td><code>1</code></td>
+      <td>TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.</td>
+    </tr>
+    <tr>
+      <td><code>controller.watchNamespaces</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Namespaces this controller watches. Empty (the default) means cluster-wide. When set, the manager&#39;s cache only observes StageSets and sources in these namespaces, and RBAC pivots from a cluster-wide ClusterRoleBinding to one RoleBinding per listed namespace — the multi-tenant controller-instances pattern (one release per tenant-group, disjoint watch sets).</td>
+    </tr>
+    <tr>
+      <td><code>crds</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>CRD lifecycle. The chart ships the controller&#39;s CRDs under templates/ so a `helm upgrade` applies schema changes automatically. Set create=false to manage them out-of-band — e.g. pre-installed cluster-wide, or in CI where the same chart is installed once per values file and a kept cluster-scoped CRD owned by the first release can&#39;t be re-adopted by the next.</td>
+    </tr>
+    <tr>
+      <td><code>crds.create</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>deployment</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra labels and revision history for the Deployment.</td>
+    </tr>
+    <tr>
+      <td><code>deployment.additionalLabels</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>deployment.revisionHistoryLimit</code></td>
+      <td><code>integer</code></td>
+      <td><code>10</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>gate</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Flagger stage-gate endpoint (GET /gate/{ns}/{stageset}/{stage}). Renders a dedicated Service when enabled.</td>
+    </tr>
+    <tr>
+      <td><code>gate.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>global</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Global values are values that can be accessed from any chart or subchart by exactly the same name.</td>
+    </tr>
+    <tr>
+      <td><code>image</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Container image. tag defaults to .Chart.AppVersion (the released controller version); override only for a custom build.</td>
+    </tr>
+    <tr>
+      <td><code>image.pullPolicy</code></td>
+      <td><code>string</code></td>
+      <td><code>IfNotPresent</code></td>
+      <td>Pull policy. IfNotPresent suits tagged release images; switch to Always for a mutable tag (latest, edge).</td>
+    </tr>
+    <tr>
+      <td><code>image.registry</code></td>
+      <td><code>string</code></td>
+      <td><code>ghcr.io</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>image.repository</code></td>
+      <td><code>string</code></td>
+      <td><code>metio/stageset-controller</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>image.tag</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td>Explicit tag override; empty defaults to .Chart.AppVersion.</td>
+    </tr>
+    <tr>
+      <td><code>imagePullSecrets</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Image pull secrets for a private registry.</td>
+    </tr>
+    <tr>
+      <td><code>mcp</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>MCP (Model Context Protocol) server. Exposes the controller&#39;s read-only introspection tools over a streamable-HTTP endpoint. Renders the server flag, container port, and a dedicated Service when enabled.</td>
+    </tr>
+    <tr>
+      <td><code>mcp.allowMutations</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Additionally register the gated write tools. Off keeps the server read-only.</td>
+    </tr>
+    <tr>
+      <td><code>mcp.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Render the MCP server flag, container port, and Service.</td>
+    </tr>
+    <tr>
+      <td><code>mcp.service</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Dedicated MCP Service. Rendered with the rest of the MCP wiring when mcp.enabled.</td>
+    </tr>
+    <tr>
+      <td><code>mcp.service.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Prometheus integration.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Opt-in PrometheusRule with a starter alert set on the custom stageset_* metrics plus controller-runtime signals. Requires the Prometheus operator CRDs.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.annotations</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra annotations on the PrometheusRule object.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.extraAlertLabels</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Labels merged onto EVERY rendered alert — route all stageset alerts through one Alertmanager receiver (e.g. team: platform).</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.extraRules</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra alert rules appended under a separate &#34;stageset-extras&#34; group, rendered verbatim. To silence a built-in alert, raise its threshold below to an impossibly high value rather than forking the chart.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.interval</code></td>
+      <td><code>string</code></td>
+      <td><code>30s</code></td>
+      <td>Evaluation interval for every rule group.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.labels</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra labels on the PrometheusRule object (typically what your Prometheus selects on).</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.runbookAnnotationKey</code></td>
+      <td><code>string</code></td>
+      <td><code>runbook_url</code></td>
+      <td>Annotation key the runbook URL lands under (runbook_url is the Prometheus-operator convention).</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Numeric/duration thresholds in one place so operators can tune the noise floor without editing rule bodies.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.budgetFrozenDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>15m</code></td>
+      <td>StageSetBudgetFrozen / StageSetStageBudgetFrozen: how long an error-budget freeze (rollout-wide or per-stage) must hold before alerting. Deploys held out of SLO budget are intentional, so this is a heads-up, not an instant page.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.metricSourceErrorsDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>15m</code></td>
+      <td>How long the per-hour metric-source error increase must stay above the threshold before the alert fires.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.metricSourceErrorsPerHour</code></td>
+      <td><code>integer</code></td>
+      <td><code>3</code></td>
+      <td>StageSetMetricSourceUnavailable: hourly increase on the metric-source error counter before alerting. A fail-open freeze runs with no protection while its source is broken, so this is the loud signal for that hole.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.podDownDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>5m</code></td>
+      <td>StageSetControllerPodDown: NotReady duration before paging. Below 5m it fires during normal pod rolls.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.promotionBlockedDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>10m</code></td>
+      <td>StageSetPromotionBlocked: how long a promotion analysis must stay failed (breached past failureLimit) before alerting.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.promotionPendingDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>1h</code></td>
+      <td>StageSetPromotionStuck: how long a rollout may sit parked at a stage (soak/analysis/manual hold) before alerting. Long by default so a normal short soak never fires — it targets a forgotten manual gate or a misconfigured soak. Raise it where long deliberate holds are expected.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.reconcileErrorDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>10m</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.reconcileErrorRate</code></td>
+      <td><code>number</code></td>
+      <td><code>0.1</code></td>
+      <td>StageSetReconcileErrorsHigh: per-StageSet Ready=False rate (per second, 5m window). 0.1/s ≈ one failure every 10s — a stuck StageSet, not a blip.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.reconcileLatencyDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>15m</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.reconcileLatencySeconds</code></td>
+      <td><code>integer</code></td>
+      <td><code>30</code></td>
+      <td>StageSetReconcileLatencyHigh: reconcile p99 ceiling, seconds. 30s is generous — an artifact fetch plus a multi-stage apply.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.watchEngagementFailuresDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>30m</code></td>
+      <td>How long the per-hour watch-engagement failure increase must stay above the threshold before the alert fires.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.watchEngagementFailuresPerHour</code></td>
+      <td><code>integer</code></td>
+      <td><code>1</code></td>
+      <td>StageSetWatchEngagementFailing: hourly increase on the producer-watch engagement failure counter. The retry pipeline eventually re-engages, but a sustained inability to engage means dependent StageSets aren&#39;t re-triggering on upstream producer republishes.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.webhookCertRenewalFailuresDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>30m</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.webhookCertRenewalFailuresPerHour</code></td>
+      <td><code>integer</code></td>
+      <td><code>1</code></td>
+      <td>StageSetWebhookCertRenewalFailing: self-signed cert renewal failures per hour before paging.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.workqueueDepth</code></td>
+      <td><code>integer</code></td>
+      <td><code>50</code></td>
+      <td>StageSetControllerWorkqueueDepthHigh: queued reconcile requests before alerting. 50 absorbs a normal burst, low enough to catch a real stall.</td>
+    </tr>
+    <tr>
+      <td><code>metrics.prometheusRule.thresholds.workqueueDuration</code></td>
+      <td><code>string</code></td>
+      <td><code>15m</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.serviceMonitor</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.serviceMonitor.additionalLabels</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.serviceMonitor.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>metrics.serviceMonitor.interval</code></td>
+      <td><code>string</code></td>
+      <td><code>30s</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>namespace</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Install namespace with Pod-Security labels. The chart installs into .Release.Namespace; set create to render it with PSS labels.</td>
+    </tr>
+    <tr>
+      <td><code>namespace.create</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>namespace.pssLevel</code></td>
+      <td><code>string</code></td>
+      <td><code>restricted</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Opt-in NetworkPolicy. Inert without a NetworkPolicy controller.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.additionalIngress</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra ingress rules merged verbatim. Applies to the kubernetes engine only.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.calico</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Calico engine (engine=calico) raw passthrough. Entries are merged verbatim into the projectcalico.org NetworkPolicy&#39;s spec.ingress / spec.egress.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.calico.egress</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra spec.egress rules merged verbatim (Calico NetworkPolicy schema).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.calico.ingress</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra spec.ingress rules merged verbatim (Calico NetworkPolicy schema).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.cilium</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Cilium engine (engine=cilium) raw passthrough. Entries are merged verbatim into the CiliumNetworkPolicy&#39;s spec.ingress / spec.egress. This is how you tighten the cilium policy — e.g. add fromEndpoints to the ingress rules, or additional toEndpoints / toFQDNs egress.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.cilium.egress</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra spec.egress rules merged verbatim (CiliumNetworkPolicy schema).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.cilium.ingress</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra spec.ingress rules merged verbatim (CiliumNetworkPolicy schema).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.clusterNetworkPolicy</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>ClusterNetworkPolicy engine (engine=clusterNetworkPolicy) raw passthrough. Entries are merged verbatim into the policy.networking.k8s.io ClusterNetworkPolicy&#39;s spec.ingress / spec.egress.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.clusterNetworkPolicy.egress</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra spec.egress rules merged verbatim (ClusterNetworkPolicy schema).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.clusterNetworkPolicy.ingress</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra spec.ingress rules merged verbatim (ClusterNetworkPolicy schema).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.clusterNetworkPolicy.priority</code></td>
+      <td><code>integer</code></td>
+      <td><code>1000</code></td>
+      <td>spec.priority on the ClusterNetworkPolicy (lower wins within the tier).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.defaultDeny</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Render a namespace-wide default-deny policy so EVERY pod in the namespace is denied by default and the per-workload allowlists are the only exceptions (zero-trust namespace). OFF by default because it also denies co-located workloads — only enable it when the controller has its own namespace. Leaving it off keeps a pod-scoped setup: only this controller&#39;s pods are locked down, neighbours untouched.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.defaultDeny.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.defaultDeny.order</code></td>
+      <td><code>integer</code></td>
+      <td><code>2000</code></td>
+      <td>Calico/ClusterNetworkPolicy sort key for the deny-all. It must rank the deny-all AFTER the per-workload allowlists so the allowlists win: Calico evaluates lower order first (the allowlist policies carry no order = lowest precedence, so this defaults high), and ClusterNetworkPolicy gives lower priority numbers higher precedence (the allowlist priority defaults to networkPolicy.clusterNetworkPolicy.priority, so this defaults higher). The kubernetes and cilium engines have no precedence knob — deny &#43; allow simply combine additively, allow wins.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.egress</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.egress.dns</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td>When egress is enabled, allow DNS (UDP&#43;TCP 53) to the cluster DNS namespace.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.egress.dnsNamespace</code></td>
+      <td><code>string</code></td>
+      <td><code>kube-system</code></td>
+      <td>Namespace of the cluster DNS service (matched by kubernetes.io/metadata.name).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.egress.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Render egress rules. Adds Egress to policyTypes, so everything not explicitly allowed is denied. Off by default: enable only after allowing everything the controller needs (DNS, the kube-apiserver, source-controller / producer namespaces, S3, the OTLP collector, and any remote-cluster or http-action targets) via egress.to — enabling egress without allowing the apiserver cuts the controller off from the cluster.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.egress.to</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Additional egress peers merged verbatim into spec.egress. This is where you allow the kube-apiserver (an ipBlock CIDR), the source-controller / producer namespaces, and external endpoints (S3, OTLP, remote-cluster or http-action targets). NetworkPolicy cannot select the apiserver by label, so it must be an ipBlock here.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Render the NetworkPolicy. When enabled, the policy targets the controller pod; with a NetworkPolicy controller (Calico/Cilium/etc.) installed, anything not listed below is denied. Leave OFF on clusters without such a controller — the policy is silently inert there.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.engine</code></td>
+      <td><code>string</code></td>
+      <td><code>kubernetes</code></td>
+      <td>Policy engine to render for. kubernetes (default) emits a vanilla networking.k8s.io NetworkPolicy. cilium / calico / clusterNetworkPolicy emit the engine-native equivalent instead (CiliumNetworkPolicy, projectcalico.org NetworkPolicy, or policy.networking.k8s.io ClusterNetworkPolicy). The per-port .from knobs below apply to the kubernetes engine only; alternative engines are pod-scoped allow-all on the required ports and tighten via their native passthrough lists (cilium/calico/clusterNetworkPolicy .ingress / .egress).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.gate</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Sources allowed to reach the gate port. Empty = all (e.g. Flagger for the gate).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.gate.from</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.mcp</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Sources allowed to reach the MCP server port. Empty = all. Only rendered when mcp.enabled.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.mcp.from</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.metrics</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Sources allowed to reach the metrics port. Empty = all (e.g. Prometheus for metrics).</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.metrics.from</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.webhook</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Sources allowed to reach the webhook port. Empty = all (e.g. kube-apiserver for the webhook, which cannot be a podSelector). Applies to the kubernetes engine only.</td>
+    </tr>
+    <tr>
+      <td><code>networkPolicy.webhook.from</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>nodeSelector</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Node selector for scheduling.</td>
+    </tr>
+    <tr>
+      <td><code>pod</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra labels for the pod template.</td>
+    </tr>
+    <tr>
+      <td><code>pod.additionalLabels</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>podDisruptionBudget</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>PodDisruptionBudget (rendered for any multi-replica install — replicas.min above 1, or replicas.max above replicas.min).</td>
+    </tr>
+    <tr>
+      <td><code>podDisruptionBudget.maxUnavailable</code></td>
+      <td><code>integer|string|null</code></td>
+      <td><code>null</code></td>
+      <td>PDB maxUnavailable. Null (default) renders minAvailable instead; set this (and minAvailable to null) to cap voluntary disruptions to N pods at a time.</td>
+    </tr>
+    <tr>
+      <td><code>podDisruptionBudget.minAvailable</code></td>
+      <td><code>integer|string|null</code></td>
+      <td><code>1</code></td>
+      <td>PDB minAvailable (the default shape). Mutually exclusive with maxUnavailable — set this to null when using maxUnavailable.</td>
+    </tr>
+    <tr>
+      <td><code>podDisruptionBudget.unhealthyPodEvictionPolicy</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td>spec.unhealthyPodEvictionPolicy on the PDB. Empty defers to the cluster default.</td>
+    </tr>
+    <tr>
+      <td><code>podSecurityContext</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Pod-level securityContext (PSS restricted). fsGroup matches the container&#39;s runAsGroup so the kubelet/CSI driver chowns mounted volumes (notably the rollbackStore.backend=pvc volume) to the running group — without it the non-root container (uid/gid 65532) cannot write to a freshly provisioned, root-owned PVC and the controller crashloops at startup. fsGroupChangePolicy OnRootMismatch skips the recursive chown when the volume root already matches, avoiding slow restarts on large volumes.</td>
+    </tr>
+    <tr>
+      <td><code>podSecurityContext.fsGroup</code></td>
+      <td><code>integer</code></td>
+      <td><code>65532</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>podSecurityContext.fsGroupChangePolicy</code></td>
+      <td><code>string</code></td>
+      <td><code>OnRootMismatch</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>podSecurityContext.runAsNonRoot</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>podSecurityContext.seccompProfile</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>podSecurityContext.seccompProfile.type</code></td>
+      <td><code>string</code></td>
+      <td><code>RuntimeDefault</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>ports</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Ports the controller binds.</td>
+    </tr>
+    <tr>
+      <td><code>ports.gate</code></td>
+      <td><code>integer</code></td>
+      <td><code>8082</code></td>
+      <td>read-only Flagger stage-gate endpoint</td>
+    </tr>
+    <tr>
+      <td><code>ports.health</code></td>
+      <td><code>integer</code></td>
+      <td><code>8081</code></td>
+      <td>/healthz &#43; /readyz probes</td>
+    </tr>
+    <tr>
+      <td><code>ports.mcp</code></td>
+      <td><code>integer</code></td>
+      <td><code>8084</code></td>
+      <td>MCP (Model Context Protocol) server (mcp.enabled only)</td>
+    </tr>
+    <tr>
+      <td><code>ports.metrics</code></td>
+      <td><code>integer</code></td>
+      <td><code>8080</code></td>
+      <td>controller-runtime Prometheus metrics</td>
+    </tr>
+    <tr>
+      <td><code>ports.webhook</code></td>
+      <td><code>integer</code></td>
+      <td><code>9443</code></td>
+      <td>validating admission webhook</td>
+    </tr>
+    <tr>
+      <td><code>rbac</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Controller RBAC. The default grant is deliberately minimal: the controller impersonates each StageSet&#39;s spec.serviceAccountName for cluster writes, so a tenant&#39;s own RBAC bounds what its StageSets can touch.</td>
+    </tr>
+    <tr>
+      <td><code>rbac.clusterAdmin</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Bind the controller ServiceAccount to the built-in cluster-admin ClusterRole. Single-tenant clusters where StageSets omit spec.serviceAccountName run the controller under its own identity; cluster-admin lets it apply any kind cluster-wide — the model Flux&#39;s helm-controller uses in its default install. Leave false for multi-tenant clusters, where every StageSet sets serviceAccountName and the controller only impersonates those scoped SAs.</td>
+    </tr>
+    <tr>
+      <td><code>replicas</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Replica bounds. min is the Deployment replica count; when max &gt; min an HPA and a PodDisruptionBudget are rendered. At the default 1/1 both are omitted.</td>
+    </tr>
+    <tr>
+      <td><code>replicas.max</code></td>
+      <td><code>integer</code></td>
+      <td><code>1</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>replicas.min</code></td>
+      <td><code>integer</code></td>
+      <td><code>1</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>resources</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Pod resource sizing. Applied to both requests and limits (cpu, memory, and ephemeral-storage) so the pod is fully constrained — kube-score&#39;s resource-completeness checks require all three on both sides. ephemeralStorage must exceed tmpSizeLimit (the /tmp emptyDir, which holds the streamed artifact capped at the binary&#39;s 64Mi download limit plus the decrypted build tree): sizing it below would let the kubelet evict the pod mid-fetch on any artifact larger than the limit.</td>
+    </tr>
+    <tr>
+      <td><code>resources.cpu</code></td>
+      <td><code>string</code></td>
+      <td><code>50m</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>resources.ephemeralStorage</code></td>
+      <td><code>string</code></td>
+      <td><code>320Mi</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>resources.memory</code></td>
+      <td><code>string</code></td>
+      <td><code>256Mi</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Optional rollback store for bit-exact, GC-independent rollbacks.</td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.backend</code></td>
+      <td><code>string</code></td>
+      <td><code>none</code></td>
+      <td>none: rollback falls back to re-fetching the producer artifact. pvc: an RWX PersistentVolumeClaim (use RWX for HA replicas). s3: any S3-compatible bucket.</td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.pvc</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.pvc.accessModes</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.pvc.mountPath</code></td>
+      <td><code>string</code></td>
+      <td><code>/var/lib/stageset/rollback</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.pvc.size</code></td>
+      <td><code>string</code></td>
+      <td><code>1Gi</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.pvc.storageClass</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.anonymous</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.bucket</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.endpoint</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.existingSecret</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td>Existing Secret carrying AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally AWS_SESSION_TOKEN. It is wired into the pod via envFrom.secretRef; the controller&#39;s AWS credential chain picks the keys up automatically. Leave empty to engage the IAM/IRSA discovery chain (AWS_* env vars, EKS web-identity, EC2 metadata).</td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.prefix</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.region</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.sse</code></td>
+      <td><code>string</code></td>
+      <td><code>s3</code></td>
+      <td>Server-side encryption at rest for stored objects. The rollback store holds rendered Secret data, so this defaults on. s3 = SSE-S3 (bucket-managed key); kms = SSE-KMS with sseKmsKeyId; none only for a backend that cannot honor an SSE header. A rejected SSE write is non-fatal — it warns and skips the store write, the rollout still succeeds.</td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.sseKmsKeyId</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td>KMS key ARN/ID for sse: kms; empty uses the bucket&#39;s default KMS key.</td>
+    </tr>
+    <tr>
+      <td><code>rollbackStore.s3.useSSL</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Container-level securityContext (PSS restricted). runAsUser/runAsGroup are set above 10000 (kube-score requirement) for a static binary that needs no real user identity.</td>
+    </tr>
+    <tr>
+      <td><code>securityContext.allowPrivilegeEscalation</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.capabilities</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.capabilities.drop</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.readOnlyRootFilesystem</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.runAsGroup</code></td>
+      <td><code>integer</code></td>
+      <td><code>65532</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.runAsNonRoot</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.runAsUser</code></td>
+      <td><code>integer</code></td>
+      <td><code>65532</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.seccompProfile</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>securityContext.seccompProfile.type</code></td>
+      <td><code>string</code></td>
+      <td><code>RuntimeDefault</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>serviceAccount</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Controller ServiceAccount.</td>
+    </tr>
+    <tr>
+      <td><code>serviceAccount.annotations</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Extra annotations on the ServiceAccount — e.g. eks.amazonaws.com/role-arn for IRSA, so the controller&#39;s S3 rollback store assumes an IAM role instead of using static keys.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Opt-in service-mesh L7 authorization &#43; mTLS for the controller pod. Complementary to networkPolicy, NOT a replacement: networkPolicy is L3/L4 (which pods/IPs may open a connection), serviceMesh is L7/identity (which mesh identities may call which port). Both can be enabled at once and stack additively. Authorizes only the mesh-reachable ports — gate (Flagger) and metrics (Prometheus). The webhook (kube-apiserver) and health/probe (kubelet) ports are deliberately left out: those callers speak plain TLS / no mesh identity, and locking them to mesh principals would break admission and health probing.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.defaultDeny</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Render a namespace-wide default-deny so every pod in the install namespace rejects unauthorized mesh traffic and the per-workload allows above are the only exceptions (zero-trust namespace). Istio renders an empty-spec AuthorizationPolicy (deny-all) scoped to the whole namespace, which sits at lower precedence than the workload ALLOW. Linkerd has no per-object deny-all; the namespace default is set via the config.linkerd.io/default-inbound-policy annotation, so this is stamped onto the chart-managed Namespace (requires namespace.create=true) — otherwise annotate the namespace out-of-band. Enable only when the controller owns its namespace; it also denies co-located workloads.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.defaultDeny.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>false</code></td>
+      <td>Opt-in. When enabled, the chart renders the selected engine&#39;s authorization &#43; mTLS objects for the controller pod. Inert unless that mesh (Istio or Linkerd) is actually installed and the pod is injected.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.engine</code></td>
+      <td><code>string</code></td>
+      <td><code>istio</code></td>
+      <td>Mesh engine to render for. istio emits security.istio.io AuthorizationPolicy (&#43; optional PeerAuthentication). linkerd emits policy.linkerd.io Server / AuthorizationPolicy / MeshTLSAuthentication objects.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.gate</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Per-port allowed mesh identities. Each `from` entry is a source matcher:   - principals: SPIFFE/mesh identities (Istio source.principals, e.g.       cluster.local/ns/&lt;ns&gt;/sa/&lt;sa&gt;). For Linkerd these map to       MeshTLSAuthentication identities (the proxy identity string, e.g.       &lt;sa&gt;.&lt;ns&gt;.serviceaccount.identity.linkerd.cluster.local, or &#34;*&#34;).   - namespaces: source namespaces (Istio source.namespaces). ISTIO-ONLY —       Linkerd authenticates by workload identity, not by namespace, so this       field is ignored on the linkerd engine. An EMPTY `from` list on a port means OPEN (allow any caller), mirroring networkPolicy&#39;s empty-`from`=open semantics. On Istio that is a port rule with no `from`; on Linkerd it is a MeshTLSAuthentication of identities: [&#34;*&#34;] (any authenticated meshed client). Mesh identities allowed to poll the Flagger stage-gate endpoint (ports.gate). Rendered only when gate.enabled. Empty = open.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.gate.from</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.istio</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Istio engine raw passthrough. Entries are merged verbatim into the AuthorizationPolicy&#39;s spec.rules (security.istio.io/v1 rule schema). Use this to add rules the per-port `from` knobs above can&#39;t express — path/method matchers, `when` JWT-claim conditions, ipBlocks, etc.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.istio.rules</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.linkerd</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Linkerd engine raw passthrough. Entries are appended verbatim as additional documents after the rendered Server / AuthorizationPolicy / MeshTLSAuthentication set — each entry must be a complete object (policy.linkerd.io AuthorizationPolicy, HTTPRoute, etc.).</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.linkerd.authorizations</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.metrics</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Mesh identities allowed to scrape the controller metrics port (ports.metrics). Empty = open.</td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.metrics.from</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>serviceMesh.mtls</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td>mTLS posture (Istio engine only). Empty defers to the mesh&#39;s own default (mesh-wide PeerAuthentication / MeshConfig). permissive renders a PeerAuthentication accepting both mTLS and plaintext. strict requires mTLS on the workload&#39;s ports EXCEPT the webhook &#43; health ports, which get a port-level PERMISSIVE carve-out so the non-mesh kube-apiserver and kubelet still connect. Linkerd negotiates mTLS automatically between meshed pods, so this knob does not apply to the linkerd engine.</td>
+    </tr>
+    <tr>
+      <td><code>tmpSizeLimit</code></td>
+      <td><code>string</code></td>
+      <td><code>256Mi</code></td>
+      <td>Size limit for the writable /tmp emptyDir (artifact download &#43; decrypted kustomize build scratch). Kept below resources.ephemeralStorage so an over-large artifact trips this with a clear message before kubelet eviction.</td>
+    </tr>
+    <tr>
+      <td><code>tolerations</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Tolerations for scheduling.</td>
+    </tr>
+    <tr>
+      <td><code>topologySpreadConstraints</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>Topology spread constraints for scheduling.</td>
+    </tr>
+    <tr>
+      <td><code>webhook</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>Validating admission webhook for StageSet.</td>
+    </tr>
+    <tr>
+      <td><code>webhook.certManager</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>cert-manager mode: the issuer that signs the webhook Certificate.</td>
+    </tr>
+    <tr>
+      <td><code>webhook.certManager.issuerRef</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>webhook.certManager.issuerRef.kind</code></td>
+      <td><code>string</code></td>
+      <td><code>Issuer</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>webhook.certManager.issuerRef.name</code></td>
+      <td><code>string</code></td>
+      <td><em>(empty)</em></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>webhook.certMode</code></td>
+      <td><code>string</code></td>
+      <td><code>self-signed</code></td>
+      <td>TLS provisioning. self-signed (default) has the controller generate a CA &#43; serving cert in-pod and patch the ValidatingWebhookConfiguration caBundle (HA-safe) — no cluster prerequisite, works out of the box. cert-manager renders a Certificate (cert mounted from the issued Secret) and needs cert-manager &#43; a configured issuer.</td>
+    </tr>
+    <tr>
+      <td><code>webhook.certValidity</code></td>
+      <td><code>string</code></td>
+      <td><code>8760h</code></td>
+      <td>Validity of the self-signed serving cert; the renewer rotates at validity/3.</td>
+    </tr>
+    <tr>
+      <td><code>webhook.enabled</code></td>
+      <td><code>boolean</code></td>
+      <td><code>true</code></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><code>webhook.failurePolicy</code></td>
+      <td><code>string</code></td>
+      <td><code>Fail</code></td>
+      <td>Failure policy for the ValidatingWebhookConfiguration. Fail is the safer default — a webhook outage blocks StageSet writes cluster-wide until the controller is back. Switch to Ignore only when you&#39;re willing to accept invalid StageSets reaching the reconciler.  During a controller restart (rolling update, crash-loop, eviction) the webhook is briefly unreachable and Fail blocks every StageSet create/update for that window. If your CI/GitOps tooling can&#39;t tolerate that, scope the webhook with objectSelector / namespaceSelector to limit the blast radius, or set failurePolicy: Ignore.</td>
+    </tr>
+    <tr>
+      <td><code>webhook.matchConditions</code></td>
+      <td><code>array</code></td>
+      <td><em>(empty)</em></td>
+      <td>matchConditions are CEL expressions evaluated server-side before the webhook is dialed. Lets operators short-circuit admission checks for specific StageSet shapes without a round trip. Requires Kubernetes 1.30&#43;.</td>
+    </tr>
+    <tr>
+      <td><code>webhook.namespaceSelector</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>namespaceSelector restricts the webhook to Namespaces carrying the listed labels. A common pattern: opt-in per namespace via a label so the apiserver doesn&#39;t dial the webhook for unrelated namespaces during controller outages. Example:   namespaceSelector:     matchLabels:       stages.metio.wtf/admission: enforce</td>
+    </tr>
+    <tr>
+      <td><code>webhook.objectSelector</code></td>
+      <td><code>object</code></td>
+      <td><em>(empty)</em></td>
+      <td>objectSelector restricts the webhook to StageSets carrying the listed labels. Useful when only some StageSets are controller-managed (the rest live in Argo or kustomize). Example:   objectSelector:     matchLabels:       stages.metio.wtf/managed: &#34;true&#34;</td>
+    </tr>
+    <tr>
+      <td><code>webhook.sideEffects</code></td>
+      <td><code>string</code></td>
+      <td><code>None</code></td>
+      <td>Side-effect mode for the ValidatingWebhookConfiguration.</td>
+    </tr>
+    <tr>
+      <td><code>webhook.timeoutSeconds</code></td>
+      <td><code>integer</code></td>
+      <td><code>10</code></td>
+      <td>Webhook call timeout in seconds. The apiserver aborts the admission call after this and applies failurePolicy. Keep low so a wedged controller fails fast instead of stalling every StageSet apply.</td>
+    </tr>
+  </tbody>
+</table>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/installation" term="installation" label="installation"/><category scheme="https://stageset.projects.metio.wtf/tags/helm" term="helm" label="helm"/><category scheme="https://stageset.projects.metio.wtf/tags/chart" term="chart" label="chart"/><category scheme="https://stageset.projects.metio.wtf/tags/values" term="values" label="values"/><category scheme="https://stageset.projects.metio.wtf/tags/reference" term="reference" label="reference"/></entry></feed>

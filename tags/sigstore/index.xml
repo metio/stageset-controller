@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Sigstore on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/sigstore/</link><description>Recent content in Sigstore on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/sigstore/index.xml" rel="self" type="application/rss+xml"/><item><title>Verifying releases</title><link>https://stageset.projects.metio.wtf/reference/verifying-releases/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/reference/verifying-releases/</guid><description>&lt;p&gt;Every release is signed with &lt;a href="https://github.com/sigstore/cosign"&gt;cosign&lt;/a&gt;
+ keyless
+signing. There is no GPG key to import and no public key to distribute — the
+signature&amp;rsquo;s trust comes from the GitHub Actions workflow&amp;rsquo;s OIDC identity, proven by
+a &lt;a href="https://docs.sigstore.dev/"&gt;Fulcio&lt;/a&gt;
+ certificate and logged in
+&lt;a href="https://docs.sigstore.dev/logging/overview/"&gt;Rekor&lt;/a&gt;
+. Verify the artifacts you pull
+before you run them.&lt;/p&gt;
+&lt;p&gt;Install cosign from &lt;a href="https://github.com/sigstore/cosign/releases"&gt;its releases&lt;/a&gt;
+, or
+on most systems:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;go install github.com/sigstore/cosign/v2/cmd/cosign@latest
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Two values appear in every command below — the workflow identity and the OIDC
+issuer. They are the same for the image and the blobs:&lt;/p&gt;</description></item></channel></rss>

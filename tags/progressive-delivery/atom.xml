@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Progressive-Delivery on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/progressive-delivery/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/progressive-delivery/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/progressive-delivery/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/progressive-delivery/</id><entry><title type="html">Progressive delivery</title><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/?utm_source=atom_feed" rel="related" type="text/html" title="Conflict policies"/><id>https://stageset.projects.metio.wtf/guides/progressive-delivery/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Gate a Flagger or Argo Rollouts promotion on a StageSet stage, and gate a StageSet stage on a Rollout.</blockquote><p><code>StageSet</code> integrates with both progressive-delivery controllers:
+<a href="https://flagger.app/">Flagger</a>
+ and
+<a href="https://argoproj.github.io/argo-rollouts/">Argo Rollouts</a>
+. The controller exposes
+a read-only gate endpoint and a readiness gauge so either one can hold a promotion
+until a <code>StageSet</code> stage is healthy; ready checks let a stage wait on a Rollout in
+return. See also <a href="/comparisons/argo-rollouts/">StageSet vs Argo Rollouts</a>
+.</p>
+<h2 id="the-gate-contract">The gate contract</h2>
+<p>The gate endpoint backs the Flagger integration and the Argo Rollouts JSON-metric
+option.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">GET /gate/{namespace}/{stageset}/{stage}
+</span></span><span class="line"><span class="cl">  200  — the stage is Ready at the currently pinned revision
+</span></span><span class="line"><span class="cl">  403  — the stage is not Ready (or not found / not gateable)
+</span></span></code></pre></div><p>It is served on <code>--gate-bind-address</code> (default <code>:8082</code>) and exposed by the chart&rsquo;s
+<code>stageset-controller-gate</code> Service (<code>gate.enabled</code>, on by default). The endpoint is
+<strong>unauthenticated and read-only</strong>, so fence it with a <code>NetworkPolicy</code>
+(<a href="/running/production/#network-policy">production</a>
+) to admit only your
+delivery controller.</p>
+<h2 id="flagger">Flagger</h2>
+<p>Add a <code>confirm-promotion</code> (or <code>confirm-rollout</code>) webhook to a Flagger <code>Canary</code>
+pointing at the gate. Flagger blocks the promotion until the gate returns <code>200</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">flagger.app/v1beta1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Canary</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">analysis</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">1m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">threshold</span><span class="p">:</span><span class="w"> </span><span class="m">5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">stepWeight</span><span class="p">:</span><span class="w"> </span><span class="m">10</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxWeight</span><span class="p">:</span><span class="w"> </span><span class="m">50</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">webhooks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-stage-ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">confirm-promotion</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="c"># gate this canary&#39;s promotion on a StageSet stage being Ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">http://stageset-controller-gate.stageset-system:8082/gate/apps/web/web</span><span class="w">
+</span></span></span></code></pre></div><p>This is independent of the Flagger <em>strategy</em>: the same webhook gates a weighted
+<strong>canary</strong>, an <strong>A/B test</strong> (header/cookie routing), or a <strong>blue-green</strong> promotion
+— the gate only answers &ldquo;is this stage Ready,&rdquo; and Flagger decides what to do with
+that answer.</p>
+<p>This coordinates two moving parts: Flagger shifts traffic to a new version only once
+a StageSet stage that applied the supporting config (a CRD, a migration, a sibling
+component) reports Ready.</p>
+<h2 id="argo-rollouts">Argo Rollouts</h2>
+<p>Argo Rollouts gates on <strong>analysis metrics</strong> (a query that returns a value to
+compare) rather than a webhook&rsquo;s HTTP status, so the controller meets it on its own
+terms in two ways.</p>
+<h3 id="gate-on-the-readiness-gauge-recommended">Gate on the readiness gauge (recommended)</h3>
+<p>The controller exports <code>stageset_stage_ready{namespace,stageset,stage}</code> (<code>1</code> when
+the stage is Ready, <code>0</code> otherwise). Argo&rsquo;s <strong>Prometheus</strong> metric provider gates on
+it directly — no gate endpoint, no Job:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">argoproj.io/v1alpha1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">AnalysisTemplate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-stage-ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stage-ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">successCondition</span><span class="p">:</span><span class="w"> </span><span class="l">result == 1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">provider</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">http://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="l">max(stageset_stage_ready{namespace=&#34;apps&#34;,stageset=&#34;web&#34;,stage=&#34;web&#34;})</span><span class="w">
+</span></span></span></code></pre></div><h3 id="gate-on-the-json-endpoint">Gate on the JSON endpoint</h3>
+<p>The same gate endpoint also answers JSON when asked
+(<code>Accept: application/json</code>), returning <code>{&quot;ready&quot;: true, …}</code> with a <code>200</code> so Argo&rsquo;s
+<strong>web</strong> metric can parse it (Argo treats a non-2xx as an error, so readiness has to
+live in the body):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stage-ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">successCondition</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;result.ready == true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">provider</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">web</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">http://stageset-controller-gate.stageset-system:8082/gate/apps/web/web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">headers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">Accept</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">application/json</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">jsonPath</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;{$}&#34;</span><span class="w">
+</span></span></span></code></pre></div><p>A <strong>Job-based metric</strong> (<code>curl -fsS …</code> against the gate, succeeding only on <code>200</code>)
+is the fallback when the analysis has no Prometheus or web access.</p>
+<h2 id="the-reverse-direction-gate-a-stageset-on-a-rollout">The reverse direction: gate a StageSet on a Rollout</h2>
+<p>The coordination also works the other way. Because
+<a href="/defining-a-release/ready-checks/">ready checks</a>
+ accept CEL, a StageSet stage can wait on an
+Argo <code>Rollout</code> finishing its own progressive rollout before the next stage runs:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">readyChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">exprs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">argoproj.io/v1alpha1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Rollout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">current</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.phase == &#39;Healthy&#39;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">inProgress</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.phase in [&#39;Progressing&#39;, &#39;Paused&#39;]&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.phase == &#39;Degraded&#39;&#34;</span><span class="w">
+</span></span></span></code></pre></div><p>So StageSet can gate Argo (via the gauge/gate) and Argo&rsquo;s outcome can gate
+StageSet (via ready checks) — pick whichever direction your release needs.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/progressive-delivery" term="progressive-delivery" label="progressive-delivery"/><category scheme="https://stageset.projects.metio.wtf/tags/flagger" term="flagger" label="flagger"/><category scheme="https://stageset.projects.metio.wtf/tags/argo" term="argo" label="argo"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs Argo Rollouts</title><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="related" type="text/html" title="Progressive delivery"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Kustomize"/><id>https://stageset.projects.metio.wtf/comparisons/argo-rollouts/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Different layers — staged multi-artifact delivery versus single-workload traffic shifting.</blockquote><p><a href="https://argoproj.github.io/argo-rollouts/">Argo Rollouts</a>
+ and <code>StageSet</code> are easy
+to mention in the same breath because both roll things out gradually, but they
+operate at different layers and are complementary rather than competing.</p>
+<h2 id="what-argo-rollouts-does">What Argo Rollouts does</h2>
+<p><code>Argo Rollouts</code> replaces a <code>Deployment</code> with a <code>Rollout</code> that shifts traffic to a new
+version <strong>progressively</strong> — canary or blue-green — pausing at weighted steps and
+promoting based on <strong>metric analysis</strong> (Prometheus queries, web/Job providers).
+Its unit of work is a <strong>single workload&rsquo;s</strong> version transition and the traffic in
+front of it.</p>
+<h2 id="what-stageset-does">What StageSet does</h2>
+<p><code>StageSet</code> orchestrates a <strong>whole release</strong> as an ordered list of stages, each built
+from a Flux <code>ExternalArtifact</code> — CRDs before the operator that needs them, a
+migration before the app, config before the workload — gating each stage on health
+and running typed <a href="/defining-a-release/actions/">actions</a>
+ between them. It does not shift
+traffic or run metric analysis; its unit of work is the <strong>multi-component release</strong>
+and the order things apply in.</p>
+<table>
+	<thead>
+			<tr>
+					<th></th>
+					<th>Argo Rollouts</th>
+					<th>StageSet</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Unit of work</td>
+					<td>one workload&rsquo;s version + its traffic</td>
+					<td>a multi-stage release of artifacts</td>
+			</tr>
+			<tr>
+					<td>Mechanism</td>
+					<td>weighted traffic shifting + metric analysis</td>
+					<td>ordered apply with readiness gates + actions</td>
+			</tr>
+			<tr>
+					<td>Promotion driver</td>
+					<td>analysis metrics (Prometheus, web, Job)</td>
+					<td>stage readiness (kstatus, CEL) and actions</td>
+			</tr>
+			<tr>
+					<td>Pruning / inventory</td>
+					<td>no (owns the Rollout&rsquo;s pods)</td>
+					<td>yes (StageInventory record, per-stage prune)</td>
+			</tr>
+			<tr>
+					<td>GitOps reconcile</td>
+					<td>via your GitOps tool (e.g. Argo CD)</td>
+					<td>native (Flux controller)</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="using-them-together">Using them together</h2>
+<p>A realistic setup uses both: <code>StageSet</code> rolls out the release in order, and a
+workload <em>inside</em> one stage is itself an Argo <code>Rollout</code> doing a canary. <code>StageSet</code>
+gets the supporting pieces (CRDs, config, migrations) in place and healthy;
+<code>Argo Rollouts</code> handles the fine-grained traffic progression for that one service.</p>
+<h2 id="integrating-them">Integrating them</h2>
+<p>Both directions are supported:</p>
+<ul>
+<li><strong>Argo gating on StageSet.</strong> The controller exports a
+<code>stageset_stage_ready{namespace,stageset,stage}</code> gauge that Argo&rsquo;s Prometheus
+metric reads directly, and the stage <a href="/guides/progressive-delivery/">gate endpoint</a>
+
+also answers JSON for Argo&rsquo;s web metric. So an Argo <code>Rollout</code> can hold its
+promotion until a <code>StageSet</code> stage is Ready — no Job bridge needed.</li>
+<li><strong>StageSet gating on Argo.</strong> A <code>StageSet</code> stage&rsquo;s <a href="/defining-a-release/ready-checks/">ready checks</a>
+
+can wait (via CEL) on an Argo <code>Rollout</code> reaching <code>Healthy</code> before the next stage
+runs.</li>
+</ul>
+<p>The full, worked examples for both are in the
+<a href="/guides/progressive-delivery/#argo-rollouts">progressive-delivery tutorial</a>
+.
+Where the gate&rsquo;s HTTP-status contract is a native fit for
+<a href="https://flagger.app/">Flagger</a>
+, the readiness gauge and JSON endpoint make
+<code>Argo Rollouts</code> a first-class consumer too.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/argo" term="argo" label="argo"/><category scheme="https://stageset.projects.metio.wtf/tags/progressive-delivery" term="progressive-delivery" label="progressive-delivery"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

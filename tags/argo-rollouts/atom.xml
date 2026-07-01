@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Argo-Rollouts on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/argo-rollouts/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/argo-rollouts/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/argo-rollouts/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/argo-rollouts/</id><entry><title type="html">Comparisons</title><link href="https://stageset.projects.metio.wtf/comparisons/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><link href="https://stageset.projects.metio.wtf/get-started/flux-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stage sources — Git, OCI, Bucket"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><id>https://stageset.projects.metio.wtf/comparisons/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>How StageSet relates to Helm, Kustomize, Flux, Tanka, kubecfg, Argo Rollouts, jsonnet-controller, and the Flux Operator ResourceSet.</blockquote><p><code>StageSet</code> isn&rsquo;t a templating tool and isn&rsquo;t a replacement for your manifest
+generator. It&rsquo;s a <em>delivery</em> controller: it takes manifests that already exist
+(as a <a href="https://fluxcd.io/">Flux</a>
+ <code>ExternalArtifact</code>) and rolls them out in order,
+with gates, under continuous reconciliation. The tools below come up in the same
+situations; here is how each one relates.</p>
+<table>
+	<thead>
+			<tr>
+					<th></th>
+					<th>Generates manifests</th>
+					<th>Applies them</th>
+					<th>Continuous reconcile / drift</th>
+					<th>Ordered stages within a release</th>
+					<th>Gates / typed actions</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><strong>StageSet</strong></td>
+					<td>no</td>
+					<td>yes</td>
+					<td>yes</td>
+					<td><strong>yes</strong></td>
+					<td><strong>yes</strong></td>
+			</tr>
+			<tr>
+					<td>Helm</td>
+					<td>yes (templates)</td>
+					<td>yes (<code>helm upgrade</code>)</td>
+					<td>no</td>
+					<td>hooks + weights</td>
+					<td>hooks only</td>
+			</tr>
+			<tr>
+					<td>Kustomize (<code>kustomize</code> CLI)</td>
+					<td>yes (overlays)</td>
+					<td>no (<code>kubectl apply</code>)</td>
+					<td>no</td>
+					<td>no</td>
+					<td>no</td>
+			</tr>
+			<tr>
+					<td>Flux <code>kustomize-controller</code></td>
+					<td>no</td>
+					<td>yes</td>
+					<td>yes</td>
+					<td>between Kustomizations</td>
+					<td>health checks</td>
+			</tr>
+			<tr>
+					<td>Tanka / kubecfg</td>
+					<td>yes (Jsonnet)</td>
+					<td>yes (CLI)</td>
+					<td>no</td>
+					<td>dependency order</td>
+					<td>no</td>
+			</tr>
+	</tbody>
+</table>
+<p><code>StageSet</code> is complementary to all of them. It consumes manifests produced by
+<a href="https://helm.sh/">Helm</a>
+, <a href="https://kustomize.io/">Kustomize</a>
+,
+<a href="https://tanka.dev/">Tanka</a>
+, or anything else — its job starts once you have
+manifests and need to deliver them carefully.</p>
+<p>Progressive-delivery controllers (<a href="https://flagger.app/">Flagger</a>
+,
+<a href="https://argoproj.github.io/argo-rollouts/">Argo Rollouts</a>
+) sit at another layer —
+traffic shifting for a single workload — and also compose with <code>StageSet</code> rather
+than replace it; see <a href="/comparisons/argo-rollouts/">vs Argo Rollouts</a>
+.</p>
+<h2 id="all-comparisons">All comparisons</h2>
+<ul>
+<li><strong><a href="/comparisons/helm/">vs Helm</a>
+</strong> — templating and release hooks vs ordered, gated delivery.</li>
+<li><strong><a href="/comparisons/kustomize/">vs Kustomize</a>
+</strong> — overlay rendering vs continuous, staged apply.</li>
+<li><strong><a href="/comparisons/flux/">vs Flux kustomize-controller</a>
+</strong> — one-shot reconciliation vs sequenced stages with gates.</li>
+<li><strong><a href="/comparisons/tanka-kubecfg/">vs Tanka and kubecfg</a>
+</strong> — Jsonnet rendering vs delivery of the rendered result.</li>
+<li><strong><a href="/comparisons/argo-rollouts/">vs Argo Rollouts</a>
+</strong> — single-workload traffic shifting vs release-wide staging.</li>
+<li><strong><a href="/comparisons/jsonnet-controller/">vs jsonnet-controller</a>
+</strong> — in-cluster Jsonnet apply vs the producer/delivery split.</li>
+<li><strong><a href="/comparisons/flux-operator/">vs Flux Operator ResourceSet</a>
+</strong> — horizontal fan-out vs vertical, gated promotion.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparisons" term="comparisons" label="comparisons"/><category scheme="https://stageset.projects.metio.wtf/tags/helm" term="helm" label="helm"/><category scheme="https://stageset.projects.metio.wtf/tags/kustomize" term="kustomize" label="kustomize"/><category scheme="https://stageset.projects.metio.wtf/tags/flux" term="flux" label="flux"/><category scheme="https://stageset.projects.metio.wtf/tags/argo-rollouts" term="argo-rollouts" label="argo-rollouts"/></entry></feed>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Quickstart on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/quickstart/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/quickstart/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/quickstart/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/quickstart/</id><entry><title type="html">Get started</title><link href="https://stageset.projects.metio.wtf/get-started/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/get-started/quickstart/?utm_source=atom_feed" rel="related" type="text/html" title="Quickstart"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><link href="https://stageset.projects.metio.wtf/reference/upgrading/?utm_source=atom_feed" rel="related" type="text/html" title="Upgrading"/><id>https://stageset.projects.metio.wtf/get-started/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Install the controller and roll out your first StageSet, then go from plain manifests to a Jsonnet-rendered, gated rollout.</blockquote><p>Stand up the controller and ship your first release. Start with the Quickstart
+and work down — each page builds on the previous one.</p>
+<ul>
+<li><strong><a href="/get-started/quickstart/">Quickstart</a>
+</strong> — from an empty cluster to one
+running StageSet, the shortest path.</li>
+<li><strong><a href="/get-started/kubernetes/">Install on Kubernetes</a>
+</strong> — prerequisites and the
+Helm install in full.</li>
+<li><strong><a href="/get-started/jsonnet-to-rollout/">From Jsonnet to a gated rollout</a>
+</strong> — the
+flagship flow: render Jsonnet with <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+,
+gate with readiness checks, add versioned migrations.</li>
+<li><strong><a href="/get-started/flux-sources/">Stage sources</a>
+</strong> — point a stage at a
+<code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>, or a rendered <code>ExternalArtifact</code>.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/getting-started" term="getting-started" label="getting-started"/><category scheme="https://stageset.projects.metio.wtf/tags/installation" term="installation" label="installation"/><category scheme="https://stageset.projects.metio.wtf/tags/quickstart" term="quickstart" label="quickstart"/></entry><entry><title type="html">Quickstart</title><link href="https://stageset.projects.metio.wtf/get-started/quickstart/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="related" type="text/html" title="Parameterizing a rollout"/><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="related" type="text/html" title="Progressive delivery"/><link href="https://stageset.projects.metio.wtf/get-started/flux-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stage sources — Git, OCI, Bucket"/><id>https://stageset.projects.metio.wtf/get-started/quickstart/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Install the controller and roll out your first StageSet in a few steps.</blockquote><p>This tutorial takes you from an empty cluster to one running StageSet. The path
+is the shortest one — a single stage pointing directly at a Flux
+<code>GitRepository</code> that already holds plain manifests. No Jsonnet, no migrations,
+no optional knobs.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>A <a href="https://kubernetes.io/docs/">Kubernetes</a>
+ cluster with <code>kubectl</code> configured
+against it.</li>
+<li><code>helm</code> 3.x.</li>
+<li><a href="https://fluxcd.io/">Flux</a>
+ <strong>v2.7.0 or newer</strong> — the <code>ExternalArtifact</code> CRD a
+stage resolves to lands in that version. See
+<a href="/get-started/kubernetes/#prerequisites">Install on Kubernetes</a>
+ for the full
+prerequisites.</li>
+</ul>
+<h2 id="step-1--install-the-controller">Step 1 — Install the controller</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">helm upgrade --install stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://ghcr.io/metio/helm-charts/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace stageset-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --wait --timeout 5m
+</span></span></code></pre></div><p>See <a href="/get-started/kubernetes/">Install on Kubernetes</a>
+ for the full list of chart
+values (HA replicas, rollback store, webhook TLS mode, and so on).</p>
+<p>Verify the controller is running:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system get deploy stageset-controller
+</span></span><span class="line"><span class="cl"><span class="c1"># NAME                   READY   UP-TO-DATE   AVAILABLE   AGE</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># stageset-controller    1/1     1            1           30s</span>
+</span></span></code></pre></div><h2 id="step-2--provide-a-source">Step 2 — Provide a source</h2>
+<p>A stage reads from a Flux source. The quickest path is a <code>GitRepository</code>
+pointing at a repo that contains plain Kubernetes manifests:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">cat <span class="s">&lt;&lt;EOF | kubectl apply -f -
+</span></span></span><span class="line"><span class="cl"><span class="s">apiVersion: source.toolkit.fluxcd.io/v1
+</span></span></span><span class="line"><span class="cl"><span class="s">kind: GitRepository
+</span></span></span><span class="line"><span class="cl"><span class="s">metadata:
+</span></span></span><span class="line"><span class="cl"><span class="s">  name: my-app
+</span></span></span><span class="line"><span class="cl"><span class="s">  namespace: default
+</span></span></span><span class="line"><span class="cl"><span class="s">spec:
+</span></span></span><span class="line"><span class="cl"><span class="s">  interval: 1m
+</span></span></span><span class="line"><span class="cl"><span class="s">  url: https://github.com/acme/my-app-manifests
+</span></span></span><span class="line"><span class="cl"><span class="s">  ref:
+</span></span></span><span class="line"><span class="cl"><span class="s">    branch: main
+</span></span></span><span class="line"><span class="cl"><span class="s">EOF</span>
+</span></span></code></pre></div><p>Wait for it to sync:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace default <span class="nb">wait</span> --for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready gitrepository/my-app --timeout<span class="o">=</span>2m
+</span></span></code></pre></div><h2 id="step-3--apply-a-stageset">Step 3 — Apply a StageSet</h2>
+<p>Only <code>spec.stages</code> is required. Each stage needs a <code>name</code> and a <code>sourceRef</code>.
+<code>sourceRef.kind</code> defaults to <code>ExternalArtifact</code>; for a <code>GitRepository</code> name it
+explicitly:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">cat <span class="s">&lt;&lt;EOF | kubectl apply -f -
+</span></span></span><span class="line"><span class="cl"><span class="s">apiVersion: stages.metio.wtf/v1
+</span></span></span><span class="line"><span class="cl"><span class="s">kind: StageSet
+</span></span></span><span class="line"><span class="cl"><span class="s">metadata:
+</span></span></span><span class="line"><span class="cl"><span class="s">  name: my-app
+</span></span></span><span class="line"><span class="cl"><span class="s">  namespace: default
+</span></span></span><span class="line"><span class="cl"><span class="s">spec:
+</span></span></span><span class="line"><span class="cl"><span class="s">  stages:
+</span></span></span><span class="line"><span class="cl"><span class="s">    - name: app
+</span></span></span><span class="line"><span class="cl"><span class="s">      sourceRef:
+</span></span></span><span class="line"><span class="cl"><span class="s">        kind: GitRepository
+</span></span></span><span class="line"><span class="cl"><span class="s">        name: my-app
+</span></span></span><span class="line"><span class="cl"><span class="s">EOF</span>
+</span></span></code></pre></div><h2 id="step-4--confirm-it-reconciled">Step 4 — Confirm it reconciled</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace default get stageset my-app
+</span></span><span class="line"><span class="cl"><span class="c1"># NAME     READY   AGE</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># my-app   True    15s</span>
+</span></span></code></pre></div><p>If <code>READY</code> is <code>False</code>, describe the resource — the <code>Reason</code> and <code>Message</code> on the
+<code>Ready</code> condition identify the problem:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace default describe stageset my-app
+</span></span></code></pre></div><p>For a richer view of per-stage progress, use the CLI:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl --namespace default get my-app
+</span></span></code></pre></div><p>See <a href="/cli/">CLI reference</a>
+ for all <code>stagesetctl</code> commands.</p>
+<h2 id="where-to-go-next">Where to go next</h2>
+<ul>
+<li><a href="/get-started/jsonnet-to-rollout/">From Jsonnet to a gated rollout</a>
+ — the
+flagship tutorial: render Jsonnet with <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+,
+gate with readiness checks, add versioned migrations.</li>
+<li><a href="/get-started/flux-sources/">Stage sources</a>
+ — direct <code>GitRepository</code>,
+<code>OCIRepository</code>, and <code>Bucket</code> sources, plus the renderer route.</li>
+<li><a href="/defining-a-release/">Usage</a>
+ — every configuration knob, one page per concern.</li>
+<li><a href="/get-started/">Installation</a>
+ — production-grade install: HA, rollback store,
+webhook TLS, NetworkPolicy.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/quickstart" term="quickstart" label="quickstart"/><category scheme="https://stageset.projects.metio.wtf/tags/getting-started" term="getting-started" label="getting-started"/></entry></feed>

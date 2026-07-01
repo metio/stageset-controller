@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Multi-Tenancy on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/multi-tenancy/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/multi-tenancy/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/multi-tenancy/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/multi-tenancy/</id><entry><title type="html">Security &amp; multi-tenancy</title><link href="https://stageset.projects.metio.wtf/security/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/security/multi-cluster/?utm_source=atom_feed" rel="related" type="text/html" title="Multi-cluster and tenancy"/><link href="https://stageset.projects.metio.wtf/security/network-policy/?utm_source=atom_feed" rel="related" type="text/html" title="Network policy"/><id>https://stageset.projects.metio.wtf/security/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Run the controller safely — SOPS decryption, tenant impersonation, remote clusters, admission validation, network policy, and service mesh.</blockquote><p>How to run StageSet without granting it broad cluster power, keep secrets
+encrypted, and constrain what it can reach. The controller applies as a tenant
+<code>ServiceAccount</code>, so a StageSet can do exactly what its RBAC allows and no more.</p>
+<ul>
+<li><strong><a href="/security/encryption/">Secrets encryption</a>
+</strong> — decrypt SOPS-encrypted files
+in memory during apply.</li>
+<li><strong><a href="/security/multi-cluster/">Multi-cluster and tenancy</a>
+</strong> — apply as a tenant
+<code>ServiceAccount</code> or to a remote cluster.</li>
+<li><strong><a href="/security/admission-webhook/">Admission webhook</a>
+</strong> — validate StageSets at
+admission time.</li>
+<li><strong><a href="/security/network-policy/">Network policy</a>
+</strong> — lock the controller&rsquo;s traffic
+down to what it needs.</li>
+<li><strong><a href="/security/service-mesh/">Service mesh</a>
+</strong> — run the controller inside a mesh.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/multi-tenancy" term="multi-tenancy" label="multi-tenancy"/><category scheme="https://stageset.projects.metio.wtf/tags/rbac" term="rbac" label="rbac"/></entry></feed>

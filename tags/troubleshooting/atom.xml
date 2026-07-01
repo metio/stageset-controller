@@ -1,0 +1,1217 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Troubleshooting on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/troubleshooting/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/troubleshooting/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/troubleshooting/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/troubleshooting/</id><entry><title type="html">ArtifactNotFound</title><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="related" type="text/html" title="ResolveFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/watch-engagement/?utm_source=atom_feed" rel="related" type="text/html" title="Producer watch engagement failing"/><id>https://stageset.projects.metio.wtf/runbooks/artifactnotfound/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The referenced ExternalArtifact could not be found (transient; the controller requeues).</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=ArtifactNotFound</code>. Transient: the controller requeues in case the artifact appears.</p>
+<h2 id="cause">Cause</h2>
+<p>A stage&rsquo;s <code>sourceRef</code> resolves to <strong>no <code>ExternalArtifact</code></strong>. Either:</p>
+<ul>
+<li>a <strong>direct</strong> <code>sourceRef</code> (<code>kind: ExternalArtifact</code>, the default) names an object that does not exist in the target namespace; or</li>
+<li>a <strong>producer</strong> <code>sourceRef</code> (e.g. <code>kind: JsonnetSnippet</code>) exists, but no <code>ExternalArtifact</code> carries a <code>spec.sourceRef</code> back-pointer to it yet — the producer has not created its artifact object.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;     <span class="c1"># Message names the missing ref</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get externalartifact
+</span></span></code></pre></div><p>For a producer ref, confirm the producer object exists and that it is configured to publish an <code>ExternalArtifact</code> (not only serve over HTTP):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get &lt;producer-kind&gt; &lt;name&gt; --output yaml
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li>Fix a typo in <code>sourceRef.name</code> / <code>sourceRef.namespace</code>.</li>
+<li>For a direct ref, create (or wait for) the named <code>ExternalArtifact</code>.</li>
+<li>For a producer ref, ensure the producer actually publishes an artifact and that it lands in the same namespace as the StageSet (cross-namespace producer refs are gated by <code>--no-cross-namespace-refs</code>).</li>
+</ul>
+<p>If the artifact exists but is not yet published, the reason is <a href="/runbooks/sourcenotready/"><code>SourceNotReady</code></a>
+; a spec/API resolution failure is <a href="/runbooks/resolvefailed/"><code>ResolveFailed</code></a>
+. See <a href="/defining-a-release/stages-and-sources/">stages and sources</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">AwaitingPromotion</title><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="related" type="text/html" title="StageFailed"/><id>https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage is applied and healthy and the rollout is holding for a manual promotion.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=AwaitingPromotion</code>. The Message names the stage waiting to be promoted. <code>status.stages[].promotionState</code> shows <code>phase: AwaitingManual</code>.</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its <a href="/gating/stage-promotion/"><code>spec.stages[].promotion.requireManualPromotion</code></a>
+ holds the rollout there until an operator promotes it. This is the &ldquo;hold before prod&rdquo; gate: a human confirms the stage is good (ideally after reviewing metrics) before the rollout advances.</p>
+<p>The gate holds only <em>advancement to the next stage</em>. The awaiting stage stays applied and its drift keeps being corrected; earlier stages remain promoted. A manual promotion gate is distinct from a migration&rsquo;s <code>requireApproval</code>, which gates a destructive version transition rather than a stage advance.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages}&#39;</span>
+</span></span></code></pre></div><p>The stage whose <code>promotionState.phase</code> is <code>AwaitingManual</code> is the one waiting. Verify it is behaving as expected before promoting.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Promote the stage when you are satisfied it is healthy:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl promote &lt;name&gt; --namespace &lt;namespace&gt; --stage &lt;stage&gt;
+</span></span></code></pre></div><p>This stamps a one-shot <code>stages.metio.wtf/promote</code> annotation that advances the named stage exactly once; the rollout then continues to the next stage. To promote without the CLI:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; annotate --overwrite stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  stages.metio.wtf/promote<span class="o">=</span><span class="s2">&#34;&lt;stage&gt;@</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span>
+</span></span></code></pre></div><p>A manual gate that is always rubber-stamped is theatre — it earns its keep when the operator actually checks the stage&rsquo;s behavior (in a later release, paired with promotion analysis) before promoting.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/promotion" term="promotion" label="promotion"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">BudgetExhausted</title><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/updatedeferred/?utm_source=atom_feed" rel="related" type="text/html" title="UpdateDeferred"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><id>https://stageset.projects.metio.wtf/runbooks/budgetexhausted/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A rollout is frozen because the service is out of its SLO error budget.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=BudgetExhausted</code> (or, for an already-deployed StageSet, <code>READY=True</code> with a <code>status.budgetFreeze</code> and the message prefixed <code>Deployed;</code>). <code>status.budgetFreeze</code> records the last observed remaining budget, the freeze and resume thresholds, and when the freeze began.</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is the <a href="/gating/error-budget/">error-budget freeze</a>
+ working as configured. The metric source named in <code>spec.errorBudget.source</code> returned a remaining-budget value below <code>freezeThreshold</code>, so new-revision rollouts are held until the budget recovers. This is the Google SRE error-budget policy: when the budget is spent, stop shipping feature changes until reliability recovers.</p>
+<p>The freeze holds only new-revision rollouts. Drift on the current revision keeps being corrected — a frozen service still has its declared state enforced — and the freeze self-resumes once the remaining budget reaches <code>resumeThreshold</code>.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.budgetFreeze}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.errorBudget}&#39;</span>
+</span></span></code></pre></div><p>Compare <code>status.budgetFreeze.remaining</code> against <code>freezeThreshold</code> / <code>resumeThreshold</code>. Confirm the source query returns what you expect — a value that never matches reality points at a wrong query (the <code>stageset_budget_remaining</code> metric carries the same number). A <em>calendar</em> budget source snaps back to full at the period boundary and unfreezes instantly; a <em>rolling</em> source recovers gradually.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Usually none — the rollout resumes on its own once the budget recovers. To ship a reliability or security fix while still out of budget (the policy&rsquo;s explicit exemption), break the glass once:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile &lt;name&gt; --namespace &lt;namespace&gt; --budget-override
+</span></span></code></pre></div><p>That applies the held rollout a single time without disabling the gate. To change the policy, adjust <code>freezeThreshold</code> / <code>resumeThreshold</code>, or set <code>spec.errorBudget.dryRun: true</code> to observe what <em>would</em> freeze without holding anything while you tune the query.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/error-budget" term="error-budget" label="error-budget"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">BudgetSourceUnavailable</title><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A metric source for an error-budget freeze or a promotion analysis could not be read.</blockquote><h2 id="symptom">Symptom</h2>
+<p>A <code>BudgetSourceUnavailable</code> Warning event, the <code>stageset_metric_source_errors_total</code> counter rising, and — when a gate&rsquo;s <code>onSourceError</code> is <code>Hold</code> — <code>READY=False</code>, <code>REASON=BudgetSourceUnavailable</code>. With <code>onSourceError: Allow</code> the rollout proceeds and only the event and metric fire, so the condition may not show the reason.</p>
+<h2 id="cause">Cause</h2>
+<p>A metric source (the <a href="/gating/error-budget/">error-budget freeze</a>
+ or a <a href="/gating/stage-promotion/">promotion analysis</a>
+ check) was unreachable or returned no usable scalar: the Prometheus endpoint was down or returned a non-2xx, the query evaluated to an error, an empty or multi-sample vector, or <code>NaN</code> (the shape a wrong query takes). This is treated as <em>transient</em> — the controller keeps retrying.</p>
+<p>What happens to the rollout depends on the gate&rsquo;s <code>onSourceError</code>:</p>
+<ul>
+<li>The <strong>error-budget freeze</strong> defaults to <code>Allow</code> (fail-open): blocking it would stop every deploy, including the hotfix you need during the very outage that took the source down.</li>
+<li>A <strong>promotion analysis</strong> defaults to <code>Hold</code> (fail-closed): holding only parks the rollout at the current healthy stage, so it is safe to refuse to advance while behavior can&rsquo;t be verified.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;   <span class="c1"># the event names the source error</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages[*].promotionState.lastAnalysis}&#39;</span>
+</span></span></code></pre></div><p>Check the address and query in <code>spec.errorBudget.source</code> / <code>spec.stages[].promotion.analysis.checks[].source</code>. From a pod in the namespace, confirm the Prometheus endpoint is reachable and the query returns a single scalar:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">curl -s <span class="s1">&#39;&lt;address&gt;/api/v1/query?query=&lt;query&gt;&#39;</span>
+</span></span></code></pre></div><p>A <code>NaN</code>/empty result means the query&rsquo;s labels match nothing — fix the query, not the gate. A connection failure points at NetworkPolicy or a wrong address. If a bearer token is configured, confirm the referenced Secret has a non-empty <code>token</code> key.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Fix the source so the query returns a single numeric scalar. While debugging a freeze, <code>spec.errorBudget.dryRun: true</code> records what would happen without holding anything. If a service is genuinely safety-critical and you want it to stop deploying when its SLO source is down, set <code>spec.errorBudget.onSourceError: Hold</code> (accepting that a source outage then blocks its deploys).</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/error-budget" term="error-budget" label="error-budget"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Controller pod down</title><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/runbooks/controller-pod-down/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stageset-controller pod has been NotReady for the alert window.</blockquote><h2 id="symptom">Symptom</h2>
+<p>A <code>stageset-controller</code> pod is <code>NotReady</code>; the <code>StageSetControllerPodDown</code> alert
+fires. While no replica is Ready, StageSets are not reconciled and the
+<a href="https://kubernetes.io/docs/">Kubernetes</a>
+ admission webhook may reject <code>StageSet</code>
+writes (<code>failurePolicy: Fail</code>).</p>
+<h2 id="cause">Cause</h2>
+<ul>
+<li>a crash-looping container (bad config flag, missing RBAC, panic),</li>
+<li>the node draining or out of resources,</li>
+<li>a failing readiness probe (<code>/readyz</code> on <code>--health-probe-bind-address</code>),</li>
+<li>the leader-election lease unobtainable.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system get pods --selector app.kubernetes.io/name<span class="o">=</span>stageset-controller
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system describe pod &lt;pod&gt;
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system logs &lt;pod&gt; --previous --tail<span class="o">=</span><span class="m">200</span>
+</span></span></code></pre></div><p>Look for flag-parse errors at startup, RBAC <code>Forbidden</code> on the controller&rsquo;s own
+<code>ServiceAccount</code>, or OOMKills.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Fix the surfaced cause (correct the flag/values, grant the missing controller
+RBAC, raise resource limits).</li>
+<li>Run more than one replica with leader election so a single pod failure doesn&rsquo;t
+stop reconciliation — see <a href="/running/production/#high-availability">production</a>
+.</li>
+<li>If admission is blocking writes during the outage and you must unblock urgently,
+scope or relax the webhook <code>failurePolicy</code>, then restore it once the controller
+is healthy.</li>
+</ul>
+<p>See <a href="/running/operations/">operations</a>
+ for the full alert set and its thresholds.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">DependencyNotReady</title><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="related" type="text/html" title="StageFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/stalled/?utm_source=atom_feed" rel="related" type="text/html" title="Stalled"/><id>https://stageset.projects.metio.wtf/runbooks/dependencynotready/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-17T10:56:50+02:00</updated><content type="html"><![CDATA[<blockquote>A StageSet named in spec.dependsOn is not yet Ready.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=DependencyNotReady</code>. Transient: the controller requeues at <code>spec.retryInterval</code> (or <code>spec.interval</code>).</p>
+<h2 id="cause">Cause</h2>
+<p>A StageSet listed in <code>spec.dependsOn</code> is not <code>Ready</code> at its observed generation, so this StageSet holds before doing any work. Semantics match kustomize-controller: a dependency is satisfied only when its <code>Ready=True</code> <strong>and</strong> its <code>status.observedGeneration</code> equals its current generation (so a freshly-edited dependency mid-reconcile does not count as ready).</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;            <span class="c1"># Message names the dependency</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;dependency&gt;           <span class="c1"># is it Ready?</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;dependency&gt;      <span class="c1"># why not?</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>Resolve the dependency&rsquo;s own Ready condition first (follow its runbook). Once it reports <code>Ready=True</code> at its current generation, this StageSet proceeds on the next reconcile. If the dependency is intentionally <a href="/runbooks/suspended/">suspended</a>
+, this StageSet waits indefinitely by design — remove the <code>dependsOn</code> entry or resume the dependency.</p>
+<p>A <code>dependsOn</code> <strong>cycle</strong> is reported as <a href="/runbooks/stalled/"><code>Stalled</code></a>
+, not this reason.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">DowngradeRequiresMigration</title><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidversion/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidVersion"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><id>https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The desired version is below the deployed version and a migration boundary blocks the downgrade.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=DowngradeRequiresMigration</code>. Terminal: the run does not requeue until the desired version is at or above <code>status.version</code>.</p>
+<h2 id="cause">Cause</h2>
+<p>The desired version (<code>spec.version</code>) is <strong>lower</strong> than the version the controller last recorded as deployed (<code>status.version</code>). Downgrades are refused by default: <a href="/gating/versioned-migrations/">migrations</a>
+ are forward-only action ladders, and replaying upgrade migrations in reverse is how data gets destroyed. The controller does not silently run a downgrade.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.version}&#39;</span>   <span class="c1"># deployed</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># desired: read spec.version.value, or the version file the artifact carries</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>Pick the intended direction:</p>
+<ul>
+<li><strong>You did not mean to downgrade</strong> (e.g. a source revert pulled an older version file): roll the source forward again so the desired version is <code>&gt;=</code> the deployed version. The StageSet converges normally.</li>
+<li><strong>You genuinely need to go back</strong>: a downgrade is an operational decision with potential data loss. Perform it deliberately — restore from backup or apply an explicit down-migration out of band — then set <code>status.version</code> to match. There is no automatic reverse-migration path by design.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">InvalidSpec</title><link href="https://stageset.projects.metio.wtf/runbooks/invalidspec/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><id>https://stageset.projects.metio.wtf/runbooks/invalidspec/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The StageSet spec is invalid; the Message names the offending field or action.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=InvalidSpec</code>. The Message names the offending field or action. Terminal: the controller does not requeue until the spec changes.</p>
+<h2 id="cause">Cause</h2>
+<p>The spec failed validation that the CRD schema cannot express cheaply, normally one of:</p>
+<ul>
+<li>an <strong>action sets zero or more than one verb</strong> — each action must set exactly one of <code>patch</code>, <code>http</code>, <code>wait</code>, <code>job</code>, <code>delete</code>, <code>apply</code> (see <a href="/defining-a-release/actions/">actions</a>
+);</li>
+<li><strong><code>spec.migrations</code> without <code>spec.version</code></strong>, or a migration anchored to a stage name that does not exist (see <a href="/gating/versioned-migrations/">versioned migrations</a>
+);</li>
+<li><strong><code>spec.version</code> does not name exactly one source</strong> — set one of <code>value</code>, <code>fromObject</code>, or <code>fromArtifact</code>;</li>
+<li><strong><code>spec.decryption.provider</code> is not <code>sops</code></strong>, or a <code>secretRef</code> is given without a <code>name</code> (see <a href="/security/encryption/">encryption</a>
+);</li>
+<li>an <strong>invalid update window</strong> — a malformed <code>schedule</code>, <code>duration</code>, or <code>timeZone</code> (see <a href="/gating/update-windows/">update windows</a>
+).</li>
+</ul>
+<p>The admission webhook normally rejects these at write time; seeing this on the object means the webhook was bypassed or disabled and the reconciler caught it.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;
+</span></span></code></pre></div><p>Read the Message — it names the stage, action, or field.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Fix the spec per the Message:</p>
+<ul>
+<li>give each action exactly one verb;</li>
+<li>set <code>spec.version</code> (to one of <code>value</code>/<code>fromObject</code>/<code>fromArtifact</code>) whenever <code>spec.migrations</code> is present, and anchor each migration to a real stage;</li>
+<li>set exactly one <code>spec.version</code> source;</li>
+<li>use <code>provider: sops</code> for <code>spec.decryption</code>, with a named <code>secretRef</code> when one is given;</li>
+<li>correct any malformed update window (<code>schedule</code>, <code>duration</code>, <code>timeZone</code>).</li>
+</ul>
+<p>If the webhook should have caught this, confirm the <code>ValidatingWebhookConfiguration</code> is installed and its service is reachable.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/><category scheme="https://stageset.projects.metio.wtf/tags/api" term="api" label="api"/></entry><entry><title type="html">InvalidVersion</title><link href="https://stageset.projects.metio.wtf/runbooks/invalidversion/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><id>https://stageset.projects.metio.wtf/runbooks/invalidversion/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A version source or value could not be parsed as semver.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=InvalidVersion</code>. Terminal: the run does not requeue until the spec or the version file is fixed.</p>
+<h2 id="cause">Cause</h2>
+<p>A version <code>spec.version</code> (or a migration boundary) could not be resolved to a parseable <a href="https://semver.org/">semver</a>
+. The controller refuses to proceed rather than deploy a half-versioned system — a system whose recorded version is unknown is worse for migrations than an unversioned one. The Message names which input failed. By version source:</p>
+<ul>
+<li><strong><code>spec.version.value</code></strong> — the inline string is not a semver.</li>
+<li><strong><code>spec.version.fromObject</code></strong> — the named stage doesn&rsquo;t exist; the object (<code>kind</code>/<code>name</code>) isn&rsquo;t in the stage&rsquo;s rendered manifests; the <code>fieldPath</code> is invalid JSONPath or resolves to empty; or the value read (by default the <code>app.kubernetes.io/version</code> label) is missing or not a semver.</li>
+<li><strong><code>spec.version.fromArtifact</code></strong> — the named stage doesn&rsquo;t exist; the file at <code>path</code> is missing from the stage&rsquo;s artifact, empty, or doesn&rsquo;t parse as a semver.</li>
+<li><strong><code>spec.version</code> sets none</strong> of <code>value</code>/<code>fromObject</code>/<code>fromArtifact</code>.</li>
+<li>A <strong>migration&rsquo;s <code>to</code> or <code>from</code></strong> is not a valid semver.</li>
+<li>The recorded <strong><code>status.version</code></strong> is not a semver (corrupted status).</li>
+</ul>
+<p>Common triggers across all of them: a <code>v</code> prefix or trailing whitespace the parser rejects, or non-semver text (e.g. a Git SHA or a <code>latest</code> tag) where a version was expected.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;   <span class="c1"># Message names the failing input</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.version}{&#34;\n&#34;}&#39;</span>
+</span></span></code></pre></div><p>Then, depending on which source the Message names:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># fromObject: confirm the field carries a bare semver on the rendered object</span>
+</span></span><span class="line"><span class="cl">stagesetctl --namespace &lt;namespace&gt; build &lt;name&gt; --stage &lt;stage&gt; <span class="p">|</span> grep -i version
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># fromArtifact: confirm the file exists and contains only a semver (e.g. 2.1.0)</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># inspect the resolved artifact for the stage named in the Message</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>Match the failing input in the Message:</p>
+<ul>
+<li><strong><code>value</code></strong> — correct the inline string to a bare semver (<code>2.1.0</code>, not <code>v2.1.0</code>).</li>
+<li><strong><code>fromObject</code></strong> — fix the <code>stage</code>/<code>kind</code>/<code>name</code> to point at a real rendered object, fix the <code>fieldPath</code>, and ensure the field (default: <code>app.kubernetes.io/version</code> label) carries a semver.</li>
+<li><strong><code>fromArtifact</code></strong> — fix <code>path</code>/<code>stage</code> to the real version file, or correct the file to a bare semver.</li>
+<li><strong>migration <code>to</code>/<code>from</code></strong> — correct the boundary to a valid semver.</li>
+<li>If you don&rsquo;t need <a href="/gating/versioned-migrations/">versioned migrations</a>
+, remove <code>spec.version</code> entirely (this disables versioning and migrations).</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationArtifactInvalid</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A migration ladder sourced via spec.migrationsSourceRef could not be parsed or failed content validation; the version is held back until the artifact is fixed.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationArtifactInvalid</code>. The Message names the file and
+the parse or validation error. <code>status.version</code> is <strong>not</strong> advanced — the
+transition is held until the artifact is fixed and republished.</p>
+<h2 id="cause">Cause</h2>
+<p>The StageSet sources its migration ladder from <code>spec.migrationsSourceRef</code>, and
+the fetched artifact could not be turned into a valid ladder. Each
+<code>.yaml</code>/<code>.yml</code>/<code>.json</code> file in the artifact (under the optional <code>path</code>) must be a
+YAML or JSON document that is either a list of migrations or a single migration.
+Parsing is strict — a misspelled field is rejected rather than silently dropped,
+because a destructive ladder must not run a half-understood definition.</p>
+<p>Common causes:</p>
+<ul>
+<li>The artifact contains no <code>.yaml</code>/<code>.yml</code>/<code>.json</code> files (wrong <code>path</code>, or the
+source published something else).</li>
+<li>Malformed YAML/JSON, or a misspelled field (<code>acions:</code> for <code>actions:</code>).</li>
+<li>A migration with an empty <code>name</code> or <code>to</code>, an action that sets zero or more than
+one verb, an action with an empty or duplicate name, or two migrations sharing
+a name (names are the idempotency-ledger key and must be unique).</li>
+</ul>
+<p>This validates the same invariants the admission webhook enforces for inline
+<code>spec.migrations</code>; for a sourced ladder they can only be checked at fetch time,
+not at <code>kubectl apply</code>.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>
+<p>Fix the offending file in the source repository/registry and republish the
+artifact. Validate it the same way the controller does before publishing — the
+ladder format is one migration, or a list of them, per file:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">add-orders-table</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre         </span><span class="w"> </span><span class="c"># a stage name or a stage&#39;s migrationAnchor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">create-table</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apply</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="l">... }</span><span class="w">
+</span></span></span></code></pre></div></li>
+<li>
+<p>Check <code>spec.migrationsSourceRef.path</code> points at the file or directory that
+actually holds the ladder.</p>
+</li>
+</ul>
+<p>The condition clears and the version advances on the next reconcile once the
+republished artifact parses and validates.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationCoverageMissing</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidversion/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidVersion"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><id>https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A major-version transition has no migration covering it, and requireMigrationCoverage is set; the version is held back.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationCoverageMissing</code>. The Message names the boundary
+(e.g. <code>1.4.0 → 2.0.0</code>). <code>status.version</code> is <strong>not</strong> advanced.</p>
+<h2 id="cause">Cause</h2>
+<p><code>spec.version.requireMigrationCoverage</code> is set, and the version transition crosses
+a <strong>major-version boundary</strong> (the major component increased) with <strong>no migration</strong>
+selected for it. A major bump usually implies breaking changes that need a
+migration, so rather than advance silently the controller fails closed and asks
+for an explicit decision.</p>
+<p>Minor and patch transitions are never gated by this — only a major boundary.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Either add a migration that covers the boundary:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">upgrade-to-2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">            </span><span class="c"># covers the 1.x → 2.0.0 major boundary</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&gt;=1.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="l">... ]</span><span class="w">
+</span></span></span></code></pre></div><p>…or, if the major bump genuinely needs no migration, drop
+<code>spec.version.requireMigrationCoverage</code> (or correct the version if the bump was
+unintended). The condition clears on the next reconcile once a covering migration
+exists or the flag is removed.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationDirty</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><id>https://stageset.projects.metio.wtf/runbooks/migrationdirty/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A migration failed repeatedly, so the controller halted auto-retry; clear the halt with a manual reconcile once the cause is fixed.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationDirty</code>. The Message names the migration that keeps
+failing. The controller has <strong>stopped auto-retrying</strong> — there is no backoff
+requeue — and <code>status.version</code> is not advanced. <code>status.migrationFailureCount</code> is
+at the threshold.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration failed repeatedly (the consecutive-failure threshold). Rather than
+keep re-attempting destructive work against an uncertain state, the controller
+halts and waits for a human — the golang-migrate &ldquo;dirty&rdquo; / Flyway &ldquo;repair&rdquo; model.
+A persistently-failing destructive migration usually means something needs
+fixing by hand (a bad action, a half-applied change, missing RBAC, a broken
+target) that retrying cannot resolve.</p>
+<h2 id="remediation">Remediation</h2>
+<ol>
+<li>
+<p>Diagnose the failure from the Message and the migration&rsquo;s Events; the earlier
+failures surfaced as <a href="/runbooks/migrationfailed/"><code>MigrationFailed</code></a>
+.</p>
+</li>
+<li>
+<p>Fix the underlying cause. If a destructive action partially applied, reconcile
+the real-world state by hand so the migration&rsquo;s actions can complete (the
+per-action ledger will skip the actions that already succeeded).</p>
+</li>
+<li>
+<p>Clear the halt with a manual reconcile, which resets the failure count and
+re-attempts the migration once:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">flux reconcile <span class="nb">source</span> ... <span class="o">&amp;&amp;</span> kubectl annotate stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span> --overwrite
+</span></span></code></pre></div></li>
+</ol>
+<p>The transition also resets the count to zero once it completes successfully.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationFailed</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><id>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A migration&rsquo;s action failed; the run halts at that stage and retries with backoff, skipping already-completed actions.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationFailed</code>. The Message names the migration and the
+failed action. The run halts at the anchoring stage; <code>status.version</code> is not
+advanced. The controller retries with backoff.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration anchored before a stage ran an action that failed (a <code>job</code> that
+errored, an <code>http</code> call that returned an error, a <code>wait</code> that timed out, an
+<code>apply</code>/<code>patch</code>/<code>delete</code> the apiserver rejected). This reason is distinct from
+<code>StageFailed</code> so you can tell a migration failure from the stage&rsquo;s own apply.</p>
+<p>Retries are safe for the actions that already completed: the per-action ledger
+(<code>status.executedMigrationActions</code>, keyed by migration content digest) records
+each finished action, so a retry resumes at the failed action rather than
+re-running destructive work from the top.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Read the Message and the migration&rsquo;s Events (<code>MigrationStarted</code> /
+<code>MigrationFailed</code>) to find the failed action and its error.</li>
+<li>Fix the underlying cause (the target object, RBAC for the action, the endpoint
+an <code>http</code> action calls, the image a <code>job</code> runs).</li>
+<li>The migration re-attempts automatically on the next retry. After repeated
+failures it escalates to <a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+, which halts
+auto-retry — see that page for the manual-recovery step.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationSourceNotPinned</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A sourced migration ladder&rsquo;s source is pinned to a mutable tag/branch instead of an immutable digest/commit, and pinning is required.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationSourceNotPinned</code>. The Message says the migrations
+source is pinned to a mutable tag/branch and <code>--require-pinned-migration-sources</code>
+is set. <code>status.version</code> is <strong>not</strong> advanced — the migration ladder does not run.</p>
+<p>When the flag is <em>off</em>, this does not block: the ladder runs, but a
+<code>Warning MigrationSourceMutable</code> event is emitted so the auto-rollout risk stays
+visible.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration ladder sourced from <code>spec.migrationsSourceRef</code> runs remote-authored,
+destructive instructions. If the source is pinned to a <strong>mutable</strong> revision — an
+<code>OCIRepository</code> <code>spec.ref.tag</code>/<code>spec.ref.semver</code>, or a <code>GitRepository</code>
+<code>spec.ref.branch</code>/<code>tag</code>/<code>semver</code> — an upstream overwrite of that tag/branch
+silently changes what runs on the next source reconcile. An immutable pin
+(<code>OCIRepository</code> <code>spec.ref.digest</code> or <code>GitRepository</code> <code>spec.ref.commit</code>) removes
+that auto-rollout window.</p>
+<p>A <code>Bucket</code> source is never pinned; an in-cluster <code>ExternalArtifact</code> is exempt
+(its producer owns the revision).</p>
+<h2 id="remediation">Remediation</h2>
+<p>Pin the source to an immutable revision. For an <code>OCIRepository</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">digest: sha256:abc123...   # instead of tag</span><span class="p">:</span><span class="w"> </span><span class="l">latest</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># ...</span><span class="w">
+</span></span></span></code></pre></div><p>For a <code>GitRepository</code>, set <code>spec.ref.commit</code>. To roll new migrations, bump the
+digest/commit in the source — a deliberate, reviewable change — rather than
+overwriting a tag.</p>
+<p><code>--require-pinned-migration-sources</code> is off by default but recommended in
+production for destructive ladders.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationSourceNotVerified</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A sourced migration ladder&rsquo;s source is not signature-verified; the destructive ladder is refused until verification passes.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationSourceNotVerified</code>. The Message says either
+verification failed (<code>SourceVerified=False</code>) or that verification is required but
+not configured. <code>status.version</code> is <strong>not</strong> advanced — the migration ladder does
+not run.</p>
+<h2 id="cause">Cause</h2>
+<p>Sourcing a migration ladder from <code>spec.migrationsSourceRef</code> runs remote-authored,
+destructive instructions, so the controller can require they be provenance-verified
+before executing. Verification state comes from the source CR&rsquo;s
+<code>status.conditions[SourceVerified]</code>, which Flux source-controller sets from the
+source&rsquo;s <code>spec.verify</code> (cosign or notation):</p>
+<ul>
+<li><strong><code>SourceVerified=False</code></strong> — the source configured <code>spec.verify</code>, but the
+artifact&rsquo;s signature did not pass. Always refused, regardless of flags — a
+tampered or unsigned-by-the-expected-identity artifact must not run.</li>
+<li><strong>No <code>SourceVerified</code> condition + <code>--require-verified-migration-sources</code></strong> — the
+controller requires verification, but the source configures none.</li>
+</ul>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>
+<p>Configure signature verification on the source. For an <code>OCIRepository</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">verify</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">cosign</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchOIDCIdentity</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subject</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github.com/your-org/.+$</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># ...</span><span class="w">
+</span></span></span></code></pre></div><p>Once source-controller sets <code>SourceVerified=True</code>, the ladder runs on the next
+reconcile.</p>
+</li>
+<li>
+<p>If verification genuinely failed, the published artifact is not signed by the
+expected identity — investigate the publishing pipeline before trusting it; do
+not work around it by disabling verification for a destructive ladder.</p>
+</li>
+<li>
+<p><code>--require-verified-migration-sources</code> is off by default but strongly
+recommended in production; a source whose verification <em>fails</em> is refused even
+with the flag off.</p>
+</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">MigrationStageNotFound</title><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><id>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A version-selected migration anchors to a stage that doesn&rsquo;t exist in this StageSet; the version is held back rather than skipping the migration.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=MigrationStageNotFound</code>. The Message names the migration
+and the anchor value it could not resolve. <code>status.version</code> is <strong>not</strong> advanced —
+the transition is held until the anchor resolves.</p>
+<h2 id="cause">Cause</h2>
+<p>A migration that the version transition selected (<code>current &lt; to &lt;= desired</code>)
+anchors to a stage that this StageSet does not have. A migration&rsquo;s <code>stage</code> value
+resolves to the stage whose <code>migrationAnchor</code> (preferred) or <code>name</code> equals it;
+an empty <code>stage</code> anchors before the first stage. If none matches, the controller
+<strong>fails closed</strong> instead of silently never running the migration — the failure
+mode a shared, late-binding ladder must not have (a <code>DROP</code> that quietly never
+runs while the app advances to a schema that needs it).</p>
+<p>Common causes:</p>
+<ul>
+<li>A <strong>shared ladder</strong> (sourced via <code>spec.migrationsSourceRef</code>) anchors to a role
+like <code>db-pre</code>, but this StageSet&rsquo;s stages don&rsquo;t declare
+<code>migrationAnchor: db-pre</code>.</li>
+<li>A typo in a migration&rsquo;s <code>stage</code> value, or a stage was renamed without updating
+the anchor.</li>
+</ul>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>
+<p>If the migration should run before a particular stage, declare that role on
+the stage:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prepare</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">migrationAnchor: db-pre   # now `stage</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre` migrations anchor here</span><span class="w">
+</span></span></span></code></pre></div></li>
+<li>
+<p>Or point the migration&rsquo;s <code>stage</code> at an existing stage <code>name</code> (inline ladders),
+or leave it empty to anchor before the first stage.</p>
+</li>
+<li>
+<p>For a shared ladder, ensure every consuming StageSet declares the
+<code>migrationAnchor</code> roles the ladder references — that&rsquo;s how one ladder stays
+portable across StageSets whose stage names differ.</p>
+</li>
+</ul>
+<p>The condition clears and the version advances on the next reconcile once the
+anchor resolves.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">PreviousRevisionUnavailable</title><link href="https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><id>https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>rollbackOnFailure is set but the last-good revisions could not be restored.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=PreviousRevisionUnavailable</code>. The StageSet has <code>spec.rollbackOnFailure</code> set, a run failed, and the controller could not restore the last-good revisions.</p>
+<h2 id="cause">Cause</h2>
+<p><a href="/gating/rollback/"><code>rollbackOnFailure</code></a>
+ restores the previously-applied artifact revisions by re-fetching their recorded URLs and verifying their digests. That only works while the <strong>producer still retains</strong> those revisions. This reason means a revision the rollback needs is no longer fetchable — the producer garbage-collected it.</p>
+<p>Rollback is best-effort by contract: it works exactly when producers retain. Common triggers:</p>
+<ul>
+<li>a JaaS <code>JsonnetSnippet</code> with <code>spec.history: 1</code> (the default) — only the current revision is kept, so there is no previous revision to roll back to</li>
+<li>a stock source-controller source, which retains only the current revision</li>
+<li>the previous revision aged out of the producer&rsquo;s retention window</li>
+<li>the run used <a href="/security/encryption/">SOPS decryption</a>
+ and the key Secret was rotated
+or deleted — rollback re-runs decryption rather than restoring plaintext, so it
+fails closed when the key is gone, even for a revision the rollback store holds</li>
+</ul>
+<p>A configured external rollback store changes the failure shape rather than masking it:</p>
+<ul>
+<li>a <strong>transient store outage</strong> (an S3 5xx, a connection reset) is <em>not</em> reported as <code>PreviousRevisionUnavailable</code>. The controller emits a <code>RollbackStoreFailed</code> Warning Event and backs off so the rollback retries once the store recovers — it never silently re-fetches the producer, which could have already garbage-collected the revision and turned a recoverable blip into a false terminal.</li>
+<li>a <strong>corrupt snapshot</strong> in the store (the object decodes to garbage) emits a <code>RollbackStoreFailed</code> Warning Event and falls back to a producer re-fetch. If the producer still retains the revision, rollback succeeds; if not, this terminal reason is set.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;   <span class="c1"># Message names the stage + revision</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get events --field-selector <span class="nv">reason</span><span class="o">=</span>RollbackStoreFailed
+</span></span></code></pre></div><p>Check the producer&rsquo;s retention. For a JaaS snippet:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get jsonnetsnippet &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.history}&#39;</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>The cluster is left at the partially-applied failed state; resolve the underlying failure (see the failing stage&rsquo;s own runbook) and fix forward — the StageSet converges once the desired revision applies cleanly.</p>
+<p>To make rollback reliable in future, either:</p>
+<ul>
+<li><strong>Increase producer retention</strong> so at least one previous revision is always fetchable — JaaS snippets used with <code>rollbackOnFailure</code> should set <code>spec.history: 2</code> (or more); sources that retain only the current revision cannot support the re-fetch path, so rely on source revert instead.</li>
+<li><strong>Configure the external rollback store</strong> — a filesystem/RWX PVC (<code>--rollback-store-path</code>) or an S3 bucket (<code>--rollback-store-s3-*</code>); see <a href="/running/operations/">operations</a>
+. When the controller pushes rendered output to a store it owns, rollback is bit-exact and <strong>independent of producer retention</strong> — this <code>PreviousRevisionUnavailable</code> state cannot occur for runs the store holds, unless the run used SOPS and the key Secret is no longer readable (see the SOPS trigger above).</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/rollback" term="rollback" label="rollback"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Producer watch engagement failing</title><link href="https://stageset.projects.metio.wtf/runbooks/watch-engagement/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="related" type="text/html" title="ResolveFailed"/><id>https://stageset.projects.metio.wtf/runbooks/watch-engagement/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-18T20:07:19+02:00</updated><content type="html"><![CDATA[<blockquote>A dynamic watch on a producer source kind failed to engage, so StageSets referencing that kind no longer re-trigger on the producer&rsquo;s upstream changes.</blockquote><p><code>stageset_watch_engagement_failures_total{gvk=...}</code> has increased above the
+per-hour threshold for the alert window, and the named producer kind stays
+unwatched. The controller engages producer watches lazily: the first time a
+StageSet names a producer kind in a stage&rsquo;s <code>sourceRef</code>, <code>engageProducerWatch</code>
+adds a dynamic <code>source.Kind</code> watch (routed through <code>mapProducer</code>) so a change on
+that producer re-triggers the referencing StageSets. <code>ExternalArtifact</code> is
+watched statically; the dynamic watches cover producer kinds such as
+<code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>, and operator-defined producers like a
+JaaS <code>JsonnetSnippet</code>.</p>
+<p>While engagement fails, StageSets referencing that kind sit at their
+last-resolved revision and only catch up on the periodic retry. There is no
+per-StageSet status signal.</p>
+<h2 id="symptom">Symptom</h2>
+<ul>
+<li><code>StageSetWatchEngagementFailing</code> alert is firing with <code>gvk</code> labelling the
+affected producer kind.</li>
+<li>StageSets whose stages reference that kind don&rsquo;t react to upstream producer
+changes promptly — they reconcile only on <code>retryInterval</code>, not on the
+producer&rsquo;s status flip.</li>
+<li>The producer&rsquo;s source CRs (<code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>,
+<code>ExternalArtifact</code>) show recent <code>status.artifact.revision</code> changes that the
+StageSets aren&rsquo;t picking up between periodic reconciles.</li>
+</ul>
+<h2 id="cause">Cause</h2>
+<p>A watch engagement can fail for two reasons:</p>
+<ul>
+<li><strong>Transient cache reconnect.</strong> controller-runtime&rsquo;s shared cache can drop and
+re-establish its informer connection under load; a <code>Controller.Watch</code> call
+during that window can fail once. The controller does not record the GVK as
+watched on failure, so a later reconcile re-attempts and the watch engages on
+its own. A single blip at startup or during a cache reconnect is expected.</li>
+<li><strong>Missing ClusterRole verb on the producer kind.</strong> If the controller&rsquo;s
+ClusterRole lacks <code>get</code>/<code>list</code>/<code>watch</code> on the producer kind, every engagement
+attempt fails and the watch never engages — a stuck watch that the periodic
+reconcile cannot heal.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<h3 id="step-1--confirm-the-producer-crd-is-installed-and-established">Step 1 — confirm the producer CRD is installed and Established</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl get crd &lt;plural&gt;.&lt;group&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions[?(@.type==&#34;Established&#34;)].status}{&#34;\n&#34;}&#39;</span>
+</span></span></code></pre></div><p>Expect <code>True</code>. If the CRD is not installed the controller is correct to skip the
+watch; install the producer&rsquo;s controller (Flux source-controller, JaaS, …).</p>
+<h3 id="step-2--check-the-controllers-rbac-on-the-producer-kind">Step 2 — check the controller&rsquo;s RBAC on the producer kind</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl auth can-i watch &lt;plural&gt;.&lt;group&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --as<span class="o">=</span>system:serviceaccount:&lt;ns&gt;:&lt;controller-sa&gt;
+</span></span><span class="line"><span class="cl">kubectl auth can-i list &lt;plural&gt;.&lt;group&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --as<span class="o">=</span>system:serviceaccount:&lt;ns&gt;:&lt;controller-sa&gt;
+</span></span></code></pre></div><p>If either is &ldquo;no&rdquo;, the chart&rsquo;s controller ClusterRole is missing the
+<code>get/list/watch</code> verbs on this kind. Grant them.</p>
+<h3 id="step-3--inspect-controller-runtime-cache-state">Step 3 — inspect controller-runtime cache state</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; logs deploy/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> grep -E <span class="s1">&#39;watch|cache|forbidden&#39;</span> <span class="p">|</span> tail -20
+</span></span></code></pre></div><p>Look for <code>cache reconnect</code>, <code>informer failed</code>, or <code>Watch failed: forbidden</code>. A
+transient reconnect trips engagement once and heals on the next reconcile;
+sustained <code>forbidden</code> points at RBAC.</p>
+<h2 id="remediation">Remediation</h2>
+<ol>
+<li>
+<p><strong>Fix the RBAC / verb</strong> issue identified above so the controller can watch
+the producer kind.</p>
+</li>
+<li>
+<p><strong>Roll the controller pod</strong> to force a fresh setup pass and re-engage the
+watch on the next reconcile that touches a referencing StageSet:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; rollout restart deployment stageset-controller
+</span></span></code></pre></div></li>
+<li>
+<p><strong>Verify</strong> the counter stops increasing and the alert clears.</p>
+</li>
+</ol>
+<h2 id="when-the-alert-is-noisy">When the alert is noisy</h2>
+<p>If <code>stageset_watch_engagement_failures_total</code> ticks once during startup or a
+cache reconnect but never again, that is the expected self-healing behavior: the
+GVK was not recorded as watched, so the next reconcile re-engaged it. Raise
+<code>metrics.prometheusRule.thresholds.watchEngagementFailuresPerHour</code> if the blip is
+noisy enough to page.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry><entry><title type="html">PromotionBlocked</title><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/runbooks/promotionblocked/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage&rsquo;s promotion analysis breached its thresholds, so the rollout will not advance past it.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=PromotionBlocked</code>. <code>status.stages[].promotionState</code> shows <code>phase: Blocked</code>, an <code>analysisFailures</code> count, and <code>lastAnalysis</code> with each check&rsquo;s observed value and verdict. When the stage&rsquo;s <code>onFailure</code> is <code>Rollback</code>, a Warning event records the revert and <code>promotionState.abortedRevision</code> names the revision that was rolled back.</p>
+<h2 id="cause">Cause</h2>
+<p>A <a href="/gating/stage-promotion/">promotion analysis</a>
+ on the named stage failed: one or more checks read a metric outside its threshold for more than <code>failureLimit</code> consecutive evaluations. The stage applied and became Ready, but its <em>observed behavior</em> — error rate, latency, SLO burn, whatever the checks measure — is out of bounds, so the rollout is not advanced to the next stage.</p>
+<p><code>onFailure</code> decides what happened:</p>
+<ul>
+<li><code>Hold</code> (default): the stage stays applied but not promoted, surfacing why.</li>
+<li><code>Rollback</code>: the stage was reverted to its last-known-good revision (scoped to this stage; earlier promoted stages are untouched) and the failing revision is parked so it is not re-applied each reconcile.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages[*].promotionState.lastAnalysis}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.stages[*].promotion.analysis}&#39;</span>
+</span></span></code></pre></div><p><code>lastAnalysis.checks[]</code> shows each check&rsquo;s observed <code>value</code>, whether it was <code>ok</code>, and any source <code>error</code>. Confirm whether the metric reflects a real regression in the new revision or a too-tight threshold / wrong query. The <code>stageset_stage_promotion_blocked</code> gauge is <code>1</code> for a blocked stage.</p>
+<h2 id="remediation">Remediation</h2>
+<p>If the new revision is genuinely bad, fix it forward (push a corrected revision) — a new revision clears the failure count and re-runs the analysis. If the analysis itself is wrong (threshold too tight, query off), correct <code>spec.stages[].promotion.analysis</code> and re-reconcile. To accept the current revision despite the analysis (you have confirmed it is healthy), promote past the gate:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl promote &lt;name&gt; --namespace &lt;namespace&gt; --stage &lt;stage&gt;
+</span></span></code></pre></div><p>While tuning a new analysis, set <code>dryRun: true</code> on it so it records what <em>would</em> block without holding or rolling back anything.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/promotion" term="promotion" label="promotion"/><category scheme="https://stageset.projects.metio.wtf/tags/analysis" term="analysis" label="analysis"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">RBACDenied</title><link href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><id>https://stageset.projects.metio.wtf/runbooks/rbacdenied/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>An apiserver call the controller made — resolving a source, an impersonated apply, or a tenant get — failed with Forbidden or referenced a kind the apiserver does not know.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=RBACDenied</code>. The Message names the call that failed and appends the verbatim apiserver error:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; describe stageset &lt;name&gt;
+</span></span><span class="line"><span class="cl">...
+</span></span><span class="line"><span class="cl">Status:
+</span></span><span class="line"><span class="cl">  Conditions:
+</span></span><span class="line"><span class="cl">    Reason:  RBACDenied
+</span></span><span class="line"><span class="cl">    Status:  False
+</span></span><span class="line"><span class="cl">    Type:    Ready
+</span></span><span class="line"><span class="cl">    Message: stage &#34;deploy&#34; apply: RBAC denied apply — grant the missing verb to the tenant ServiceAccount ...
+</span></span></code></pre></div><p>The controller logs at error level and stops engaging backoff for this StageSet. The next reconcile happens only when the spec changes, a referenced source CR&rsquo;s status flips, or <code>spec.interval</code> ticks — so the workqueue isn&rsquo;t burning cycles on a permanently-failing call.</p>
+<h2 id="cause">Cause</h2>
+<p>The apiserver returned <code>Forbidden</code>, reported the resource kind is not registered (the CRD is not installed), or rejected the payload as schema-invalid. Three call sites surface this:</p>
+<ol>
+<li><strong>Source resolution.</strong> The controller (or the impersonated <code>spec.serviceAccountName</code>) lacks <code>get</code> / <code>list</code> on the source kind named by a stage&rsquo;s <code>sourceRef</code>, or the source-controller CRDs are not installed.</li>
+<li><strong>Connect to target cluster.</strong> Minting the tenant SA&rsquo;s TokenRequest token, or building the remote-cluster connection, was denied.</li>
+<li><strong>Apply.</strong> The impersonated tenant SA lacks <code>create</code> / <code>update</code> / <code>patch</code> on a resource the stage applies, or an admission webhook rejected the manifest.</li>
+</ol>
+<h2 id="diagnosis">Diagnosis</h2>
+<p><code>kubectl describe</code> shows the classified message with the verbatim apiserver error appended, so you can read off the SA, the verb it lacked, and the resource. Verify the SA&rsquo;s permissions:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;tenant-namespace&gt; get sa &lt;sa-name&gt;
+</span></span><span class="line"><span class="cl">kubectl auth can-i --as<span class="o">=</span>system:serviceaccount:&lt;tenant-namespace&gt;:&lt;sa-name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">    --namespace &lt;tenant-namespace&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">    &lt;verb&gt; &lt;resource&gt;
+</span></span></code></pre></div><p>For the missing-CRD variant:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl get crd <span class="p">|</span> grep -E <span class="s1">&#39;source.toolkit.fluxcd.io&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># If source-controller&#39;s CRDs are missing, install Flux:</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># https://fluxcd.io/flux/get-started/</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>Grant the missing verb to the controller&rsquo;s ClusterRole or to the tenant <code>ServiceAccount</code>&rsquo;s <code>Role</code>. The expected verbs are documented in the <a href="/security/multi-cluster/">Tenancy and RBAC</a>
+ guide. After the RBAC change (or after installing the missing CRD), force the next reconcile — the non-transient classification means the last spec edit does not auto-retrigger:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; annotate stageset &lt;name&gt; reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="k">$(</span>date -u +%FT%TZ<span class="k">)</span> --overwrite
+</span></span></code></pre></div><h2 id="why-this-is-non-transient">Why this is non-transient</h2>
+<p><code>Forbidden</code> does not recover by retry — the cluster operator has to grant the verb. A missing CRD does not appear by retrying. A schema-invalid payload is rejected the same way every time. Treating these as terminal keeps the workqueue-depth metric meaningful: anything on it is genuinely live work, not a permanently-failing call piling up wasted API requests every interval.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/><category scheme="https://stageset.projects.metio.wtf/tags/rbac" term="rbac" label="rbac"/></entry><entry><title type="html">Reconcile latency high</title><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><id>https://stageset.projects.metio.wtf/runbooks/reconcile-latency/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Reconcile p99 latency for the StageSet controller is above threshold.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>controller_runtime_reconcile_time_seconds</code> p99 for <code>controller=&quot;stageset&quot;</code> exceeds
+the configured threshold; the <code>StageSetReconcileLatencyHigh</code> alert fires (see
+<a href="/running/operations/">operations</a>
+ for the alert set and its thresholds).</p>
+<h2 id="cause">Cause</h2>
+<p>A single reconcile does a lot of work — resolve and fetch every stage&rsquo;s artifact,
+kustomize-build, server-side apply, prune, verify readiness, and run actions — all
+impersonating the tenant <code>ServiceAccount</code>. Latency climbs when any of those is slow:</p>
+<ul>
+<li>large artifacts or slow artifact servers,</li>
+<li>many objects per stage (apply + prune scale with object count),</li>
+<li>readiness waits and <code>wait</code>/<code>http</code>/<code>job</code> actions with long timeouts,</li>
+<li>apiserver or tenant-authorization slowness.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller --tail<span class="o">=</span><span class="m">200</span> <span class="p">|</span> grep -i <span class="s1">&#39;slow\|timeout\|took&#39;</span>
+</span></span></code></pre></div><p>Break the latency down by stage count and artifact size; a single StageSet with
+many large stages dominates p99.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Split a very large StageSet into smaller ones, or fewer objects per stage.</li>
+<li>Tighten action <code>timeout</code>s so a slow gate fails fast instead of stretching the
+reconcile.</li>
+<li>Raise <code>spec.interval</code> where freshness isn&rsquo;t critical.</li>
+<li>Address upstream artifact-server or apiserver latency.</li>
+</ul>
+<p>If the queue itself is backing up, see <a href="/runbooks/workqueue-saturation/">workqueue saturation</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">ResolveFailed</title><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/watch-engagement/?utm_source=atom_feed" rel="related" type="text/html" title="Producer watch engagement failing"/><id>https://stageset.projects.metio.wtf/runbooks/resolvefailed/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A source reference could not be resolved to a ready ExternalArtifact.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=ResolveFailed</code>. The Message describes why resolution failed.</p>
+<h2 id="cause">Cause</h2>
+<p>A stage&rsquo;s <code>sourceRef</code> could not be resolved to an <code>ExternalArtifact</code> for a spec/config or API reason (distinct from &ldquo;not published yet&rdquo;, which is <a href="/runbooks/sourcenotready/"><code>SourceNotReady</code></a>
+, and &ldquo;no such object&rdquo;, which is <a href="/runbooks/artifactnotfound/"><code>ArtifactNotFound</code></a>
+). Common cases:</p>
+<ul>
+<li>an <strong>ambiguous producer</strong> — more than one <code>ExternalArtifact</code> back-points at the same producer object, so the target is undefined;</li>
+<li>a <strong>cross-namespace ref rejected</strong> by <code>--no-cross-namespace-refs</code>;</li>
+<li>a <strong>transient API error</strong> reading the source or artifact (a list/get blip). A permanent API error — RBAC denial or a missing source CRD — is reported as <a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+ instead, since retry can&rsquo;t fix it.</li>
+</ul>
+<p>When the failing <code>sourceRef</code> targets another namespace, the Message is deliberately scrubbed to <code>cross-namespace &lt;kind&gt; %q is not reachable</code> so tenants cannot fingerprint other namespaces — check that source CR&rsquo;s status in its own namespace.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;
+</span></span><span class="line"><span class="cl"><span class="c1"># Ambiguity: are there multiple artifacts pointing at the producer?</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get externalartifact --output yaml <span class="p">|</span> grep -A3 sourceRef
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li><strong>Ambiguous producer:</strong> ensure exactly one <code>ExternalArtifact</code> back-points at the producer, or reference the <code>ExternalArtifact</code> directly by name.</li>
+<li><strong>Cross-namespace rejected:</strong> move the source into the StageSet&rsquo;s namespace, or run the controller without <code>--no-cross-namespace-refs</code> if your <a href="/security/multi-cluster/">tenancy model</a>
+ allows it.</li>
+<li><strong>RBAC / missing CRD:</strong> these surface as <a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+ — grant the controller (or the impersonated <code>serviceAccountName</code>) read on the source kind, or install the <code>source-controller</code> CRDs.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Runbooks</title><link href="https://stageset.projects.metio.wtf/runbooks/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><id>https://stageset.projects.metio.wtf/runbooks/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Symptom-to-remediation pages for every StageSet status reason and operational alert, grouped by what each means for the rollout.</blockquote><p>Start from the <code>status.conditions[Ready].reason</code> on a StageSet, or from a firing
+operational alert, and follow the matching page to diagnose and remediate the
+symptom.</p>
+<p>The controller appends the matching page link to each actionable Ready message —
+<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code> — so a
+<code>kubectl describe</code> routes you straight here. Healthy and intentional reasons
+carry no link.</p>
+<p>The reasons below are grouped by what they mean for the rollout. If you are
+paging in a hurry, check <strong>Healthy and intentional holds</strong> first — those are not
+failures.</p>
+<h2 id="healthy-and-intentional-holds">Healthy and intentional holds</h2>
+<p>The rollout is doing exactly what it was told to. No action is needed beyond the
+one the gate is waiting for — approve, promote, resume, or wait for the window.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/succeeded/"><code>Succeeded</code></a>
+</td>
+					<td>All stages applied and verified; healthy steady state.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/suspended/"><code>Suspended</code></a>
+</td>
+					<td>Reconciliation is paused via <code>spec.suspend</code>.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/updatedeferred/"><code>UpdateDeferred</code></a>
+</td>
+					<td>A new revision is held by a closed update window.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/soaking/"><code>Soaking</code></a>
+</td>
+					<td>A healthy stage is holding through its soak window before advancing.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/awaitingpromotion/"><code>AwaitingPromotion</code></a>
+</td>
+					<td>A healthy stage is holding for a manual promotion.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationapprovalpending/"><code>MigrationApprovalPending</code></a>
+</td>
+					<td>A version transition with pending migrations is held for operator approval.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/budgetexhausted/"><code>BudgetExhausted</code></a>
+</td>
+					<td>A rollout is frozen because the service is out of its SLO error budget; it resumes on its own when the budget recovers.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="waiting-on-upstream">Waiting on upstream</h2>
+<p>Blocked on something outside the StageSet. These usually clear on their own once
+the upstream becomes ready; check the referenced source or dependency.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/sourcenotready/"><code>SourceNotReady</code></a>
+</td>
+					<td>The source exists but has not published a ready artifact yet.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/artifactnotfound/"><code>ArtifactNotFound</code></a>
+</td>
+					<td>The referenced <code>ExternalArtifact</code> could not be found; the controller requeues.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/resolvefailed/"><code>ResolveFailed</code></a>
+</td>
+					<td>A source reference could not be resolved to a ready <code>ExternalArtifact</code>.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/dependencynotready/"><code>DependencyNotReady</code></a>
+</td>
+					<td>A StageSet named in <code>spec.dependsOn</code> is not yet Ready.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="failures-that-need-action">Failures that need action</h2>
+<p>Something is wrong with the StageSet, its sources, or its permissions, and the
+rollout will not progress until you fix it.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/stagefailed/"><code>StageFailed</code></a>
+</td>
+					<td>A stage failed to fetch, build, apply, verify, or run an action.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/stalled/"><code>Stalled</code></a>
+</td>
+					<td>The run cannot make progress and will not retry until the spec changes.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/invalidspec/"><code>InvalidSpec</code></a>
+</td>
+					<td>The spec is invalid; the Message names the offending field or action.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/invalidversion/"><code>InvalidVersion</code></a>
+</td>
+					<td>A version source or value could not be parsed as semver.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+</td>
+					<td>An apiserver call failed with Forbidden, or referenced a kind the apiserver does not know.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/promotionblocked/"><code>PromotionBlocked</code></a>
+</td>
+					<td>A stage&rsquo;s promotion analysis breached its thresholds.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/previousrevisionunavailable/"><code>PreviousRevisionUnavailable</code></a>
+</td>
+					<td><code>rollbackOnFailure</code> is set but the last-good revisions could not be restored.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/budgetsourceunavailable/"><code>BudgetSourceUnavailable</code></a>
+</td>
+					<td>A metric source for an error-budget freeze or a promotion analysis could not be read.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/teardown-forced/"><code>TeardownForced</code></a>
+</td>
+					<td>A deleting StageSet&rsquo;s finalizer was force-dropped after teardown kept failing, possibly orphaning objects.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="migration-problems">Migration problems</h2>
+<p>A version-aware migration is holding the rollout back. The version stays pinned
+to a safe revision until the migration is fixed or approved.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/runbooks/migrationfailed/"><code>MigrationFailed</code></a>
+</td>
+					<td>A migration&rsquo;s action failed; the run halts and retries with backoff.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationdirty/"><code>MigrationDirty</code></a>
+</td>
+					<td>A migration failed repeatedly; auto-retry is halted until a manual reconcile clears it.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationartifactinvalid/"><code>MigrationArtifactInvalid</code></a>
+</td>
+					<td>A sourced migration ladder could not be parsed or failed content validation.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationcoveragemissing/"><code>MigrationCoverageMissing</code></a>
+</td>
+					<td>A major-version transition has no covering migration and coverage is required.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationstagenotfound/"><code>MigrationStageNotFound</code></a>
+</td>
+					<td>A migration anchors to a stage that does not exist in this StageSet.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationsourcenotpinned/"><code>MigrationSourceNotPinned</code></a>
+</td>
+					<td>A sourced ladder is pinned to a mutable tag or branch instead of an immutable digest or commit.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/migrationsourcenotverified/"><code>MigrationSourceNotVerified</code></a>
+</td>
+					<td>A sourced ladder is not signature-verified; the destructive ladder is refused.</td>
+			</tr>
+			<tr>
+					<td><a href="/runbooks/downgraderequiresmigration/"><code>DowngradeRequiresMigration</code></a>
+</td>
+					<td>The desired version is below the deployed version across a migration boundary.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="operational-alerts">Operational alerts</h2>
+<p>These are reached from a firing Prometheus alert rather than a Ready reason —
+they describe the controller&rsquo;s own health, not a single StageSet.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Alert</th>
+					<th>Page</th>
+					<th>What it means</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSetControllerPodDown</code></td>
+					<td><a href="/runbooks/controller-pod-down/">Controller pod down</a>
+</td>
+					<td>A controller pod has been NotReady for the alert window.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetReconcileLatencyHigh</code></td>
+					<td><a href="/runbooks/reconcile-latency/">Reconcile latency high</a>
+</td>
+					<td>Reconcile p99 latency is above threshold.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerWorkqueueDepthHigh</code></td>
+					<td><a href="/runbooks/workqueue-saturation/">Workqueue saturation</a>
+</td>
+					<td>The controller cannot drain its reconcile queue fast enough.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWebhookCertRenewalFailing</code></td>
+					<td><a href="/runbooks/webhook-cert-renewal/">Webhook cert renewal failing</a>
+</td>
+					<td>The self-signed admission webhook certificate is not being rotated.</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWatchEngagementFailing</code></td>
+					<td><a href="/runbooks/watch-engagement/">Producer watch engagement failing</a>
+</td>
+					<td>A dynamic watch on a producer source kind failed to engage, so referencing StageSets stop re-triggering on its changes.</td>
+			</tr>
+	</tbody>
+</table>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">Soaking</title><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><id>https://stageset.projects.metio.wtf/runbooks/soaking/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage is applied and healthy and the rollout is holding through its promotion soak window before advancing.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=Soaking</code>. The Message names the stage and when the soak window closes. <code>status.stages[].promotionState</code> shows <code>phase: Soaking</code> with a <code>soakUntil</code> timestamp.</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its <a href="/gating/stage-promotion/"><code>spec.stages[].promotion.soak</code></a>
+ holds the rollout at this stage for the configured duration before advancing to the next one. A soak catches delayed regressions — an OOM after warm-up, error-rate creep, a crashloop after several minutes — that the point-in-time <code>readyChecks</code> cannot see.</p>
+<p>The soak gates only <em>advancement to the next stage</em>. The soaking stage stays applied and its drift keeps being corrected; earlier stages remain promoted. The controller requeues at <code>soakUntil</code> and advances on its own once the window closes (provided the stage is still healthy).</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.stages[*].promotion}&#39;</span>
+</span></span></code></pre></div><p>Compare <code>promotionState.soakUntil</code> against the current time. A new revision restarts the soak from the start, so a fresh rollout resets the clock.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Usually none — the rollout advances automatically when the soak elapses. If you need it sooner (for example to ship a fix without waiting out a long soak):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl promote &lt;name&gt; --namespace &lt;namespace&gt; --stage &lt;stage&gt;
+</span></span></code></pre></div><p>A manual promotion advances the stage immediately, ending the soak early. If a soak is consistently too long for the environment, lower or remove <code>spec.stages[].promotion.soak</code> for that stage — soaks are a per-stage trade-off (long for prod, short or absent for dev).</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/promotion" term="promotion" label="promotion"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">SourceNotReady</title><link href="https://stageset.projects.metio.wtf/runbooks/sourcenotready/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/watch-engagement/?utm_source=atom_feed" rel="related" type="text/html" title="Producer watch engagement failing"/><id>https://stageset.projects.metio.wtf/runbooks/sourcenotready/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The source exists but has not published a ready artifact yet (transient).</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=SourceNotReady</code>. Transient: the controller requeues and clears the condition once the source publishes.</p>
+<h2 id="cause">Cause</h2>
+<p>A stage&rsquo;s <code>sourceRef</code> resolved to an <code>ExternalArtifact</code> (directly, or via a producer&rsquo;s RFC-0012 back-pointer such as a JaaS <code>JsonnetSnippet</code>), but that artifact&rsquo;s <code>status.conditions[Ready]</code> is not yet <code>True</code> — its producer has not finished publishing a revision. The StageSet gates on <code>Ready=True</code> so it never builds against a half-written artifact.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># Which artifact, and is it Ready?</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get externalartifact
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe externalartifact &lt;name&gt;
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># If the producer is a JsonnetSnippet (or other producer kind), check it:</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe jsonnetsnippet &lt;name&gt;
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>This usually clears on its own when the producer publishes. If it persists:</p>
+<ul>
+<li>confirm the producing controller (e.g. the JaaS operator, or <a href="https://fluxcd.io/">Flux</a>
+ <code>source-controller</code>) is running and reconciling the producer object;</li>
+<li>check the producer&rsquo;s own Ready condition for an upstream error (a failed render, an unreachable <code>GitRepository</code>/<code>OCIRepository</code> source);</li>
+<li>once the producer reports <code>Ready=True</code> with a <code>status.artifact</code>, the StageSet converges on the next reconcile.</li>
+</ul>
+<p>If the artifact never appears at all, the reason is <a href="/runbooks/artifactnotfound/"><code>ArtifactNotFound</code></a>
+; a spec/API resolution failure is <a href="/runbooks/resolvefailed/"><code>ResolveFailed</code></a>
+. See <a href="/defining-a-release/stages-and-sources/">stages and sources</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">StageFailed</title><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationfailed/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><id>https://stageset.projects.metio.wtf/runbooks/stagefailed/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage failed to fetch, build, apply, verify, or run an action; the run halts there.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=StageFailed</code>. The Message names the stage and the operation that failed (<code>fetch artifact</code>, <code>build</code>, <code>apply</code>, <code>verify</code>, a pre/post action, or <code>connect to target cluster</code>). The run halts at that stage; later stages keep their previous revisions.</p>
+<h2 id="cause">Cause</h2>
+<p>A stage failed during execution. By operation:</p>
+<ul>
+<li><strong>fetch artifact</strong> — the artifact URL was unreachable, or its bytes failed digest verification. Transient fetch failures (network, 5xx, source not ready) back off and retry. Terminal ones — a digest mismatch, an oversized tarball, or a URL the SSRF guard rejects — stop requeuing, since the same fetch would fail the same way; the next genuine watch event or interval tick re-runs.</li>
+<li><strong>apply RBAC / missing CRD</strong> — a <code>Forbidden</code> apply, or a manifest whose kind the apiserver doesn&rsquo;t know, is reported as <a href="/runbooks/rbacdenied/"><code>RBACDenied</code></a>
+ (terminal), not <code>StageFailed</code>.</li>
+<li><strong>build</strong> — kustomize build or post-build substitution failed (a missing <code>substituteFrom</code> source, an invalid patch, a malformed manifest).</li>
+<li><strong>apply</strong> — the server-side apply was rejected: an immutable-field conflict, or an <strong>RBAC denial</strong> under the impersonated <code>serviceAccountName</code>.</li>
+<li><strong>verify</strong> — applied objects did not become Ready within the stage timeout (kstatus).</li>
+<li><strong>pre/post action</strong> — a <code>patch</code>/<code>http</code>/<code>wait</code>/<code>job</code>/<code>delete</code>/<code>apply</code> action failed or timed out.</li>
+<li><strong>connect to target cluster</strong> — a <code>spec.kubeConfig</code> Secret was missing, unparseable, or used the unsupported cloud-provider <code>configMapRef</code>.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;     <span class="c1"># Message: which stage + operation</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller --tail<span class="o">=</span><span class="m">200</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># For apply/verify failures, inspect what the stage tried to apply:</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageinventory <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --selector stages.metio.wtf/stage-set<span class="o">=</span>&lt;name&gt;,stages.metio.wtf/stage<span class="o">=</span>&lt;stage&gt;
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<p>Match the operation in the Message:</p>
+<ul>
+<li><strong>fetch / digest</strong> — confirm the producer republished cleanly; a digest mismatch means the artifact changed mid-flight or is corrupt.</li>
+<li><strong>build</strong> — validate the manifests/patches locally; ensure every <code>substituteFrom</code> ConfigMap/Secret exists.</li>
+<li><strong>apply RBAC</strong> — grant the impersonated <code>serviceAccountName</code> (or the controller) the verbs it was denied; the Message names the resource.</li>
+<li><strong>apply immutable conflict</strong> — set a per-stage <a href="/defining-a-release/conflict-policies/"><code>conflictPolicy</code></a>
+ (or <code>force: true</code>, its blunt <code>Recreate</code>-everything form) so the controller deletes and recreates the conflicting object; for objects holding data (<code>PersistentVolumeClaim</code>/<code>PersistentVolume</code>) a <code>Recreate</code> rule additionally requires <code>allowDataLoss: true</code>. Alternatively, use content-hash-suffixed names so a change is a new object rather than a mutation.</li>
+<li><strong>verify timeout</strong> — raise the stage <code>timeout</code>, or fix why the workload is not becoming Ready.</li>
+<li><strong>action</strong> — read the action&rsquo;s error; for <code>http</code>, confirm the host is in <code>--allowed-action-hosts</code>.</li>
+</ul>
+<p>Retries re-run the same pinned snapshot idempotently — actions already recorded in the stage&rsquo;s ledger do not re-fire. See <a href="/defining-a-release/stages-and-sources/">stages and sources</a>
+ for how a stage resolves and applies.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">StageInventory</title><link href="https://stageset.projects.metio.wtf/api/stageinventory/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/api/stageset/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidspec/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidSpec"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><id>https://stageset.projects.metio.wtf/api/stageinventory/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-18T21:33:26+02:00</updated><content type="html"><![CDATA[<blockquote>The controller-managed inventory of objects each stage applied.</blockquote><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageInventory</span><span class="w">
+</span></span></span></code></pre></div><p>A <code>StageInventory</code> records the set of objects a single stage has applied, so the
+controller can prune precisely and tear stages down in reverse order. <strong>You do not
+author these</strong> — the controller creates, updates, and deletes them. The fields
+below let you read inventory state when debugging and back it up.</p>
+<p>One stage may be backed by several <code>StageInventory</code> shards once it exceeds
+<code>--inventory-shard-cap</code> entries (default 5000), so a single object never grows
+unbounded.</p>
+<h2 id="spec">spec</h2>
+<p>A <code>StageInventory</code> as the controller writes it (read-only — never hand-author one):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageInventory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-application-0         </span><span class="w"> </span><span class="c"># &lt;stageset&gt;-&lt;stage&gt;-&lt;shard&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">stages.metio.wtf/stage-set</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">stages.metio.wtf/stage</span><span class="p">:</span><span class="w"> </span><span class="l">application</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">stages.metio.wtf/shard</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stagePosition</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">                       </span><span class="c"># the stage&#39;s index in spec.stages</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">entries</span><span class="p">:</span><span class="w">                               </span><span class="c"># identifiers only — never object contents</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">payments_web_apps_Deployment  </span><span class="w"> </span><span class="c"># namespace_name_group_kind</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">v</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1                        </span><span class="w"> </span><span class="c"># the applied API version</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">payments_web__Service         </span><span class="w"> </span><span class="c"># empty group → core/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">v</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span></code></pre></div><p>The inventory is stored in <code>spec</code> (not <code>status</code>) on purpose: backup tooling that
+restores <code>spec</code> preserves the prune history, so a restored controller does not
+orphan or wrongly prune objects.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Field</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stagePosition</code></td>
+					<td>The stage&rsquo;s index in <code>spec.stages</code> at write time. Teardown walks inventories in reverse position order.</td>
+			</tr>
+			<tr>
+					<td><code>entries[].id</code></td>
+					<td>An applied object&rsquo;s identifier, form <code>namespace_name_group_kind</code> (empty group for core).</td>
+			</tr>
+			<tr>
+					<td><code>entries[].v</code></td>
+					<td>The API version the object was applied at.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="well-known-labels-and-annotations">Well-known labels and annotations</h2>
+<p>The controller stamps these onto inventories and managed objects:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Key</th>
+					<th>On</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stages.metio.wtf/stage-set</code></td>
+					<td>inventory</td>
+					<td>Owning StageSet name.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/stage</code></td>
+					<td>inventory</td>
+					<td>Stage name.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/shard</code></td>
+					<td>inventory</td>
+					<td>Shard index.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/name</code></td>
+					<td>managed object</td>
+					<td>Owning StageSet name — <code>kubectl get -l stages.metio.wtf/name=&lt;stageset&gt;</code>.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/namespace</code></td>
+					<td>managed object</td>
+					<td>Owning StageSet namespace.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/stage</code></td>
+					<td>managed object</td>
+					<td>Stage that applied the object — <code>kubectl get -l stages.metio.wtf/stage=&lt;stage&gt;</code> for per-stage discovery.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/prune</code></td>
+					<td>managed object</td>
+					<td>Set to <code>disabled</code> to opt an object out of pruning.</td>
+			</tr>
+	</tbody>
+</table>
+<p>Other annotations the controller honors on a StageSet or its objects. Each has a
+<a href="/cli/reconcile/"><code>stagesetctl reconcile</code></a>
+ equivalent:</p>
+<ul>
+<li><code>reconcile.fluxcd.io/requestedAt</code> — request an out-of-band reconcile.</li>
+<li><code>stages.metio.wtf/reconcile-stage</code> — force a single stage to re-run.</li>
+<li><code>stages.metio.wtf/update-now</code> — push a window-held rollout through immediately.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/api" term="api" label="api"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/crd" term="crd" label="crd"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Stalled</title><link href="https://stageset.projects.metio.wtf/runbooks/stalled/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="related" type="text/html" title="StageFailed"/><id>https://stageset.projects.metio.wtf/runbooks/stalled/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-17T10:56:50+02:00</updated><content type="html"><![CDATA[<blockquote>The run cannot make progress and will not retry until the spec changes.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=Stalled</code>. Terminal: the controller does not requeue until the spec changes.</p>
+<h2 id="cause">Cause</h2>
+<p>A condition that retrying cannot clear. Currently this is a <strong><code>spec.dependsOn</code> cycle</strong> — two or more StageSets depend on each other (directly or transitively), so none can ever become Ready first. The cycle is detected by a breadth-first walk over the <code>dependsOn</code> graph. A dependency that is merely not Ready yet (no cycle) reports <a href="/runbooks/dependencynotready/"><code>DependencyNotReady</code></a>
+ instead.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;     <span class="c1"># Message states &#34;spec.dependsOn forms a cycle&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># Trace the edges:</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --output custom-columns<span class="o">=</span>NAME:.metadata.name,DEPENDSON:.spec.dependsOn<span class="o">[</span>*<span class="o">]</span>.name
+</span></span></code></pre></div><p>Follow the <code>dependsOn</code> names until you find the loop (A → B → A, or longer).</p>
+<h2 id="remediation">Remediation</h2>
+<p>Break the cycle by removing one edge — drop a <code>dependsOn</code> entry from one StageSet, or restructure so the ordering is a strict chain. Dependencies must form a directed acyclic graph. After the edit, the next reconcile re-walks the graph and clears the condition.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Suspended</title><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><id>https://stageset.projects.metio.wtf/runbooks/suspended/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-17T10:56:50+02:00</updated><content type="html"><![CDATA[<blockquote>Reconciliation is paused via spec.suspend.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=Suspended</code>.</p>
+<h2 id="cause">Cause</h2>
+<p><code>spec.suspend: true</code> is set, so the controller short-circuits before any resolution, build, or apply. This is an intentional operator action, not a failure — applied objects are left exactly as they were at the last successful run.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Resume by clearing the flag:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; patch stageset &lt;name&gt; --type<span class="o">=</span>merge --patch <span class="s1">&#39;{&#34;spec&#34;:{&#34;suspend&#34;:false}}&#39;</span>
+</span></span></code></pre></div><p>The next reconcile picks up from the current artifact revisions.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">TeardownForced</title><link href="https://stageset.projects.metio.wtf/runbooks/teardown-forced/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><id>https://stageset.projects.metio.wtf/runbooks/teardown-forced/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-19T22:33:41+02:00</updated><content type="html"><![CDATA[<blockquote>A deleting StageSet&rsquo;s finalizer was force-dropped after teardown kept failing past &ndash;max-teardown-wait, possibly orphaning objects on the target cluster.</blockquote><h2 id="symptom">Symptom</h2>
+<p>A StageSet that was deleted lingered in <code>Terminating</code>, then disappeared. A <code>Warning</code> Event records the force-drop:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; get events --field-selector reason=TeardownForced
+</span></span><span class="line"><span class="cl">...
+</span></span><span class="line"><span class="cl">Warning  TeardownForced  TeardownForced after 1h0m0s of failing teardown (delete stage &#34;deploy&#34; objects) —
+</span></span><span class="line"><span class="cl">finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: ...
+</span></span></code></pre></div><p>The <code>stageset_teardown_force_drop_total{namespace,name}</code> counter increments at the same time.</p>
+<h2 id="cause">Cause</h2>
+<p>On deletion the controller tears the StageSet&rsquo;s applied objects down in reverse stage order, then drops the finalizer. While a teardown step keeps failing the finalizer is held and the delete retries — so a transient target-cluster outage heals on its own.</p>
+<p>But a permanently-unreachable target — a deleted <code>spec.kubeConfig</code> Secret, revoked tenant RBAC, or a decommissioned remote cluster — would wedge the StageSet in <code>Terminating</code> forever and block namespace teardown. <code>--max-teardown-wait</code> (default 1h) caps that wait: once the deletion has been pending longer than the bound, the finalizer is force-dropped so the object can be garbage-collected. Whatever objects the failing stage could not delete are left orphaned.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<p>Identify which target and stage failed from the Event message (<code>Last error</code> and the operation, e.g. <code>delete stage &quot;deploy&quot; objects</code>). Then confirm what was left behind:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># Objects the controller applies carry owner labels keyed by the StageSet name.</span>
+</span></span><span class="line"><span class="cl">kubectl --context &lt;target-context&gt; get all,configmap,secret --all-namespaces <span class="se">\
+</span></span></span><span class="line"><span class="cl">    -l stages.metio.wtf/name<span class="o">=</span>&lt;stageset-name&gt;
+</span></span></code></pre></div><p>If the target was a remote cluster (<code>spec.kubeConfig</code>), check that the kubeconfig Secret and the cloud identity it referenced still exist.</p>
+<h2 id="remediation">Remediation</h2>
+<ol>
+<li>Restore access to the target if it is meant to keep running (re-create the kubeConfig Secret, re-grant the tenant SA&rsquo;s RBAC), then delete the orphaned objects with the label selector above.</li>
+<li>If the target is genuinely gone, the orphaned objects went with it — nothing to clean up.</li>
+</ol>
+<p>To make the controller wait longer before force-dropping (for example, to ride out a planned multi-hour target outage), raise <code>--max-teardown-wait</code>. Setting it very high re-introduces the original wedge risk, so prefer fixing the target over disabling the escape hatch.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/teardown" term="teardown" label="teardown"/><category scheme="https://stageset.projects.metio.wtf/tags/finalizer" term="finalizer" label="finalizer"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">UpdateDeferred</title><link href="https://stageset.projects.metio.wtf/runbooks/updatedeferred/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><id>https://stageset.projects.metio.wtf/runbooks/updatedeferred/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A new revision is held by a closed update window.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=UpdateDeferred</code> (initial deploy held), or <code>READY=True</code> with a message noting a deferral and a populated <code>status.pendingUpdate</code> (an already-deployed StageSet with a held update).</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is time-based delivery working as configured. A new revision (or the first deploy) is being held because the StageSet&rsquo;s <a href="/gating/update-windows/"><code>spec.updateWindows</code></a>
+ do not currently permit a rollout: either a <code>Deny</code> window is active, or <code>Allow</code> windows are declared and none is active right now. With <code>spec.windowScope: All</code>, even drift correction is paused while a window is closed.</p>
+<p><code>status.pendingUpdate</code> shows the held revisions and <code>nextWindowOpens</code> (when delivery resumes); the controller requeues at that boundary.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.pendingUpdate}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.updateWindows}&#39;</span>
+</span></span></code></pre></div><p>Confirm the current time (in each window&rsquo;s <code>timeZone</code>) against the windows. An already-deployed StageSet stays <code>Ready=True</code> — the deployed version keeps running while the update waits.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Usually none — the update applies automatically when the next window opens. If you need it sooner:</p>
+<ul>
+<li>
+<p><strong>Force it through once</strong> (e.g. an emergency fix during a freeze):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; annotate --overwrite stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  stages.metio.wtf/update-now<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span>
+</span></span></code></pre></div><p>This applies the held rollout immediately, regardless of windows (one-shot per annotation value).</p>
+</li>
+<li>
+<p><strong>Adjust the windows</strong> if the schedule is wrong — check <code>type</code> (Allow vs Deny), the cron <code>schedule</code>/<code>duration</code> or absolute <code>from</code>/<code>to</code>, and especially the <code>timeZone</code>.</p>
+</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/update-windows" term="update-windows" label="update-windows"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Webhook cert renewal failing</title><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><id>https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The self-signed admission webhook certificate is not being rotated.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>stageset_webhook_cert_renewal_failures_total</code> is increasing; the
+<code>StageSetWebhookCertRenewalFailing</code> alert fires (see
+<a href="/running/operations/">operations</a>
+ for the alert set and its thresholds).
+The current certificate keeps working until its natural expiry — that expiry is
+the deadline, after which cluster-wide <code>StageSet</code> admission breaks.</p>
+<h2 id="cause">Cause</h2>
+<p>Only applies in <code>--webhook-cert-mode=self-signed</code>. The in-pod renewer regenerates
+the serving cert every <code>validity/3</code> and patches the
+<code>ValidatingWebhookConfiguration</code>&rsquo;s <code>caBundle</code>. It fails when:</p>
+<ul>
+<li>the controller lost <code>update</code> (or <code>get</code>) on the named
+<code>ValidatingWebhookConfiguration</code> (<code>--webhook-validating-config-name</code>),</li>
+<li>the VWC was renamed and the flag/<code>resourceNames</code> weren&rsquo;t updated,</li>
+<li>the cert directory (<code>--webhook-cert-dir</code>) became read-only.</li>
+</ul>
+<p>In <code>cert-manager</code> mode this metric is irrelevant — <a href="https://cert-manager.io/">cert-manager</a>
+ owns renewal.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller <span class="p">|</span> grep -i <span class="s1">&#39;cert\|renew\|caBundle&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl get validatingwebhookconfiguration &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.webhooks[*].clientConfig.caBundle}&#39;</span> <span class="p">|</span> head -c <span class="m">40</span>
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li>Restore <code>get</code>/<code>update</code> on the named VWC in the controller&rsquo;s ClusterRole
+(<code>resourceNames</code> must include it).</li>
+<li>Fix the <code>--webhook-validating-config-name</code> / <code>--webhook-cert-dir</code> flags if they
+drifted from the deployed VWC and mount.</li>
+<li>As a longer-term option, switch to <code>--webhook-cert-mode=cert-manager</code> so renewal
+is handled by cert-manager.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Workqueue saturation</title><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><id>https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The controller cannot drain its reconcile queue fast enough.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>workqueue_depth{controller=&quot;stageset&quot;}</code> stays high; StageSets reconcile slowly or
+lag behind their <code>spec.interval</code>. The <code>StageSetControllerWorkqueueDepthHigh</code> alert
+fires (see <a href="/running/operations/">operations</a>
+ for the alert set and its
+thresholds).</p>
+<h2 id="cause">Cause</h2>
+<p>The controller is enqueuing reconcile requests faster than it completes them.
+Common causes:</p>
+<ul>
+<li><strong>apiserver slowness</strong> — applies, dry-runs, and status writes all block on the
+apiserver (or the impersonated tenant&rsquo;s authorization).</li>
+<li><strong>slow sources</strong> — a stage waiting on a large artifact fetch or a source that is
+slow to become Ready holds a worker.</li>
+<li><strong>a stuck stage</strong> — an action with a long timeout (a <code>wait</code>/<code>http</code>/<code>job</code> that
+never completes) pins a worker for the whole timeout.</li>
+<li><strong>too few workers for the StageSet count</strong> — many StageSets reconciling on short
+intervals.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># which StageSets are churning?</span>
+</span></span><span class="line"><span class="cl">kubectl get stagesets --all-namespaces --sort-by<span class="o">=</span>.status.observedGeneration
+</span></span><span class="line"><span class="cl"><span class="c1"># controller logs for slow operations / retries</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller --tail<span class="o">=</span><span class="m">200</span>
+</span></span></code></pre></div><p>Correlate with <code>controller_runtime_reconcile_time_seconds</code> (see
+<a href="/runbooks/reconcile-latency/">reconcile latency</a>
+) and apiserver latency.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Lengthen <code>spec.interval</code> on high-churn StageSets that don&rsquo;t need fast
+reconciliation.</li>
+<li>Cap long-running actions with a tighter <code>timeout</code> so a stuck action releases its
+worker.</li>
+<li>Adding replicas does <strong>not</strong> help: leader election means only the lease holder
+reconciles, so a second replica is failover, not added throughput
+(<a href="/running/production/#high-availability">production</a>
+). The controller has no
+reconcile-concurrency flag — the levers are reducing load (longer intervals, fewer
+StageSets, fewer objects per stage) and removing the slow operations below.</li>
+<li>Investigate apiserver / tenant-authorization latency if reconciles are uniformly
+slow.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry></feed>

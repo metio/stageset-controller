@@ -1,0 +1,600 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Jaas on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/jaas/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/jaas/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/jaas/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/jaas/</id><entry><title type="html">Dashboard</title><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/slos/?utm_source=atom_feed" rel="related" type="text/html" title="Service level objectives"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><id>https://stageset.projects.metio.wtf/observability/dashboard/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-19T09:16:22+02:00</updated><content type="html"><![CDATA[<blockquote>The StageSet controller ships a maintained Grafana dashboard as a single-layer OCI image — render it through JaaS and hand it to the grafana-operator.</blockquote><p>The StageSet controller publishes a maintained Grafana dashboard as a single-layer
+OCI image at <code>ghcr.io/metio/stageset-controller-dashboard</code>. The dashboard is
+grafonnet <em>source</em>, not pre-rendered JSON, and the controller is not a Jsonnet
+renderer — so you render it through <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+, which
+publishes the rendered JSON as a Flux <code>ExternalArtifact</code> the grafana-operator picks
+up. The two projects are intentionally tightly coupled; JaaS is the renderer.</p>
+<p>The dashboard opens with an <a href="/observability/slos/">SLO</a>
+ band — reconcile
+availability against its objective, error budget remaining, reconcile-latency p95
+against its objective, and an availability-versus-objective trend — over a band of
+controller internals that explain any movement: reconciles by reason, stages
+applied, drift corrected, deferred updates, stage readiness, watch-engagement
+failures, and the controller-runtime workqueue. The series are the
+<a href="/observability/metrics/">metrics</a>
+ the controller exports.</p>
+<p>This page needs JaaS running in the cluster. If you don&rsquo;t run JaaS, fetch the
+source from the OCI image yourself, render it with <code>jsonnet -J vendor</code> against
+grafonnet, and import the resulting JSON like any hand-built dashboard.</p>
+<h2 id="1-point-a-flux-source-at-the-image">1. Point a Flux source at the image</h2>
+<p>It&rsquo;s an OCI artifact, so use an <code>OCIRepository</code>. The dashboard imports grafonnet,
+so also install the grafonnet <code>JsonnetLibrary</code> (the
+<a href="https://github.com/metio/helm-charts/tree/main/charts/joi"><code>joi</code> chart</a>
+,
+<code>--set libraries.grafonnet.enabled=true</code>).</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">oci://ghcr.io/metio/stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l">latest       </span><span class="w"> </span><span class="c"># or a dated tag like 2026.6.22 to pin</span><span class="w">
+</span></span></span></code></pre></div><p>The dashboard source also lives in this repository under <code>dashboards/</code>; if you
+mirror it into Git, a <code>GitRepository</code> pointing there works identically.</p>
+<h2 id="2-render-it-with-a-jaas-jsonnetsnippet-passing-the-dashboards-tlas">2. Render it with a JaaS JsonnetSnippet, passing the dashboard&rsquo;s TLAs</h2>
+<p>The dashboard is a function of top-level arguments — <code>datasource</code> (the Prometheus
+datasource UID, default <code>prometheus</code>), <code>title</code> (default <code>StageSet controller</code>), a
+<code>selector</code> label matcher folded into every query (default empty), and the SLO knobs
+<code>window</code> (default <code>28d</code>), <code>availabilityTarget</code> (default <code>0.99</code>), and <code>latencyTarget</code>
+seconds (default <code>30</code>) — supplied through JaaS&rsquo;s <code>spec.tlas</code>.</p>
+<p><code>selector</code> is how you adapt to your Prometheus: scope the dashboard to one scrape
+job or cluster, e.g. <code>selector: ['job=&quot;stageset&quot;']</code> or <code>['cluster=&quot;prod&quot;']</code>. The
+queries never touch the <code>namespace</code> label, so a Prometheus that relabels it to
+<code>exported_namespace</code> doesn&rsquo;t affect them; <code>selector</code> pins anything else.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">dashboards-tenant</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># The OCI image&#39;s only file is main.jsonnet, which is spec.entryFile&#39;s default,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># so no entryFile is needed.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># grafonnet, which the dashboard imports by its full jb-vendor path, is served</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># by the JOI library installed above.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">libraries</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetLibrary</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">grafonnet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># The dashboard&#39;s top-level arguments. Each value is a list; a single element</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># becomes a string TLA.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tlas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">datasource</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;prometheus&#34;</span><span class="p">]</span><span class="w">              </span><span class="c"># your Prometheus datasource UID</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;StageSet controller — prod&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;job=&#34;stageset&#34;&#39;</span><span class="p">]</span><span class="w">            </span><span class="c"># scope every query to your scrape job/cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">window</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;28d&#34;</span><span class="p">]</span><span class="w">                         </span><span class="c"># SLO window</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">availabilityTarget</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;0.99&#34;</span><span class="p">]</span><span class="w">            </span><span class="c"># reconcile-availability objective (99%)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">latencyTarget</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;30&#34;</span><span class="p">]</span><span class="w">                   </span><span class="c"># reconcile-latency p95 objective (seconds)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l">rendered</span><span class="w">
+</span></span></span></code></pre></div><p>This is zero-maintenance: the <code>OCIRepository</code> polls
+<code>ghcr.io/metio/stageset-controller-dashboard</code>, so when a new dashboard is published
+JaaS re-renders, the <code>ExternalArtifact</code> digest changes, and the grafana-operator
+pushes the new JSON to Grafana — you reference the upstream image once and get every
+update automatically. Pin <code>ref.tag</code> to a dated tag instead of <code>latest</code> if you&rsquo;d
+rather adopt updates deliberately.</p>
+<p>JaaS renders the dashboard JSON and publishes it as an <code>ExternalArtifact</code> named
+after the snippet — <code>stageset-controller-dashboard</code>.</p>
+<h2 id="3-hand-the-artifact-to-the-grafana-operator">3. Hand the artifact to the grafana-operator</h2>
+<p>A <code>GrafanaDashboard</code> that references the published <code>ExternalArtifact</code> reconciles it
+into Grafana:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">grafana.integreatly.org/v1beta1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GrafanaDashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">instanceSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">dashboards</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;grafana&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resyncPeriod</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ExternalArtifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span></code></pre></div><p>When the published image updates (or you change the TLAs), JaaS re-renders, the
+<code>ExternalArtifact</code> digest changes, and the grafana-operator pushes the new JSON to
+Grafana — no manual export step.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/controller" term="controller" label="controller"/><category scheme="https://stageset.projects.metio.wtf/tags/grafana" term="grafana" label="grafana"/><category scheme="https://stageset.projects.metio.wtf/tags/grafonnet" term="grafonnet" label="grafonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/dashboard" term="dashboard" label="dashboard"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/></entry><entry><title type="html">From Jsonnet to a gated rollout</title><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="related" type="text/html" title="Parameterizing a rollout"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="related" type="text/html" title="Progressive delivery"/><link href="https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Tanka and kubecfg"/><id>https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Write Jsonnet manifests, render them with JaaS, and roll them out with StageSet — end to end.</blockquote><p>This tutorial follows a complete delivery: write <a href="https://kubernetes.io/docs/">Kubernetes</a>
+
+manifests in <a href="https://jsonnet.org/">Jsonnet</a>
+ and publish the source through
+<a href="https://fluxcd.io/">Flux</a>
+; <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ renders it into a
+Flux <code>ExternalArtifact</code>, and a StageSet rolls it out with a readiness gate.</p>
+<p>The chain is:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Jsonnet in Git/OCI/Bucket  →  JaaS (JsonnetSnippet)  →  ExternalArtifact  →  StageSet
+</span></span></code></pre></div><p>This tutorial renders <em>Jsonnet</em>, so it goes through JaaS: JaaS turns the Jsonnet
+into an <code>ExternalArtifact</code> the stage consumes. (If your manifests were already plain
+YAML, a stage could read a <code>GitRepository</code>/<code>OCIRepository</code>/<code>Bucket</code> directly — see
+<a href="/get-started/flux-sources/">Stage sources</a>
+. The renderer is here because the input is
+Jsonnet, not because StageSet can&rsquo;t read Git.)</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>
+<p>Flux installed (with the <code>ExternalArtifact</code> API — Flux ≥ v2.7.0).</p>
+</li>
+<li>
+<p><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ installed in operator mode.</p>
+</li>
+<li>
+<p>StageSet installed (see <a href="/get-started/kubernetes/">Installation</a>
+).</p>
+</li>
+<li>
+<p>An <code>apps</code> namespace, and a <code>web-deployer</code> <code>ServiceAccount</code> in it whose RBAC can
+apply the workload (the StageSet applies as it):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl create namespace apps
+</span></span><span class="line"><span class="cl">kubectl --namespace apps create serviceaccount web-deployer
+</span></span><span class="line"><span class="cl"><span class="c1"># bind web-deployer to a Role/ClusterRole that can manage Deployments and</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># Services in the apps namespace — see /security/multi-cluster/ for the tenancy model</span>
+</span></span></code></pre></div></li>
+</ul>
+<h2 id="1-write-the-manifests-in-jsonnet">1. Write the manifests in Jsonnet</h2>
+<p>A small web app, parameterized as a Jsonnet top-level function so the same source
+renders for any environment. Commit this as <code>jsonnet/main.jsonnet</code> in a Git repo:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-jsonnet" data-lang="jsonnet"><span class="line"><span class="cl"><span class="c1">// jsonnet/main.jsonnet
+</span></span></span><span class="line"><span class="cl"><span class="k">function</span><span class="p">(</span><span class="nv">name</span><span class="o">=</span><span class="s">&#39;web&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">image</span><span class="o">=</span><span class="s">&#39;registry.internal/web:latest&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">replicas</span><span class="o">=</span><span class="s">&#39;2&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;v1&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;List&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">items</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;apps/v1&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Deployment&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">metadata</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">spec</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nv">replicas</span><span class="p">:</span><span class="w"> </span><span class="nb">std.parseInt</span><span class="p">(</span><span class="nv">replicas</span><span class="p">),</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nv">selector</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">matchLabels</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">app</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nv">template</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nv">metadata</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">labels</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">app</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nv">spec</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">containers</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="p">,</span><span class="w"> </span><span class="nv">image</span><span class="p">:</span><span class="w"> </span><span class="nv">image</span><span class="w"> </span><span class="p">}]</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;v1&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Service&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">metadata</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">spec</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">selector</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">app</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="nv">ports</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nv">port</span><span class="p">:</span><span class="w"> </span><span class="mf">80</span><span class="p">,</span><span class="w"> </span><span class="nv">targetPort</span><span class="p">:</span><span class="w"> </span><span class="mf">8080</span><span class="w"> </span><span class="p">}]</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">],</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">}</span><span class="w">
+</span></span></span></code></pre></div><p>Rendering a <code>kind: List</code> keeps several resources in one document — both the
+kustomize build the controller runs and <code>kubectl</code> flatten it transparently.</p>
+<h2 id="2-publish-the-source-through-flux">2. Publish the source through Flux</h2>
+<p>Point a Flux <code>GitRepository</code> at the repo so the cluster has the Jsonnet:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-manifests</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">1m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://github.com/acme/web-manifests</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">branch</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span></code></pre></div><p>Apply it and wait for the source to sync:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl apply -f gitrepository.yaml
+</span></span><span class="line"><span class="cl">kubectl --namespace apps <span class="nb">wait</span> --for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready gitrepository/web-manifests
+</span></span></code></pre></div><h2 id="3-render-with-jaas">3. Render with JaaS</h2>
+<p>A <code>JsonnetSnippet</code> reads the Jsonnet from that source, passes the parameters as
+top-level arguments, and publishes the rendered result as an <code>ExternalArtifact</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-manifests</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./jsonnet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">entryFile</span><span class="p">:</span><span class="w"> </span><span class="l">main.jsonnet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tlas</span><span class="p">:</span><span class="w">                            </span><span class="c"># top-level args → the function() parameters</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;web&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;registry.internal/web:2.1.0&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;3&#34;</span><span class="p">]</span><span class="w">
+</span></span></span></code></pre></div><p>Apply it; JaaS then publishes an <code>ExternalArtifact</code> named <code>web</code> in the <code>apps</code>
+namespace. Confirm it went Ready:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl apply -f jsonnetsnippet.yaml
+</span></span><span class="line"><span class="cl">kubectl --namespace apps get externalartifact web
+</span></span></code></pre></div><h2 id="4-roll-it-out-with-stageset">4. Roll it out with StageSet</h2>
+<p>Reference the <code>JsonnetSnippet</code> as the stage source — StageSet resolves the
+producer to its <code>ExternalArtifact</code> — and gate the stage on the Deployment becoming
+available:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">web-deployer     </span><span class="w"> </span><span class="c"># applies run as this tenant SA</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readyChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span></code></pre></div><p>Apply it, preview the change before it lands, then watch it roll out:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl apply -f stageset.yaml
+</span></span><span class="line"><span class="cl">stagesetctl --namespace apps diff web          <span class="c1"># preview against live cluster state</span>
+</span></span><span class="line"><span class="cl">stagesetctl --namespace apps get web           <span class="c1"># per-stage progress</span>
+</span></span></code></pre></div><h2 id="5-ship-a-change">5. Ship a change</h2>
+<p>Edit <code>jsonnet/main.jsonnet</code> (or bump the <code>image</code> TLA on the snippet) and commit.
+Flux pulls the new commit, JaaS re-renders and republishes the <code>ExternalArtifact</code>,
+and StageSet — watching the producer — reconciles the new revision through the
+same gate. No StageSet edit required.</p>
+<h3 id="no-labels-or-annotations-needed">No labels or annotations needed</h3>
+<p>You do <strong>not</strong> annotate or label anything to make this chain fire. The linkage is
+the <code>sourceRef</code> itself: the controller watches the source <em>kinds</em> (<code>ExternalArtifact</code>,
+<code>GitRepository</code>, <code>OCIRepository</code>, <code>Bucket</code>, and producers like <code>JsonnetSnippet</code>) and,
+when one changes, maps it back to every StageSet whose <code>sourceRef</code> points at it — then
+reconciles those. JaaS works the same way for a snippet&rsquo;s own <code>sourceRef</code> and
+library references. Discovery is automatic; you only declare the references.</p>
+<h2 id="versioning-the-rollout">Versioning the rollout</h2>
+<p>To gate one-time <a href="/gating/versioned-migrations/">migrations</a>
+ on a release boundary,
+declare the version. The simplest is to pin it on the StageSet, bumped alongside the
+image:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.1.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill-2-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">               </span><span class="c"># runs once when the deployed version crosses 2.0.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span></code></pre></div><h3 id="let-the-version-travel-with-the-rendered-manifests">Let the version travel with the rendered manifests</h3>
+<p>Pinning works, but the cleaner pattern is to let the version ride <em>inside</em> the
+manifests the snippet renders — so a single value flows from your CI all the way to
+the rollout gate. Feed the version into the snippet and stamp it onto the standard
+<code>app.kubernetes.io/version</code> label (and the image tag, from the same value):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-jsonnet" data-lang="jsonnet"><span class="line"><span class="cl"><span class="c1">// web.jsonnet
+</span></span></span><span class="line"><span class="cl"><span class="k">local</span><span class="w"> </span><span class="nv">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">std.extVar</span><span class="p">(</span><span class="s">&#39;version&#39;</span><span class="p">);</span><span class="w">   </span><span class="c1">// supplied by JaaS extVars / your CI
+</span></span></span><span class="line"><span class="cl"><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;apps/v1&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Deployment&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">metadata</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;web&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">labels</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">&#39;app.kubernetes.io/version&#39;</span><span class="p">:</span><span class="w"> </span><span class="nv">version</span><span class="w"> </span><span class="p">},</span><span class="w">   </span><span class="c1">// ← the version, in the manifest
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">spec</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">template</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">metadata</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">labels</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">&#39;app.kubernetes.io/version&#39;</span><span class="p">:</span><span class="w"> </span><span class="nv">version</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nv">spec</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">containers</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;web&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">image</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;registry.example/web:&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nv">version</span><span class="w"> </span><span class="p">}]</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">}</span><span class="w">
+</span></span></span></code></pre></div><p>Then point <code>version.fromObject</code> at that object and drop the inline <code>value</code> — the
+controller reads the label off the rendered <code>Deployment</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># defaults to the app.kubernetes.io/version label</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill-2-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span></code></pre></div><p>Now the version has exactly one source of truth — the value your pipeline feeds the
+snippet — and it shows up in the image tag, the version label, <em>and</em> the migration
+gate together. The same <code>fromObject</code> works for a <code>GitRepository</code>/<code>OCIRepository</code>
+source too; only a source that ships a dedicated file wants
+<a href="/gating/versioned-migrations/#from-a-file-in-the-artifact--versionfromartifact"><code>version.fromArtifact</code></a>
+
+instead. See <a href="/gating/versioned-migrations/">versioned migrations</a>
+ for all three.</p>
+<h2 id="next">Next</h2>
+<p>From here, add more <a href="/defining-a-release/stages-and-sources/">stages</a>
+, pre/post
+<a href="/defining-a-release/actions/">actions</a>
+, or <a href="/gating/update-windows/">update windows</a>
+ to turn
+this single rollout into a gated, multi-stage release. To parameterize per
+environment, see <a href="/guides/parameters/">Parameters</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/jsonnet" term="jsonnet" label="jsonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">Generating migrations with Jsonnet</title><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="related" type="text/html" title="Parameterizing a rollout"/><id>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Render a version-gated migration ladder with JaaS and consume it from a StageSet via migrationsSourceRef.</blockquote><p>A <a href="/gating/versioned-migrations/">migration ladder</a>
+ is just data — a list of
+version-gated actions. So you can <em>generate</em> it with <a href="https://jsonnet.org/">Jsonnet</a>
+,
+publish it once as a Flux artifact with <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+,
+and have every StageSet that deploys the app consume it through
+<code>spec.migrationsSourceRef</code>. One ladder, authored once, shared across namespaces.</p>
+<p>The chain mirrors <a href="/get-started/jsonnet-to-rollout/">From Jsonnet to a gated rollout</a>
+,
+but the rendered artifact is the <em>migrations</em> rather than the manifests:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Jsonnet ladder  →  JaaS (JsonnetSnippet)  →  ExternalArtifact  →  StageSet.migrationsSourceRef
+</span></span></code></pre></div><h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>Flux installed (with the <code>ExternalArtifact</code> API — Flux ≥ v2.7.0).</li>
+<li><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ installed in operator mode.</li>
+<li>StageSet installed (see <a href="/get-started/kubernetes/">Installation</a>
+).</li>
+</ul>
+<h2 id="1-write-the-ladder-in-jsonnet">1. Write the ladder in Jsonnet</h2>
+<p>The snippet evaluates to a <strong>JSON array of migrations</strong> — the same shape the
+ladder file uses, so JaaS&rsquo;s <code>rendered.json</code> <em>is</em> the ladder. A small helper keeps
+each entry readable, and the file is trivially parameterizable (per app, per
+environment) with top-level args:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-jsonnet" data-lang="jsonnet"><span class="line"><span class="cl"><span class="c1">// migrations/main.jsonnet
+</span></span></span><span class="line"><span class="cl"><span class="k">local</span><span class="w"> </span><span class="nf">del</span><span class="p">(</span><span class="nv">name</span><span class="p">,</span><span class="w"> </span><span class="nv">kind</span><span class="p">,</span><span class="w"> </span><span class="nv">obj</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nv">delete</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">target</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;v1&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">kind</span><span class="p">,</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">obj</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">};</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">[</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;drop-legacy-config&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">to</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;2.0.0&#39;</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">from</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;&gt;=1.0.0&#39;</span><span class="p">,</span><span class="w">            </span><span class="c1">// explicit operator — a bare &#34;1.0.0&#34; is rejected
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">stage</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;db-pre&#39;</span><span class="p">,</span><span class="w">           </span><span class="c1">// anchors by role; consuming stages declare it
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">actions</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="nf">del</span><span class="p">(</span><span class="s">&#39;drop-legacy&#39;</span><span class="p">,</span><span class="w"> </span><span class="s">&#39;ConfigMap&#39;</span><span class="p">,</span><span class="w"> </span><span class="s">&#39;legacy-config&#39;</span><span class="p">)],</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="p">]</span><span class="w">
+</span></span></span></code></pre></div><p>Commit it to a Git repo (or push it to an OCI/Bucket source) JaaS can read.
+Validate it before publishing with the controller&rsquo;s own checks:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl lint-migrations migrations/  <span class="c1"># if you render locally; see lint-migrations</span>
+</span></span></code></pre></div><h2 id="2-render-it-with-jaas">2. Render it with JaaS</h2>
+<p>A <code>JsonnetSnippet</code> points JaaS at the source; JaaS publishes an <code>ExternalArtifact</code>
+of the same name carrying <code>rendered.json</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GitRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations-src</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">entryFile</span><span class="p">:</span><span class="w"> </span><span class="l">main.jsonnet</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl apply -f jsonnetsnippet.yaml
+</span></span><span class="line"><span class="cl">kubectl --namespace apps get externalartifact orders-migrations
+</span></span></code></pre></div><h2 id="3-consume-it-from-a-stageset">3. Consume it from a StageSet</h2>
+<p>Reference the <code>JsonnetSnippet</code> as the migrations source — StageSet resolves the
+producer to its <code>ExternalArtifact</code> — and declare the <code>db-pre</code> anchor role on the
+stage the ladder anchors to:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">orders-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrationsSourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders-migrations</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">migrationAnchor: db-pre        # the ladder&#39;s stage</span><span class="p">:</span><span class="w"> </span><span class="l">db-pre resolves here</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">orders</span><span class="w">
+</span></span></span></code></pre></div><p>When <code>orders</code> crosses into <code>2.0.0</code>, the rendered <code>drop-legacy-config</code> migration
+runs before the <code>app</code> stage. Every other namespace deploying orders references the
+<strong>same</strong> <code>orders-migrations</code> snippet output — the ladder lives once, in Jsonnet.</p>
+<h2 id="production-notes">Production notes</h2>
+<ul>
+<li><strong>Validate in CI</strong> with <a href="/cli/lint-migrations/"><code>stagesetctl lint-migrations</code></a>
+
+on the Jsonnet output before it&rsquo;s published, so authoring errors never reach a
+cluster.</li>
+<li><strong>Verify and pin</strong> the source in production — see
+<a href="/gating/versioned-migrations/#verifying-and-pinning-the-source">Verifying and pinning the source</a>
+.
+An OCI-published rendered ladder can be cosign-signed and digest-pinned.</li>
+<li><strong>Approve</strong> destructive transitions with <code>spec.version.requireApproval</code> if you
+want a human in the loop before they run.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/jsonnet" term="jsonnet" label="jsonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry><entry><title type="html">Integrations &amp; tooling</title><link href="https://stageset.projects.metio.wtf/integrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="related" type="text/html" title="Dashboard"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="related" type="text/html" title="Parameterizing a rollout"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><id>https://stageset.projects.metio.wtf/integrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Connect StageSet to producers and tooling — producer-aware sources, the Flux Operator, the Claude Code skill, and the MCP server.</blockquote><p>How StageSet fits with the rest of your delivery stack: react to upstream
+producers that render artifacts, compose with the Flux Operator, and drive
+StageSets from an AI assistant.</p>
+<ul>
+<li><strong><a href="/integrations/producer-aware-sources/">Producer-aware sources</a>
+</strong> — point a
+stage at a producer like <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ and re-render
+when it republishes.</li>
+<li><strong><a href="/integrations/flux-operator/">Flux Operator integration</a>
+</strong> — combine StageSet
+with the Flux Operator&rsquo;s <code>ResourceSet</code>.</li>
+<li><strong><a href="/integrations/claude-code/">Claude Code skill</a>
+</strong> — a skill that helps an
+assistant author and operate StageSets.</li>
+<li><strong><a href="/integrations/mcp-server/">MCP server</a>
+</strong> — an MCP server an agent uses to
+read status and drive reconciliation.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/integrations" term="integrations" label="integrations"/><category scheme="https://stageset.projects.metio.wtf/tags/tooling" term="tooling" label="tooling"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/></entry><entry><title type="html">Parameterizing a rollout</title><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="related" type="text/html" title="Dashboard"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="related" type="text/html" title="Progressive delivery"/><id>https://stageset.projects.metio.wtf/guides/parameters/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Two layers of parameters — JaaS TLAs/extVars at render time, StageSet postBuild substitution at delivery.</blockquote><p>A rollout takes parameters at two distinct layers, which serve different purposes:</p>
+<ul>
+<li><strong>Render-time parameters (JaaS).</strong> Change <em>what gets rendered</em>. The Jsonnet
+computes its output from top-level arguments (<code>tlas</code>) and external variables
+(<code>externalVariables</code>). Different values produce a different <code>ExternalArtifact</code>.</li>
+<li><strong>Delivery-time parameters (StageSet <code>postBuild</code>).</strong> Inject values <em>into
+already-rendered manifests</em>, per stage, by string substitution — the same
+mechanism Flux&rsquo;s <code>kustomize-controller</code> uses.</li>
+</ul>
+<p>Use render-time parameters for structural logic; use delivery-time parameters to
+stamp environment-specific values onto a shared artifact.</p>
+<h2 id="render-time-jaas-tlas-and-external-variables">Render-time: JaaS TLAs and external variables</h2>
+<p>Top-level arguments map to a Jsonnet <code>function(...)</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-jsonnet" data-lang="jsonnet"><span class="line"><span class="cl"><span class="c1">// main.jsonnet
+</span></span></span><span class="line"><span class="cl"><span class="k">function</span><span class="p">(</span><span class="nv">name</span><span class="o">=</span><span class="s">&#39;web&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">replicas</span><span class="o">=</span><span class="s">&#39;2&#39;</span><span class="p">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nv">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;apps/v1&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">kind</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Deployment&#39;</span><span class="p">,</span><span class="w"> </span><span class="nv">metadata</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="nv">name</span><span class="w"> </span><span class="p">},</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nv">spec</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">replicas</span><span class="p">:</span><span class="w"> </span><span class="nb">std.parseInt</span><span class="p">(</span><span class="nv">replicas</span><span class="p">)</span><span class="w"> </span><span class="c">/* … */</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">kind: GitRepository, name: web-manifests, path</span><span class="p">:</span><span class="w"> </span><span class="l">./jsonnet }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tlas</span><span class="p">:</span><span class="w">                          </span><span class="c"># → function(name, replicas)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;web&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;3&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">externalVariables</span><span class="p">:</span><span class="w">            </span><span class="c"># → std.extVar(&#39;environment&#39;)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">environment</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;production&#34;</span><span class="w">
+</span></span></span></code></pre></div><p><code>tlas</code> is a map of name → list of values (a single-element list for a scalar
+argument; multiple values become a JSON array). <code>externalVariables</code> are plain
+strings read with <code>std.extVar</code>.</p>
+<h2 id="delivery-time-stageset-postbuild-substitution">Delivery-time: StageSet postBuild substitution</h2>
+<p>When the rendered manifests carry <code>${var}</code> placeholders, a stage substitutes them
+at apply time — from inline values, ConfigMaps, and Secrets:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substitute</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">cluster_name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-vars</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Secret</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-secrets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">optional</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><p>A manifest field like <code>value: &quot;${cluster_name}&quot;</code> becomes <code>value: &quot;prod-eu&quot;</code> for
+this stage.</p>
+<blockquote>
+<p><strong>A substituted number is a number.</strong> Substitution is textual and runs after
+kustomize, which drops the quotes around a plain <code>${var}</code> scalar — so a numeric
+value such as <code>replicas: &quot;${COUNT}&quot;</code> with <code>COUNT: &quot;3&quot;</code> lands as the YAML
+integer <code>3</code>, not the string <code>&quot;3&quot;</code>. For fields that must be strings —
+<code>ConfigMap</code>/<code>Secret</code> <code>data</code>, label and annotation values — keep the substituted
+value non-numeric (e.g. <code>&quot;v${COUNT}&quot;</code>) or build it with a <code>configMapGenerator</code>,
+otherwise the apply fails with <code>expected string, got int</code>. This matches Flux
+kustomize-controller&rsquo;s post-build substitution.</p>
+</blockquote>
+<h2 id="reusing-one-artifact-across-environments">Reusing one artifact across environments</h2>
+<p>The two layers combine into a common pattern: render an environment-<em>agnostic</em>
+artifact once with JaaS, then have several StageSets — one per environment —
+consume that same artifact and stamp their own values with <code>postBuild</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">apiVersion: jaas.metio.wtf/v1, kind: JsonnetSnippet, name</span><span class="p">:</span><span class="w"> </span><span class="l">web }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- {<span class="w"> </span><span class="nt">kind: ConfigMap, name</span><span class="p">:</span><span class="w"> </span><span class="l">staging-vars }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># production (same artifact, different values)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">apiVersion: jaas.metio.wtf/v1, kind: JsonnetSnippet, name</span><span class="p">:</span><span class="w"> </span><span class="l">web }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- {<span class="w"> </span><span class="nt">kind: ConfigMap, name</span><span class="p">:</span><span class="w"> </span><span class="l">production-vars }</span><span class="w">
+</span></span></span></code></pre></div><p>One render, many environments — each StageSet bounded by its own
+<a href="/security/multi-cluster/">ServiceAccount</a>
+ and gated by its own
+<a href="/defining-a-release/actions/">actions</a>
+ and <a href="/gating/update-windows/">update windows</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/tlas" term="tlas" label="tlas"/><category scheme="https://stageset.projects.metio.wtf/tags/ext-vars" term="ext-vars" label="ext-vars"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/></entry><entry><title type="html">Producer-aware sources</title><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stages and sources"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/resolvefailed/?utm_source=atom_feed" rel="related" type="text/html" title="ResolveFailed"/><id>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Reference a producer like JaaS and let the controller find its ExternalArtifact.</blockquote><p>Point a stage at the resource that <em>produces</em> an artifact, and the controller
+finds the <code>ExternalArtifact</code> that producer publishes. This is the third source
+route, alongside the two direct ones — an <code>ExternalArtifact</code> (the default
+<code>sourceRef.kind</code>) or a Flux <code>GitRepository</code>/<code>OCIRepository</code>/<code>Bucket</code> — covered in
+<a href="/defining-a-release/stages-and-sources/#source-kinds">stages and sources</a>
+. Reach for it when an
+operator publishes an <code>ExternalArtifact</code> from a custom resource (for example
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ rendering Jsonnet).</p>
+<h2 id="referencing-a-producer">Referencing a producer</h2>
+<p>Set <code>kind</code> (and <code>apiVersion</code>) to a producer resource, and the controller resolves
+it to the <code>ExternalArtifact</code> that producer publishes — the one whose
+<code>spec.sourceRef</code> back-references the producer (matched on group, kind, and name).
+For example, a <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ <code>JsonnetSnippet</code>
+renders Jsonnet and publishes an <code>ExternalArtifact</code>; reference the snippet and the
+controller follows the link:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">dashboards</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">grafana-dashboards</span><span class="w">
+</span></span></span></code></pre></div><p>The controller also watches the common Flux source kinds (<code>GitRepository</code>,
+<code>OCIRepository</code>, <code>Bucket</code>) so a stage re-reconciles when an upstream source
+changes.</p>
+<p>A producer can itself consume another producer first: a JaaS <code>JsonnetSnippet</code> can
+render from the artifact another snippet publishes. That chaining happens on the
+producer side — see
+<a href="https://jaas.projects.metio.wtf/defining-a-release/snippet-sources/#chaining-snippets">chaining snippets</a>
+.
+A stage references only the final producer and reads the <code>ExternalArtifact</code> it
+publishes.</p>
+<h2 id="related-projects">Related projects</h2>
+<p>JOI, JaaS, and <code>StageSet</code> compose end to end:</p>
+<ul>
+<li><strong><a href="https://github.com/metio/jsonnet-oci-images">JOI</a>
+</strong> publishes Jsonnet
+libraries as single-layer OCI images (usable both as image-volume mounts and as
+Flux <code>OCIRepository</code> sources).</li>
+<li><strong><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+</strong> evaluates Jsonnet — optionally
+importing those JOI libraries — and publishes the rendered JSON as an
+<code>ExternalArtifact</code>.</li>
+<li><strong><code>StageSet</code></strong> references the <code>JsonnetSnippet</code> (or its artifact) and rolls the
+result out in ordered, gated stages.</li>
+</ul>
+<p>Each project is independently useful; a stage reads straight from a
+<code>GitRepository</code>, <code>OCIRepository</code>, or <code>Bucket</code>, or from any <code>ExternalArtifact</code>
+regardless of what produced it.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/><category scheme="https://stageset.projects.metio.wtf/tags/externalartifact" term="externalartifact" label="externalartifact"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

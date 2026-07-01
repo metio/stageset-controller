@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Gating on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/gating/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/gating/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/gating/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-01T08:41:18+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/gating/</id><entry><title type="html">Gating &amp; rollout safety</title><link href="https://stageset.projects.metio.wtf/gating/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="PreviousRevisionUnavailable"/><link href="https://stageset.projects.metio.wtf/gating/rollback/?utm_source=atom_feed" rel="related" type="text/html" title="Rollback"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><id>https://stageset.projects.metio.wtf/gating/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Control when and whether a rollout proceeds — update windows, promotion gates, error-budget freezes, versioned migrations, and rollback.</blockquote><p>A stage can be healthy and still not the right moment to advance. These features
+decide <em>when</em> a new revision rolls out and <em>whether</em> it proceeds, and undo it
+when it goes wrong — they compose, so you can require an open window, a healthy
+budget, and a passed soak all at once.</p>
+<ul>
+<li><strong><a href="/gating/update-windows/">Update windows</a>
+</strong> — allow or deny new revisions on a
+schedule.</li>
+<li><strong><a href="/gating/stage-promotion/">Stage promotion</a>
+</strong> — hold a stage with a soak
+window, a manual gate, or a metric analysis before it advances.</li>
+<li><strong><a href="/gating/error-budget/">Error-budget freeze</a>
+</strong> — pause rollouts while a
+service is out of its SLO error budget.</li>
+<li><strong><a href="/gating/versioned-migrations/">Versioned migrations</a>
+</strong> — run migrations when
+a release crosses a version boundary.</li>
+<li><strong><a href="/gating/rollback/">Rollback</a>
+</strong> — restore the last-good revision when a
+rollout fails.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/gating" term="gating" label="gating"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/rollback" term="rollback" label="rollback"/></entry></feed>
