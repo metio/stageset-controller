@@ -460,13 +460,19 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 		return nil
 	}
 
+	// Migration names are the idempotency-ledger key, so the inline ladder must
+	// have unique names (and stay within the per-ladder limit) — the same check a
+	// sourced ladder gets in resolveMigrationLadder. Without it, two migrations
+	// sharing a name let pruneSupersededLedger drop a sibling entry, and that
+	// migration's destructive actions re-execute on the next reconcile.
+	// ValidateLadder also runs ValidateMigration on each entry.
+	if err := migrations.ValidateLadder(ss.Spec.Migrations); err != nil {
+		return err
+	}
 	for i := range ss.Spec.Migrations {
 		m := &ss.Spec.Migrations[i]
 		if m.Stage != "" && !anchors[m.Stage] {
 			return fmt.Errorf("migration %q anchors to unknown stage or anchor %q", m.Name, m.Stage)
-		}
-		if err := migrations.ValidateMigration(m); err != nil {
-			return err
 		}
 	}
 	return nil

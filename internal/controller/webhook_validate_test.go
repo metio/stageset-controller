@@ -388,6 +388,31 @@ func TestValidateMigrations_ActionOneof(t *testing.T) {
 	}
 }
 
+// TestValidateMigrations_InlineDuplicateNames pins that an inline ladder with
+// two migrations sharing a name is rejected. The name is the idempotency-ledger
+// key: a duplicate lets pruneSupersededLedger drop a sibling entry, so that
+// migration's destructive actions re-execute on the next reconcile.
+func TestValidateMigrations_InlineDuplicateNames(t *testing.T) {
+	t.Parallel()
+	ss := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{
+		Version: &stagesv1.VersionSource{Value: "1.0.0"},
+		Stages:  []stagesv1.Stage{{Name: "s", SourceRef: stagesv1.SourceReference{Name: "x"}}},
+		Migrations: []stagesv1.Migration{
+			{Name: "cleanup", To: "1.5.0"},
+			{Name: "cleanup", To: "2.0.0"},
+		},
+	}}
+	if err := validateMigrations(ss); err == nil {
+		t.Fatal("validateMigrations accepted a duplicate inline migration name; want rejection")
+	}
+
+	// The same ladder with distinct names is accepted.
+	ss.Spec.Migrations[1].Name = "finalize"
+	if err := validateMigrations(ss); err != nil {
+		t.Fatalf("validateMigrations rejected a unique-name inline ladder: %v", err)
+	}
+}
+
 // TestValidateMigrations_SourceAndAnchors covers the sourced-ladder admission
 // rules: inline vs source mutual exclusivity, the version requirement, that a
 // sourced ladder's content is deferred to fetch time, late-binding anchors

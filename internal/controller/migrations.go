@@ -209,6 +209,14 @@ func coverageGap(require bool, currentV, desiredV *semver.Version, pending int) 
 func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *stagesv1.StageSet, fetcher *artifact.Fetcher) (ladder []stagesv1.Migration, resolved *artifact.ResolvedArtifact, reason, msg string, err error) {
 	src := ss.Spec.MigrationsSourceRef
 	if src == nil {
+		// Reconciler-side fallback for a bypassed or disabled admission webhook:
+		// the inline ladder's names are the idempotency-ledger key, so a duplicate
+		// name would let pruneSupersededLedger drop a sibling entry and re-run a
+		// destructive migration. Reject it as a terminal spec error, mirroring the
+		// ValidateLadder gate a sourced ladder gets below.
+		if verr := migrations.ValidateLadder(ss.Spec.Migrations); verr != nil {
+			return nil, nil, ReasonInvalidSpec, verr.Error(), nil
+		}
 		return ss.Spec.Migrations, nil, "", "", nil
 	}
 	// A migration source is always resolved same-namespace, independent of the

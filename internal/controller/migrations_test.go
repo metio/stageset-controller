@@ -484,6 +484,31 @@ func TestResolveMigrationLadder_Inline(t *testing.T) {
 	}
 }
 
+// TestResolveMigrationLadder_InlineDuplicateNameRejected is the reconciler-side
+// fallback for a bypassed admission webhook: an inline ladder with a duplicate
+// migration name is refused as a terminal InvalidSpec, so pruneSupersededLedger
+// can't drop a sibling entry and re-run a destructive migration.
+func TestResolveMigrationLadder_InlineDuplicateNameRejected(t *testing.T) {
+	t.Parallel()
+	r := &StageSetReconciler{}
+	ss := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{
+		Migrations: []stagesv1.Migration{
+			{Name: "cleanup", To: "1.5.0"},
+			{Name: "cleanup", To: "2.0.0"},
+		},
+	}}
+	got, _, reason, _, err := r.resolveMigrationLadder(context.Background(), ss, nil)
+	if err != nil {
+		t.Fatalf("duplicate inline name should be a terminal reason, not a transient error: %v", err)
+	}
+	if reason != ReasonInvalidSpec {
+		t.Fatalf("reason=%q, want %q", reason, ReasonInvalidSpec)
+	}
+	if got != nil {
+		t.Fatalf("no ladder should be returned on rejection, got %+v", got)
+	}
+}
+
 func TestMigrationSourceSuffix(t *testing.T) {
 	if s := migrationSourceSuffix(nil); s != "" {
 		t.Fatalf("nil plan must have no source suffix, got %q", s)
