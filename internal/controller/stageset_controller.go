@@ -825,7 +825,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					// Can't read the watched pods (RBAC/API hiccup): never advance
 					// blind. Back off and retry rather than promote past an unverified
 					// stage — the gate fails closed, like a promotion source error.
-					return ctrl.Result{}, rerr
+					// The stage applied successfully, so this is not a stage failure:
+					// the sentinel keeps the post-loop handler from rolling back.
+					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, rerr)
 				}
 				restart = rv
 			}
@@ -833,7 +835,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if stage.Promotion != nil && stage.Promotion.EventGate != nil {
 				ev, eerr := r.evaluateEventChecks(ctx, r.gateReader(rt.target), &ss, stage)
 				if eerr != nil {
-					return ctrl.Result{}, eerr // can't read events: fail closed, retry
+					// Can't read events: fail closed, back off and retry. Not a stage
+					// failure — the sentinel keeps the handler from rolling back.
+					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, eerr)
 				}
 				event = ev
 			}
@@ -853,7 +857,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 				reverted, ok, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, rt.applier, fetcher, recorder)
 				if rerr != nil {
-					return ctrl.Result{}, rerr // transient revert failure: back off
+					// Transient revert failure: back off. Not a stage failure — the
+					// sentinel keeps the handler from also running attemptRollback.
+					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, rerr)
 				}
 				if ok {
 					appliedRevision = reverted
@@ -919,6 +925,13 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, budgetHoldReason, budgetHoldMsg)
 		}
 		return loopResult, r.patchStatus(ctx, patchHelper, &ss)
+	}
+	if errors.Is(loopErr, errGateUnevaluable) {
+		// A promotion gate could not be evaluated this pass (a transient read
+		// error on the watched pods/events, or a transient revert failure). The
+		// current stage applied successfully, so this is not a stage failure: back
+		// off and retry without rolling the healthy rollout back.
+		return loopResult, loopErr
 	}
 	if loopErr != nil {
 		// A stage failed. failStage has already written the failure status. If

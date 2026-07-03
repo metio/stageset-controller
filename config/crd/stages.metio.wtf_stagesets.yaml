@@ -3334,8 +3334,11 @@ spec:
                           format: date-time
                           type: string
                         soakUntil:
-                          description: SoakUntil is the instant the soak window closes
-                            (Soaking only).
+                          description: |-
+                            SoakUntil is the instant the soak window closes. It is set while Soaking
+                            and carried onto an intervening hold (Blocked) so a transient block during
+                            the bake resumes the original soak deadline instead of skipping or
+                            restarting the soak when it clears.
                           format: date-time
                           type: string
                       type: object

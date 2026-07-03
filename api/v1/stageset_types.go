@@ -1352,7 +1352,10 @@ type PromotionState struct {
 	// +optional
 	Since *metav1.Time `json:"since,omitempty"`
 
-	// SoakUntil is the instant the soak window closes (Soaking only).
+	// SoakUntil is the instant the soak window closes. It is set while Soaking
+	// and carried onto an intervening hold (Blocked) so a transient block during
+	// the bake resumes the original soak deadline instead of skipping or
+	// restarting the soak when it clears.
 	// +optional
 	SoakUntil *metav1.Time `json:"soakUntil,omitempty"`
 

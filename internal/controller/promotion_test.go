@@ -311,6 +311,67 @@ func TestGatePromotion_FastTrack(t *testing.T) {
 	})
 }
 
+// TestGatePromotion_SoakSurvivesTransientBlock pins that a transient block during
+// the soak — an analysis, restart, or event breach that sets Blocked mid-bake —
+// does not let the stage skip its remaining soak and promote early once the
+// block clears. The soak deadline carried on the Blocked state resumes the
+// original window rather than restarting or being skipped.
+func TestGatePromotion_SoakSurvivesTransientBlock(t *testing.T) {
+	const rev = "sha256:abc"
+	const soak = time.Hour
+	ss := &stagesv1.StageSet{}
+	ss.Spec.Interval = metav1.Duration{Duration: time.Minute}
+
+	// The revision entered its soak at t0; a breach blocked it 30m in. The
+	// original deadline t0+1h is preserved on the Blocked state.
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	deadline := t0.Add(soak)
+	blockedAt := t0.Add(30 * time.Minute)
+
+	t.Run("analysis breach mid-soak, recovered before deadline: resumes soak, no early promote", func(t *testing.T) {
+		an := &stagesv1.PromotionAnalysis{
+			Checks:       []stagesv1.AnalysisCheck{{Name: "err"}},
+			FailureLimit: func() *int32 { v := int32(3); return &v }(),
+		}
+		p := &stagesv1.StagePromotion{Soak: dur(soak), Analysis: an}
+		pass := &analysisVerdict{result: &stagesv1.AnalysisResult{Passed: true}}
+		prior := stagesv1.StageStatus{AppliedRevision: rev, PromotionState: &stagesv1.PromotionState{
+			Phase:            stagesv1.PromotionBlocked,
+			Since:            &metav1.Time{Time: blockedAt},
+			SoakUntil:        &metav1.Time{Time: deadline},
+			AnalysisFailures: 4,
+		}}
+		now := t0.Add(40 * time.Minute) // recovered, still before the deadline
+		r := &StageSetReconciler{Now: func() time.Time { return now }}
+		promoted, state, _, _, _ := r.gatePromotion(ss, promoStage(p), rev, prior, now, pass, false, nil, nil)
+		if promoted {
+			t.Fatal("a block that cleared 40m into a 1h soak must not promote early")
+		}
+		if state.Phase != stagesv1.PromotionSoaking {
+			t.Fatalf("phase=%s, want Soaking", state.Phase)
+		}
+		if !state.SoakUntil.Time.Equal(deadline) {
+			t.Fatalf("soakUntil=%v, want the original deadline %v (the soak must resume, not restart)", state.SoakUntil.Time, deadline)
+		}
+	})
+
+	t.Run("restart breach mid-soak, recovered after deadline: promotes", func(t *testing.T) {
+		p := &stagesv1.StagePromotion{Soak: dur(soak)}
+		prior := stagesv1.StageStatus{AppliedRevision: rev, PromotionState: &stagesv1.PromotionState{
+			Phase:        stagesv1.PromotionBlocked,
+			Since:        &metav1.Time{Time: blockedAt},
+			SoakUntil:    &metav1.Time{Time: deadline},
+			RestartCheck: "api",
+		}}
+		now := deadline.Add(5 * time.Minute) // recovered (restart=nil) after the deadline
+		r := &StageSetReconciler{Now: func() time.Time { return now }}
+		promoted, _, _, _, _ := r.gatePromotion(ss, promoStage(p), rev, prior, now, nil, false, nil, nil)
+		if !promoted {
+			t.Fatal("once the original soak deadline has passed, a recovered stage promotes")
+		}
+	})
+}
+
 // TestGatePromotionRestartGate covers the restart gate: a breach holds the
 // stage (PromotionBlocked, naming the check), a nil verdict advances, and a
 // manual promote is break-glass over a breach.

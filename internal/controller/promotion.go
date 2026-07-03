@@ -29,6 +29,15 @@ const promoteAnnotation = "stages.metio.wtf/promote"
 // and requeues. Distinct from errTerminalStageFailure.
 var errHoldForPromotion = errors.New("hold for promotion")
 
+// errGateUnevaluable is the stage-loop sentinel for a promotion gate that could
+// not be EVALUATED this reconcile — a transient RBAC/apiserver error reading the
+// watched pods (restart gate) or events (event gate), or a transient failure
+// applying an onFailure=Rollback revert. The stage itself applied successfully,
+// so this is NOT a stage failure: the reconciler backs off and retries without
+// rolling the healthy rollout back. Distinct from a failStage error, which is
+// the only thing that may engage rollbackOnFailure.
+var errGateUnevaluable = errors.New("promotion gate unevaluable")
+
 // parsePromote extracts the requested stage and token from the promote
 // annotation. An empty stage means no (or malformed) request.
 func parsePromote(ss *stagesv1.StageSet) (stage, token string) {
@@ -114,24 +123,24 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 	// workload still reports Ready. The manual promote above overrides this, and
 	// drift on the current stage keeps being corrected.
 	if restart != nil {
-		s := &stagesv1.PromotionState{
+		s := carrySoakUntil(&stagesv1.PromotionState{
 			Phase:            stagesv1.PromotionBlocked,
 			Since:            phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now),
 			RestartCheck:     restart.check,
 			ObservedRestarts: restart.observed,
-		}
+		}, priorState, sameRevision)
 		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, restart.rollback
 	}
 
 	// Event gate: a watched pod group has accumulated too many Warning events.
 	// Block the advance (or roll back) — same semantics as the restart gate.
 	if event != nil {
-		s := &stagesv1.PromotionState{
+		s := carrySoakUntil(&stagesv1.PromotionState{
 			Phase:          stagesv1.PromotionBlocked,
 			Since:          phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now),
 			EventCheck:     event.check,
 			ObservedEvents: event.observed,
-		}
+		}, priorState, sameRevision)
 		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, event.rollback
 	}
 
@@ -173,7 +182,7 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 	// Analysis hard-failure → onFailure (Hold leaves the stage applied-but-held;
 	// Rollback signals the caller to revert this stage).
 	if failed {
-		s := withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionBlocked, Since: phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now)})
+		s := withAnalysis(carrySoakUntil(&stagesv1.PromotionState{Phase: stagesv1.PromotionBlocked, Since: phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now)}, priorState, sameRevision))
 		return false, s, r.analysisInterval(ss, p.Analysis), prior.LastHandledPromotion, p.Analysis.OnFailure == "Rollback"
 	}
 
@@ -182,7 +191,13 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 	// (analysis/manual) does not restart the soak clock.
 	if p.Soak != nil && p.Soak.Duration > 0 && !(sameRevision && priorState != nil && pastSoak(priorState.Phase)) {
 		since := now
-		if sameRevision && priorState != nil && priorState.Phase == stagesv1.PromotionSoaking && priorState.Since != nil {
+		switch {
+		case sameRevision && priorState != nil && priorState.SoakUntil != nil:
+			// Resume the deadline anchored when this revision first entered the
+			// soak, even across an intervening Blocked hold, so a transient block
+			// during the bake neither skips nor restarts the soak.
+			since = priorState.SoakUntil.Time.Add(-p.Soak.Duration)
+		case sameRevision && priorState != nil && priorState.Phase == stagesv1.PromotionSoaking && priorState.Since != nil:
 			since = priorState.Since.Time
 		}
 		soakUntil := since.Add(p.Soak.Duration)
@@ -296,15 +311,32 @@ func analysisFailureCount(state *stagesv1.PromotionState) int32 {
 	return state.AnalysisFailures
 }
 
-// pastSoak reports whether a promotion phase is one the gate only reaches after
+// pastSoak reports whether a promotion phase is one the gate only reaches AFTER
 // the soak window has elapsed, so the soak clock isn't restarted on a later hold.
+// PromotionBlocked is deliberately excluded: the restart gate, event gate, and
+// an analysis hard-failure all set Blocked BEFORE the soak block runs, so a
+// Blocked phase can be reached mid-soak. Treating it as past-soak would let a
+// transient block that clears skip the remaining soak and promote early. The
+// soak deadline carried on the Blocked state (see carrySoakUntil) instead lets
+// the soak resume its original window.
 func pastSoak(phase stagesv1.PromotionPhase) bool {
 	switch phase {
-	case stagesv1.PromotionAnalyzing, stagesv1.PromotionBlocked, stagesv1.PromotionAwaitingManual, stagesv1.PromotionPromoted:
+	case stagesv1.PromotionAnalyzing, stagesv1.PromotionAwaitingManual, stagesv1.PromotionPromoted:
 		return true
 	default:
 		return false
 	}
+}
+
+// carrySoakUntil preserves a running soak's deadline onto a hold reached during
+// the bake (a restart/event/analysis breach mid-soak), so when the hold clears
+// the soak resumes its ORIGINAL deadline — it neither skips the remaining soak
+// (Blocked is not treated as past-soak) nor restarts it from scratch.
+func carrySoakUntil(s, priorState *stagesv1.PromotionState, sameRevision bool) *stagesv1.PromotionState {
+	if sameRevision && priorState != nil && priorState.SoakUntil != nil {
+		s.SoakUntil = priorState.SoakUntil
+	}
+	return s
 }
 
 // phaseSince preserves a phase's start instant across reconciles that stay in
