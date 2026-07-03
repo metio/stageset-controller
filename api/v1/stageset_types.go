@@ -210,6 +210,16 @@ type Stage struct {
 	// +optional
 	Path string `json:"path,omitempty"`
 
+	// ServiceAccountName impersonated for THIS stage's cluster operations —
+	// apply, prune, readiness verification, and actions — overriding the
+	// StageSet-level spec.serviceAccountName. Empty inherits the StageSet
+	// default. Lets a single StageSet drive stages that target different
+	// tenants, each stage's writes bounded by its own ServiceAccount's RBAC.
+	// SOPS decryption keys stay read under the StageSet-level identity
+	// (spec.decryption is a StageSet field, not a per-stage one).
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
 	// Prune enables garbage collection of objects that fell out of this
 	// stage. Defaults to true.
 	// +optional

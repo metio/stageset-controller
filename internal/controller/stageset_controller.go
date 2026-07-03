@@ -423,7 +423,17 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// cluster when spec.kubeConfig is set, impersonating spec.serviceAccountName
 	// when set, else the controller's own client. Bookkeeping (StageInventory,
 	// status) always stays on the controller client and cluster.
-	target, targetMapper, err := r.targetCluster(ctx, ss.Namespace, ss.Spec.ServiceAccountName, ss.Spec.KubeConfig)
+	// Every per-stage cluster operation runs through a stageRuntime derived from
+	// that stage's effective ServiceAccount (its own serviceAccountName, else the
+	// StageSet default). runtimes memoizes one per SA across the whole reconcile —
+	// the forward loop, the cross-stage prune, and any rollback — so stages
+	// sharing an SA share a connection/token while distinct SAs stay RBAC-isolated.
+	// The default-SA runtime is resolved up front: it validates spec.kubeConfig
+	// (shared by every stage) once, and backs the cross-stage teardown of stages
+	// removed from the spec, which no longer carry a per-stage SA.
+	fetcher := r.fetcher()
+	runtimes := map[string]*stageRuntime{}
+	defaultRT, err := r.stageRuntime(ctx, &ss, ss.Spec.ServiceAccountName, fetcher, runtimes)
 	if err != nil {
 		// A malformed spec.kubeConfig (unknown cloud provider, missing required
 		// ConfigMap key, unparseable kubeconfig Secret) is terminal: retrying
@@ -443,17 +453,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "connect to target cluster", err, nil, "", nil)
 	}
-	applier := apply.New(target, targetMapper, stagesv1.GroupVersion.Group)
 	recorder := &stageinv.Recorder{Client: r.Client, ShardCap: r.ShardCap}
-	fetcher := r.fetcher()
-	executor := &actions.Executor{
-		Client:       target,
-		AllowedHosts: r.AllowedActionHosts,
-		IPValidator:  r.ActionIPValidator,
-		Resolver:     &artifact.Resolver{NoCrossNamespace: r.NoCrossNamespaceRefs},
-		Fetcher:      fetcher,
-		Applier:      &manifestApplier{applier: applier, name: ss.Name, namespace: ss.Namespace},
-	}
 	// Versioned migrations: resolve the desired version and the migrations the
 	// current transition crosses, before any stage runs. Terminal version
 	// failures (InvalidVersion, downgrade) short-circuit here; the ordered
@@ -638,10 +638,22 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 			}
 
+			// Resolve the connection this stage's cluster operations run through:
+			// its effective ServiceAccount (stage override, else the StageSet
+			// default) against the target cluster. Stages sharing an SA reuse the
+			// cached client/token; a per-stage SA isolates this stage's writes to
+			// that ServiceAccount's RBAC. A connect failure fails this stage — a
+			// token-mint hiccup is transient; a malformed kubeConfig was already
+			// caught terminally by the default-runtime resolve before the loop.
+			rt, rerr := r.stageRuntime(ctx, &ss, effectiveServiceAccount(&ss, stage), fetcher, runtimes)
+			if rerr != nil {
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "connect to target cluster", rerr, stageStatuses, ra.Revision, executed)
+			}
+
 			// Migrations anchored to this stage run before its pre-actions, so
 			// version-conditional work (data conversions, immutable-object
 			// recreation) happens before the stage applies its content.
-			if merr := r.runStageMigrations(ctx, &ss, stage.Name, migPlan, executor); merr != nil {
+			if merr := r.runStageMigrations(ctx, &ss, stage.Name, migPlan, rt.executor); merr != nil {
 				ss.Status.MigrationFailureCount++
 				op := opMigration
 				if ss.Status.MigrationFailureCount >= maxMigrationFailures {
@@ -655,7 +667,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// PRE actions: before BUILD; a failure aborts the stage untouched
 			// (nothing has been applied), so no onFailure runs.
 			if stage.Actions != nil {
-				if err := executor.Run(ctx, ss.Namespace, stage.Actions.Pre, toStringSet(executed), record); err != nil {
+				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Pre, toStringSet(executed), record); err != nil {
 					return r.failStage(ctx, patchHelper, &ss, stage.Name, "pre-action", err, stageStatuses, ra.Revision, executed)
 				}
 			}
@@ -715,12 +727,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					attribute.String("stage", stage.Name),
 					attribute.Int("stage.objectCount", len(objects)),
 				))
-			changeSet, err := applier.Apply(applyCtx, ss.Name, ss.Namespace, objects, conflicts)
+			changeSet, err := rt.applier.Apply(applyCtx, ss.Name, ss.Namespace, objects, conflicts)
 			if err != nil {
 				applySpan.RecordError(err)
 				applySpan.SetStatus(codes.Error, "apply failed")
 				applySpan.End()
-				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+				r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "apply", err, stageStatuses, ra.Revision, executed)
 			}
 			applySpan.End()
@@ -750,7 +762,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				// target cluster (the remote cluster when spec.kubeConfig is set,
 				// else the controller's own). The recorder's r.Client stays on the
 				// controller cluster for the StageInventory shard read/write.
-				recovered, rerr := recorder.ReconstructFromCluster(ctx, target, ss.Name, ss.Namespace, stage.Name, objects)
+				recovered, rerr := recorder.ReconstructFromCluster(ctx, rt.target, ss.Name, ss.Namespace, stage.Name, objects)
 				if rerr != nil {
 					logger.Error(rerr, "stage inventory reconstruction was partial", "stage", stage.Name)
 					partialReconstructStages = append(partialReconstructStages, stage.Name)
@@ -759,7 +771,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				reconstructedStages = append(reconstructedStages, stage.Name)
 			}
 			if werr := recorder.Write(ctx, &ss, stage.Name, i, writeRefs); werr != nil {
-				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+				r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "record inventory", werr, stageStatuses, ra.Revision, executed)
 			}
 
@@ -773,21 +785,21 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				waitSet = append(changeSet.ToObjMetadataSet(), waitSet...)
 			}
 			if len(waitSet) > 0 {
-				if err := applier.Wait(ctx, waitSet, verifyTimeout); err != nil {
-					r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+				if err := rt.applier.Wait(ctx, waitSet, verifyTimeout); err != nil {
+					r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
 					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
 				}
 			}
-			if err := evalReadyExprs(ctx, target, &ss, stage, objects, verifyTimeout); err != nil {
-				r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+			if err := evalReadyExprs(ctx, rt.target, &ss, stage, objects, verifyTimeout); err != nil {
+				r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
 			}
 
 			// POST actions: the stage (and any downstream gate) is Ready only once
 			// these succeed.
 			if stage.Actions != nil {
-				if err := executor.Run(ctx, ss.Namespace, stage.Actions.Post, toStringSet(executed), record); err != nil {
-					r.runOnFailure(ctx, &ss, stage, executor, toStringSet(executed), record)
+				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Post, toStringSet(executed), record); err != nil {
+					r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
 					return r.failStage(ctx, patchHelper, &ss, stage.Name, "post-action", err, stageStatuses, ra.Revision, executed)
 				}
 			}
@@ -808,7 +820,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			var restart *restartVerdict
 			if stage.Promotion != nil && stage.Promotion.RestartGate != nil {
-				rv, rerr := r.evaluateRestartChecks(ctx, r.gateReader(target), &ss, stage)
+				rv, rerr := r.evaluateRestartChecks(ctx, r.gateReader(rt.target), &ss, stage)
 				if rerr != nil {
 					// Can't read the watched pods (RBAC/API hiccup): never advance
 					// blind. Back off and retry rather than promote past an unverified
@@ -819,7 +831,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			var event *eventVerdict
 			if stage.Promotion != nil && stage.Promotion.EventGate != nil {
-				ev, eerr := r.evaluateEventChecks(ctx, r.gateReader(target), &ss, stage)
+				ev, eerr := r.evaluateEventChecks(ctx, r.gateReader(rt.target), &ss, stage)
 				if eerr != nil {
 					return ctrl.Result{}, eerr // can't read events: fail closed, retry
 				}
@@ -839,7 +851,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				} else if promoState != nil && promoState.EventCheck != "" {
 					cause = fmt.Sprintf("event check %q", promoState.EventCheck)
 				}
-				reverted, ok, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, applier, fetcher, recorder)
+				reverted, ok, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, rt.applier, fetcher, recorder)
 				if rerr != nil {
 					return ctrl.Result{}, rerr // transient revert failure: back off
 				}
@@ -914,7 +926,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// no longer fetchable surfaces as a terminal PreviousRevisionUnavailable.
 		if ss.Spec.RollbackOnFailure {
 			rbCtx, rbSpan := observability.Tracer().Start(ctx, "stageset.rollback")
-			rbReason, rbMsg, rbErr := r.attemptRollback(rbCtx, &ss, applier, fetcher, recorder)
+			rbReason, rbMsg, rbErr := r.attemptRollback(rbCtx, &ss, runtimes, fetcher, recorder)
 			if rbErr != nil {
 				// Transient rollback failure (store outage, apiserver blip).
 				// The stage failure status is already written; back off and
@@ -982,19 +994,38 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			"stages", reconstructedStages, "partial", partialReconstructStages)
 	} else {
 		prunes := stagePruneByName(&ss)
+		specStages := make(map[string]*stagesv1.Stage, len(ss.Spec.Stages))
+		for i := range ss.Spec.Stages {
+			specStages[ss.Spec.Stages[i].Name] = &ss.Spec.Stages[i]
+		}
 		for stageName, refs := range plan.PrunePerStage {
 			if allowed, known := prunes[stageName]; known && !allowed {
 				continue
 			}
-			if len(refs) > 0 {
-				if _, derr := applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(refs)); derr != nil {
-					return ctrl.Result{}, derr
+			if len(refs) == 0 {
+				continue
+			}
+			// Garbage-collect a stage's dropped objects under the same identity
+			// that applied them — its effective ServiceAccount — so a per-stage SA
+			// with create rights can also prune. A stage that produced a prune set
+			// is still in the spec, so it resolves; defaultRT is a safety fallback.
+			pruneApplier := defaultRT.applier
+			if st, ok := specStages[stageName]; ok {
+				prt, perr := r.stageRuntime(ctx, &ss, effectiveServiceAccount(&ss, st), fetcher, runtimes)
+				if perr != nil {
+					return ctrl.Result{}, perr
 				}
+				pruneApplier = prt.applier
+			}
+			if _, derr := pruneApplier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(refs)); derr != nil {
+				return ctrl.Result{}, derr
 			}
 		}
 		for _, removed := range plan.RemovedStages {
+			// A stage removed from the spec no longer carries a per-stage SA, so its
+			// teardown runs under the StageSet-level default identity.
 			if len(removed.Entries) > 0 {
-				if _, derr := applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(removed.Entries)); derr != nil {
+				if _, derr := defaultRT.applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(removed.Entries)); derr != nil {
 					return ctrl.Result{}, derr
 				}
 			}
@@ -1444,6 +1475,60 @@ func (m *manifestApplier) Apply(ctx context.Context, objects []*unstructured.Uns
 	return nil
 }
 
+// stageRuntime bundles the target-cluster connection and the apply/action
+// engines a stage's cluster operations run through. Every field derives from the
+// stage's effective ServiceAccount, so all of a stage's writes — apply, prune,
+// readiness verification, actions — share one identity, and two stages with the
+// same effective SA share the same cached connection and minted token.
+type stageRuntime struct {
+	target   client.Client
+	mapper   apimeta.RESTMapper
+	applier  *apply.Applier
+	executor *actions.Executor
+}
+
+// effectiveServiceAccount is the ServiceAccount a stage's cluster operations run
+// under: the stage's own serviceAccountName when set, otherwise the StageSet's
+// spec.serviceAccountName. Per-stage overrides let one StageSet drive stages that
+// target different tenants, each bounded by its own ServiceAccount's RBAC.
+func effectiveServiceAccount(ss *stagesv1.StageSet, stage *stagesv1.Stage) string {
+	if stage.ServiceAccountName != "" {
+		return stage.ServiceAccountName
+	}
+	return ss.Spec.ServiceAccountName
+}
+
+// stageRuntime resolves (and memoizes in cache) the runtime for an effective SA.
+// The key is the SA string alone: spec.kubeConfig is StageSet-level, so it is the
+// same for every stage, and targetCluster already caches the underlying client
+// and token per (namespace, SA). Stages sharing an SA therefore reuse one
+// connection while distinct SAs stay RBAC-isolated.
+func (r *StageSetReconciler) stageRuntime(ctx context.Context, ss *stagesv1.StageSet, sa string, fetcher *artifact.Fetcher, cache map[string]*stageRuntime) (*stageRuntime, error) {
+	if rt, ok := cache[sa]; ok {
+		return rt, nil
+	}
+	target, mapper, err := r.targetCluster(ctx, ss.Namespace, sa, ss.Spec.KubeConfig)
+	if err != nil {
+		return nil, err
+	}
+	applier := apply.New(target, mapper, stagesv1.GroupVersion.Group)
+	rt := &stageRuntime{
+		target:  target,
+		mapper:  mapper,
+		applier: applier,
+		executor: &actions.Executor{
+			Client:       target,
+			AllowedHosts: r.AllowedActionHosts,
+			IPValidator:  r.ActionIPValidator,
+			Resolver:     &artifact.Resolver{NoCrossNamespace: r.NoCrossNamespaceRefs},
+			Fetcher:      fetcher,
+			Applier:      &manifestApplier{applier: applier, name: ss.Name, namespace: ss.Namespace},
+		},
+	}
+	cache[sa] = rt
+	return rt, nil
+}
+
 func disableWait(stage *stagesv1.Stage) bool {
 	return stage.ReadyChecks != nil && stage.ReadyChecks.DisableWait
 }
@@ -1470,27 +1555,46 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 	if !controllerutil.ContainsFinalizer(ss, FinalizerName) {
 		return ctrl.Result{}, nil
 	}
-	// Teardown deletes the target's objects, so it runs against the same
-	// cluster and identity that applied them.
-	target, targetMapper, err := r.targetCluster(ctx, ss.Namespace, ss.Spec.ServiceAccountName, ss.Spec.KubeConfig)
+	// Teardown deletes each stage's objects under the same identity that applied
+	// them: its effective ServiceAccount. A recorded stage still present in the
+	// spec resolves that SA (stage override, else the StageSet default); a stage
+	// already removed from the spec no longer carries one, so it falls back to the
+	// StageSet default. The default runtime is resolved up front — it validates
+	// spec.kubeConfig and backs the removed-stage fallback.
+	fetcher := r.fetcher()
+	runtimes := map[string]*stageRuntime{}
+	defaultRT, err := r.stageRuntime(ctx, ss, ss.Spec.ServiceAccountName, fetcher, runtimes)
 	if err != nil {
 		return r.teardownFailure(ctx, ss, "connect to target cluster", err)
 	}
-	applier := apply.New(target, targetMapper, stagesv1.GroupVersion.Group)
 	recorder := &stageinv.Recorder{Client: r.Client, ShardCap: r.ShardCap}
 	records, err := recorder.StageRecords(ctx, ss.Name, ss.Namespace)
 	if err != nil {
 		return r.teardownFailure(ctx, ss, "read stage inventory", err)
+	}
+	specStages := make(map[string]*stagesv1.Stage, len(ss.Spec.Stages))
+	for i := range ss.Spec.Stages {
+		specStages[ss.Spec.Stages[i].Name] = &ss.Spec.Stages[i]
 	}
 	prune := stagePruneByName(ss)
 	for _, stage := range stagesByPositionDesc(records) {
 		if allowed, known := prune[stage]; known && !allowed {
 			continue // prune:false: objects orphaned deliberately
 		}
-		if refs := records[stage].Refs; len(refs) > 0 {
-			if _, derr := applier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(refs)); derr != nil {
-				return r.teardownFailure(ctx, ss, fmt.Sprintf("delete stage %q objects", stage), derr)
+		refs := records[stage].Refs
+		if len(refs) == 0 {
+			continue
+		}
+		delApplier := defaultRT.applier
+		if st, ok := specStages[stage]; ok {
+			srt, rerr := r.stageRuntime(ctx, ss, effectiveServiceAccount(ss, st), fetcher, runtimes)
+			if rerr != nil {
+				return r.teardownFailure(ctx, ss, fmt.Sprintf("connect for stage %q teardown", stage), rerr)
 			}
+			delApplier = srt.applier
+		}
+		if _, derr := delApplier.Delete(ctx, ss.Name, ss.Namespace, stageinv.Objects(refs)); derr != nil {
+			return r.teardownFailure(ctx, ss, fmt.Sprintf("delete stage %q objects", stage), derr)
 		}
 	}
 	metrics.DeleteStageReady(ss.Namespace, ss.Name)

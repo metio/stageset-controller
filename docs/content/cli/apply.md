@@ -25,12 +25,13 @@ stagesetctl apply NAME [flags]
 |---|---|---|
 | `--stage` | _(all)_ | Apply only the named stage(s); repeatable. |
 | `--source-dir` | _(none)_ | Use a local artifact tree as `[STAGE=]PATH`; repeatable. Skips the cluster fetch. |
-| `--as-tenant` | `false` | Render and apply impersonating `spec.serviceAccountName` (see [multi-cluster and tenancy](/security/multi-cluster/)). |
+| `--as-tenant` | `false` | Render and apply each stage impersonating its effective `serviceAccountName` — the stage's own, else `spec.serviceAccountName` (see [multi-cluster and tenancy](/security/multi-cluster/)). |
 | `--wait` | `false` | Wait for each stage's objects to become ready before applying the next stage. |
 | `--timeout` | `5m` | Per-stage readiness timeout with `--wait`. |
 
 `apply` needs apply/patch RBAC for every object it writes. With `--as-tenant` that
-RBAC is the tenant ServiceAccount's, exactly as a reconcile applies.
+RBAC is the tenant ServiceAccount's, exactly as a reconcile applies — each stage
+under its own effective `serviceAccountName`.
 
 ## Example
 

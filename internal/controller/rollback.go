@@ -132,7 +132,7 @@ func snapshotStages(ss *stagesv1.StageSet, resolved []artifact.ResolvedArtifact,
 // apiserver blip on re-apply) so the caller backs off and retries rather than
 // reporting a terminal PreviousRevisionUnavailable for something that can heal.
 // A genuinely terminal rollback failure comes back as (reason, msg, nil).
-func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.StageSet, applier *apply.Applier, fetcher *artifact.Fetcher, recorder *stageinv.Recorder) (reason, msg string, err error) {
+func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.StageSet, runtimes map[string]*stageRuntime, fetcher *artifact.Fetcher, recorder *stageinv.Recorder) (reason, msg string, err error) {
 	snap := ss.Status.LastAppliedSnapshot
 	if len(snap) == 0 {
 		return "", "", nil // no snapshot (e.g. the first run failed): nothing to roll back to
@@ -174,7 +174,14 @@ func (r *StageSetReconciler) attemptRollback(ctx context.Context, ss *stagesv1.S
 		// the rolled-back objects unselectable by stages.metio.wtf/stage until the
 		// next normal reconcile re-stamps them.
 		apply.StampStageLabel(objects, stagesv1.StageLabel, ref.Stage)
-		if _, aerr := applier.Apply(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{}); aerr != nil {
+		// Re-apply under the stage's effective ServiceAccount — the same identity
+		// the forward path applied it with — so a per-stage SA governs its rollback
+		// too. A token-mint hiccup here is transient: back off and retry.
+		rt, rtErr := r.stageRuntime(ctx, ss, effectiveServiceAccount(ss, stage), fetcher, runtimes)
+		if rtErr != nil {
+			return "", "", fmt.Errorf("rollback stage %q: connect to target cluster: %w", ref.Stage, rtErr)
+		}
+		if _, aerr := rt.applier.Apply(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{}); aerr != nil {
 			return ReasonPreviousRevisionUnavailable,
 				fmt.Sprintf("cannot roll back stage %q: re-applying the previous revision failed (%v)", ref.Stage, aerr), nil
 		}

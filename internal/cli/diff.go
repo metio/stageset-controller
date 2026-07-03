@@ -53,7 +53,7 @@ func newDiffCommand(o *options) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.stages, "stage", nil, "Diff only the named stage(s); repeatable.")
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
 	cmd.Flags().BoolVar(&opts.serverSide, "server-side", true, "Server-side dry-run apply diff (needs update/patch RBAC). False compares the render against live objects client-side.")
-	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render and dry-run as the StageSet's spec.serviceAccountName.")
+	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render and dry-run each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName).")
 	cmd.Flags().BoolVar(&opts.showSecrets, "show-secrets", false, "Reveal Secret values instead of masking them.")
 	cmd.Flags().BoolVar(&opts.showUnchanged, "show-unchanged", false, "Include objects with no change.")
 	cmd.Flags().BoolVar(&opts.prune, "prune", true, "Show resources that would be deleted because they fell out of the inventory.")
@@ -81,22 +81,50 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		return runtimeErr(err)
 	}
 
-	renderClient := c
-	if opts.asTenant && ss.Spec.ServiceAccountName != "" {
-		renderClient, err = o.impersonatedClient(ss.Namespace, ss.Spec.ServiceAccountName)
-		if err != nil {
-			return runtimeErr(err)
-		}
-	}
-
 	selected, err := preview.SelectStages(&ss, opts.stages)
 	if err != nil {
 		return runtimeErr(err)
 	}
 
-	engine := preview.NewEngine(renderClient, false)
-	engine.SourceDirs = sourceDirs
-	applier := apply.New(renderClient, mapper, stagesv1.GroupVersion.Group)
+	// Each stage renders and dry-run-diffs under its effective ServiceAccount (its
+	// own serviceAccountName, else the StageSet default), mirroring the controller,
+	// so the preview reflects what that stage's identity can read and write.
+	// Without --as-tenant every stage uses the CLI's own credentials. Runtimes are
+	// cached per effective SA; the RESTMapper is identity-independent so the base
+	// mapper is reused. The cross-stage prune plan reads under the default runtime.
+	type diffRuntime struct {
+		engine       *preview.Engine
+		applier      *apply.Applier
+		renderClient client.Client
+	}
+	runtimes := map[string]diffRuntime{}
+	runtimeFor := func(sa string) (diffRuntime, error) {
+		key := ""
+		renderClient := c
+		if opts.asTenant && sa != "" {
+			key = sa
+			if rt, ok := runtimes[key]; ok {
+				return rt, nil
+			}
+			ic, ierr := o.impersonatedClient(ss.Namespace, sa)
+			if ierr != nil {
+				return diffRuntime{}, ierr
+			}
+			renderClient = ic
+		} else if rt, ok := runtimes[key]; ok {
+			return rt, nil
+		}
+		engine := preview.NewEngine(renderClient, false)
+		engine.SourceDirs = sourceDirs
+		rt := diffRuntime{engine: engine, applier: apply.New(renderClient, mapper, stagesv1.GroupVersion.Group), renderClient: renderClient}
+		runtimes[key] = rt
+		return rt, nil
+	}
+	// The default runtime (StageSet-level SA) backs the cross-stage prune plan.
+	defaultRT, err := runtimeFor(ss.Spec.ServiceAccountName)
+	if err != nil {
+		return runtimeErr(err)
+	}
 
 	priorStages := indexStageStatuses(ss.Status.Stages)
 	diffByStage := map[string][]diffrender.Change{}
@@ -104,6 +132,15 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 	var actions []diffrender.ActionPreview
 	for i := range selected {
 		stage := &selected[i]
+		sa := stage.ServiceAccountName
+		if sa == "" {
+			sa = ss.Spec.ServiceAccountName
+		}
+		rt, rtErr := runtimeFor(sa)
+		if rtErr != nil {
+			return runtimeErr(rtErr)
+		}
+		engine, applier, renderClient := rt.engine, rt.applier, rt.renderClient
 		render, rerr := engine.RenderStage(ctx, &ss, stage)
 		if rerr != nil {
 			return runtimeErr(rerr)
@@ -128,7 +165,7 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 
 	pruneByStage := map[string][]diffrender.Change{}
 	if opts.prune {
-		items, perr := engine.PrunePlan(ctx, &ss, renderedRefs)
+		items, perr := defaultRT.engine.PrunePlan(ctx, &ss, renderedRefs)
 		if perr != nil {
 			return runtimeErr(perr)
 		}

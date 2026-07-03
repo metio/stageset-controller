@@ -66,6 +66,32 @@ the controller `create` on `serviceaccounts/token` and read access, no blanket w
 and no `impersonate`. A `StageSet` with no `serviceAccountName`, or one bound to a
 too-narrow SA, fails closed rather than escalating.
 
+### Per-stage ServiceAccounts
+
+A stage can set its own `serviceAccountName`, overriding the StageSet default for
+that stage alone. Every cluster operation the stage performs — apply, prune,
+readiness verification, actions, and rollback — runs as the stage's ServiceAccount,
+bounded by its RBAC. This lets one ordered `StageSet` promote a change through
+environments that each have their own identity, without splitting the rollout
+across separate `StageSet`s:
+
+```yaml
+spec:
+  serviceAccountName: staging-deployer      # default for stages that omit it
+  stages:
+    - name: staging
+      sourceRef: { name: payments-app }     # runs as staging-deployer
+    - name: production
+      serviceAccountName: prod-deployer      # runs as prod-deployer
+      sourceRef: { name: payments-app }
+```
+
+Each stage's identity is minted the same way as the StageSet default — a
+short-lived TokenRequest token locally, or header impersonation against a remote
+`kubeConfig`. Stages sharing a ServiceAccount share one cached token. SOPS
+decryption keys are read under the StageSet-level `serviceAccountName`, since
+`spec.decryption` is a StageSet-wide setting rather than a per-stage one.
+
 ## Single-tenant cluster-admin
 
 On a cluster with a single operator, per-`StageSet` tenant identities are friction

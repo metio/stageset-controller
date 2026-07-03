@@ -41,7 +41,7 @@ func newBuildCommand(o *options) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.stages, "stage", nil, "Render only the named stage(s); repeatable.")
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
 	cmd.Flags().BoolVar(&opts.showSecrets, "show-secrets", false, "Reveal Secret values instead of masking them.")
-	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render as the StageSet's spec.serviceAccountName (the identity the controller uses).")
+	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName) — the identity the controller uses.")
 	return cmd
 }
 
@@ -60,24 +60,49 @@ func runBuild(ctx context.Context, o *options, opts buildOptions) error {
 		return err
 	}
 
-	renderClient := c
-	if opts.asTenant && ss.Spec.ServiceAccountName != "" {
-		renderClient, err = o.impersonatedClient(ss.Namespace, ss.Spec.ServiceAccountName)
-		if err != nil {
-			return err
-		}
-	}
-
 	stages, err := preview.SelectStages(&ss, opts.stages)
 	if err != nil {
 		return err
 	}
-	engine := preview.NewEngine(renderClient, false)
-	engine.SourceDirs = sourceDirs
+
+	// Each stage renders under its effective ServiceAccount (its own
+	// serviceAccountName, else the StageSet default), so a preview reflects what
+	// that stage's identity can read. Without --as-tenant every stage renders with
+	// the CLI's own credentials. Engines are cached per effective SA.
+	engines := map[string]*preview.Engine{}
+	engineFor := func(sa string) (*preview.Engine, error) {
+		key := ""
+		renderClient := c
+		if opts.asTenant && sa != "" {
+			key = sa
+			if e, ok := engines[key]; ok {
+				return e, nil
+			}
+			ic, ierr := o.impersonatedClient(ss.Namespace, sa)
+			if ierr != nil {
+				return nil, ierr
+			}
+			renderClient = ic
+		} else if e, ok := engines[key]; ok {
+			return e, nil
+		}
+		engine := preview.NewEngine(renderClient, false)
+		engine.SourceDirs = sourceDirs
+		engines[key] = engine
+		return engine, nil
+	}
 
 	masker := diffrender.NewSecretMasker(opts.showSecrets)
 	first := true
 	for i := range stages {
+		sa := stages[i].ServiceAccountName
+		if sa == "" {
+			sa = ss.Spec.ServiceAccountName
+		}
+		engine, eerr := engineFor(sa)
+		if eerr != nil {
+			return eerr
+		}
 		render, err := engine.RenderStage(ctx, &ss, &stages[i])
 		if err != nil {
 			return err

@@ -20,7 +20,7 @@ stagesetctl diff NAME [flags]
 | `--stage` | _(all)_ | Diff only the named stage(s); repeatable. |
 | `--source-dir` | _(none)_ | Use a local artifact tree as `[STAGE=]PATH`; repeatable. Skips the cluster fetch. |
 | `--server-side` | `true` | Server-side dry-run apply diff (needs update/patch RBAC). `false` renders client-side against live objects. |
-| `--as-tenant` | `false` | Render and dry-run impersonating `spec.serviceAccountName` (see [multi-cluster and tenancy](/security/multi-cluster/)). |
+| `--as-tenant` | `false` | Render and dry-run each stage impersonating its effective `serviceAccountName` — the stage's own, else `spec.serviceAccountName` (see [multi-cluster and tenancy](/security/multi-cluster/)). |
 | `--show-secrets` | `false` | Reveal Secret values instead of masking. |
 | `--show-unchanged` | `false` | Include objects with no change. |
 | `--prune` | `true` | Show resources that would be deleted (fell out of inventory). |

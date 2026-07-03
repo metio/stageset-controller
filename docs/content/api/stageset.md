@@ -83,7 +83,9 @@ spec:
 
 - **`serviceAccountName`** — the ServiceAccount the controller applies as (via a
   minted TokenRequest token on the local cluster); the StageSet can do exactly what
-  its RBAC allows. See [multi-cluster and tenancy](/security/multi-cluster/).
+  its RBAC allows. A stage can override it with its own
+  [`serviceAccountName`](#serviceaccountname) to target a different tenant. See
+  [multi-cluster and tenancy](/security/multi-cluster/).
 - **`kubeConfig`** — apply to a remote cluster. Set exactly one of:
   - **`secretRef`** — a Secret holding a self-contained kubeconfig (with its own
     embedded credentials).
@@ -184,6 +186,7 @@ spec:
         apiVersion: source.toolkit.fluxcd.io/v1   # required for a producer kind
         namespace: other-ns     # default: the StageSet's namespace
       path: ./overlays/prod     # path inside the artifact (default ./)
+      serviceAccountName: payments-eu-deployer  # per-stage identity (default: spec.serviceAccountName)
       prune: true               # GC objects that leave the stage (default true)
       timeout: 3m               # per-stage timeout (default: spec.timeout)
       force: false              # sugar for conflictPolicy.default: Recreate
@@ -211,6 +214,33 @@ accepts any producer kind, because a producer reference is resolved through the
 against a fixed set. This is a deliberate divergence from a source consumer that
 restricts its source kinds to a closed enum — here the resolution is
 producer-aware, so a new producer kind works without a schema change.
+
+### serviceAccountName
+
+The ServiceAccount this stage's cluster operations run as — apply, prune,
+readiness verification, and [actions](#actions) — overriding the StageSet-level
+`spec.serviceAccountName`. Empty inherits the StageSet default. Each stage's
+writes are bounded by its own ServiceAccount's RBAC, so a single StageSet can
+roll a change through environments that live under different identities:
+
+```yaml
+spec:
+  serviceAccountName: staging-deployer      # default for stages that omit it
+  stages:
+    - name: staging
+      sourceRef: { name: my-app }           # runs as staging-deployer
+    - name: production
+      serviceAccountName: prod-deployer      # runs as prod-deployer instead
+      sourceRef: { name: my-app }
+```
+
+The same identity that applies a stage also prunes and tears it down, so a
+per-stage ServiceAccount with create rights can garbage-collect its own objects.
+On the local cluster the identity is assumed by minting a short-lived TokenRequest
+token; a remote [`kubeConfig`](#security-and-targeting) instead impersonates the
+ServiceAccount against that cluster's credentials. SOPS decryption keys are read
+under the StageSet-level identity, since `spec.decryption` is a StageSet field.
+See [multi-cluster and tenancy](/security/multi-cluster/).
 
 ### patches
 

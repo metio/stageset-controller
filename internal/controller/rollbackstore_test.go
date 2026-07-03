@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
-	"github.com/metio/stageset-controller/internal/apply"
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/stageinv"
 )
@@ -105,12 +104,14 @@ func TestAttemptRollback_StoreSurvivesProducerGC(t *testing.T) {
 	store.data[rollbackKey(ss, ref.Stage, ref.Digest)] = data
 
 	r := &StageSetReconciler{Client: c, RESTMapper: c.RESTMapper(), RollbackStore: store}
-	applier := apply.New(c, c.RESTMapper(), stagesv1.GroupVersion.Group)
+	// No serviceAccountName on the spec or stage: the runtime resolver returns the
+	// controller's own client, so this exercises the same apply path as before.
+	runtimes := map[string]*stageRuntime{}
 	recorder := &stageinv.Recorder{Client: c}
 	// A fetcher that would fail (the producer is "gone"); it must not be reached.
 	deadFetcher := &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP}
 
-	if reason, msg, err := r.attemptRollback(context.Background(), ss, applier, deadFetcher, recorder); err != nil || reason != "" {
+	if reason, msg, err := r.attemptRollback(context.Background(), ss, runtimes, deadFetcher, recorder); err != nil || reason != "" {
 		t.Fatalf("store should make rollback succeed despite producer GC, got reason=%q msg=%q err=%v", reason, msg, err)
 	}
 	if !cmExists(t, c, ns, "restored") {

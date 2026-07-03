@@ -45,7 +45,7 @@ func newApplyCommand(o *options) *cobra.Command {
 	}
 	cmd.Flags().StringSliceVar(&opts.stages, "stage", nil, "Apply only the named stage(s); repeatable.")
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
-	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render and apply as the StageSet's spec.serviceAccountName.")
+	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render and apply each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName).")
 	cmd.Flags().BoolVar(&opts.wait, "wait", false, "Wait for each stage's objects to become ready before applying the next stage.")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 5*time.Minute, "Per-stage readiness timeout with --wait.")
 	return cmd
@@ -66,26 +66,57 @@ func runApply(ctx context.Context, o *options, opts applyOptions) error {
 		return runtimeErr(err)
 	}
 
-	applyClient := c
-	if opts.asTenant && ss.Spec.ServiceAccountName != "" {
-		applyClient, err = o.impersonatedClient(ss.Namespace, ss.Spec.ServiceAccountName)
-		if err != nil {
-			return runtimeErr(err)
-		}
-	}
-
 	selected, err := preview.SelectStages(&ss, opts.stages)
 	if err != nil {
 		return runtimeErr(err)
 	}
 
-	engine := preview.NewEngine(applyClient, false)
-	engine.SourceDirs = sourceDirs
-	applier := apply.New(applyClient, mapper, stagesv1.GroupVersion.Group)
+	// Each stage renders and applies under its effective ServiceAccount (its own
+	// serviceAccountName, else the StageSet default), mirroring the controller.
+	// Without --as-tenant every stage uses the CLI's own credentials. Runtimes are
+	// cached per effective SA — impersonatedClient builds a discovery mapper, so a
+	// StageSet whose stages share an SA pays that cost once. The RESTMapper is
+	// identity-independent, so the base mapper is reused for every applier.
+	type applyRuntime struct {
+		engine  *preview.Engine
+		applier *apply.Applier
+	}
+	runtimes := map[string]applyRuntime{}
+	runtimeFor := func(sa string) (applyRuntime, error) {
+		key := ""
+		applyClient := c
+		if opts.asTenant && sa != "" {
+			key = sa
+			if rt, ok := runtimes[key]; ok {
+				return rt, nil
+			}
+			ic, ierr := o.impersonatedClient(ss.Namespace, sa)
+			if ierr != nil {
+				return applyRuntime{}, ierr
+			}
+			applyClient = ic
+		} else if rt, ok := runtimes[key]; ok {
+			return rt, nil
+		}
+		engine := preview.NewEngine(applyClient, false)
+		engine.SourceDirs = sourceDirs
+		rt := applyRuntime{engine: engine, applier: apply.New(applyClient, mapper, stagesv1.GroupVersion.Group)}
+		runtimes[key] = rt
+		return rt, nil
+	}
 
 	total := 0
 	for i := range selected {
 		stage := &selected[i]
+		sa := stage.ServiceAccountName
+		if sa == "" {
+			sa = ss.Spec.ServiceAccountName
+		}
+		rt, rtErr := runtimeFor(sa)
+		if rtErr != nil {
+			return runtimeErr(rtErr)
+		}
+		engine, applier := rt.engine, rt.applier
 		render, rerr := engine.RenderStage(ctx, &ss, stage)
 		if rerr != nil {
 			return runtimeErr(rerr)
