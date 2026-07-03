@@ -14,7 +14,7 @@ jobs:
     # detect job auto-enables envtest and arch-go from this repo's files. Named
     # "Golang" so its checks read "Golang / test", "Golang / lint", …
     name: Golang
-    uses: metio/ci/.github/workflows/golang.yml@553c5f3c3d2693c7ef182954136bdfac7b25b80e # 2026.7.2101318
+    uses: metio/ci/.github/workflows/golang.yml@0723b4d89f3638abaa992a666382b00bb7c45d3d # 2026.7.3153603
   reuse:
     runs-on: ubuntu-latest
     steps:
