@@ -91,6 +91,19 @@ func TestRun_InvalidOutput_ExitsUsage(t *testing.T) {
 	}
 }
 
+func TestRun_InvalidColor_ExitsUsage(t *testing.T) {
+	// A bad --color value is flag misuse (exit 2), like --output: the caller
+	// invoked the tool wrong; it did not fail at runtime (exit 3). Resolved
+	// before any cluster access, so runArgs (no override) reaches it.
+	_, stderr, code := runArgs("diff", "some-stageset", "--color", "bogus")
+	if code != exitUsage {
+		t.Fatalf("invalid color exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr, "invalid --color") {
+		t.Errorf("stderr missing validation message:\n%s", stderr)
+	}
+}
+
 func TestRootUse_KubectlPluginName(t *testing.T) {
 	orig := osArgs0
 	t.Cleanup(func() { osArgs0 = orig })

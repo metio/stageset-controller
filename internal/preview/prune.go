@@ -6,6 +6,7 @@ package preview
 import (
 	"context"
 	"sort"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -96,7 +97,10 @@ func (e *Engine) fetchPruneItems(ctx context.Context, stage string, refs []inven
 			items = append(items, PruneItem{Stage: stage, Ref: ref})
 			continue
 		}
-		if live.GetAnnotations()[stagesv1.PruneAnnotation] == "disabled" {
+		// Case-insensitive to match the ssa teardown path (utils.AnyInMetadata
+		// compares with EqualFold), so `stageset diff` and the real prune agree on
+		// which objects the opt-out spares.
+		if strings.EqualFold(live.GetAnnotations()[stagesv1.PruneAnnotation], "disabled") {
 			continue
 		}
 		items = append(items, PruneItem{Stage: stage, Ref: ref, Object: live})

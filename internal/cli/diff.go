@@ -65,7 +65,8 @@ func newDiffCommand(o *options) *cobra.Command {
 func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 	color, err := colorEnabled(opts.color, o.streams.Out)
 	if err != nil {
-		return runtimeErr(err)
+		// An unrecognized --color value is flag misuse, not a runtime failure.
+		return usageErr(err)
 	}
 	sourceDirs, err := parseSourceDirs(opts.sourceDirs)
 	if err != nil {

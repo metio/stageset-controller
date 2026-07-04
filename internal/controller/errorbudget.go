@@ -221,7 +221,11 @@ func (r *StageSetReconciler) gateStageBudget(ctx context.Context, ss *stagesv1.S
 				requeue: interval,
 			}
 		}
-		return stageBudgetGate{sourceErr: v.sourceErr} // Allow: proceed
+		// Allow: proceed. The stage is not held, so drop any freeze gauge a prior
+		// exhausted-budget reconcile left set — the gauge tracks an active hold,
+		// which this reconcile no longer has.
+		metrics.SetStageBudgetFrozen(ss.Namespace, ss.Name, stage.Name, false)
+		return stageBudgetGate{sourceErr: v.sourceErr}
 	}
 	if !v.frozen {
 		metrics.SetStageBudgetFrozen(ss.Namespace, ss.Name, stage.Name, false)

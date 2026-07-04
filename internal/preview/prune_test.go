@@ -118,6 +118,32 @@ func TestPrunePlan_PerObjectAnnotationExcluded(t *testing.T) {
 	}
 }
 
+// TestPrunePlan_PerObjectAnnotationExcludedMixedCase pins the opt-out to the
+// same case-insensitive match the ssa teardown uses (utils.AnyInMetadata's
+// EqualFold): a "Disabled" value must spare the object in the preview too, or
+// `stageset diff` would show a deletion the real prune does not perform.
+func TestPrunePlan_PerObjectAnnotationExcludedMixedCase(t *testing.T) {
+	scheme := testScheme(t)
+	keepRef, keepCM := cmRef("keep")
+	dropRef, dropCM := cmRef("drop")
+	dropCM.SetAnnotations(map[string]string{stagesv1.PruneAnnotation: "Disabled"})
+
+	ss := stageSet("s1")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(keepCM, dropCM).Build()
+	seedInventory(t, c, ss, "s1", 0, keepRef, dropRef)
+
+	engine := NewEngine(c, false)
+	rendered := map[string][]inventory.ObjectRef{"s1": {keepRef}}
+
+	items, err := engine.PrunePlan(context.Background(), ss, rendered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("mixed-case prune opt-out must not be pruned in preview, got %+v", items)
+	}
+}
+
 // TestPrunePlan_AlreadyGoneObjectDropped seeds an object in the inventory whose
 // live counterpart was never created; a NotFound read drops it from the plan.
 func TestPrunePlan_AlreadyGoneObjectDropped(t *testing.T) {

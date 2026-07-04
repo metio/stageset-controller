@@ -448,6 +448,52 @@ func TestReconcile_StageErrorBudget_FreezesEntryThenResumes(t *testing.T) {
 	}
 }
 
+// A per-stage freeze that is later re-evaluated under an unreadable source with
+// onSourceError=Allow proceeds, and must not leave the per-stage frozen gauge
+// stuck at 1 — the gauge reflects an active hold, which the proceeding reconcile
+// no longer has.
+func TestReconcile_StageErrorBudget_SourceErrorAllowClearsFrozenGauge(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea-a", "", map[string]string{"cm.yaml": configMapManifest(ns, "clr-a")})
+	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "clr-b")})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "stage-budget-clear"},
+		Spec: stagesv1.StageSetSpec{
+			Interval: metav1.Duration{Duration: time.Minute},
+			Stages: []stagesv1.Stage{
+				{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea-a"}},
+				// onSourceError unset defaults to Allow.
+				{Name: "stage-b", SourceRef: stagesv1.SourceReference{Name: "ea-b"}, ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"}},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+
+	// Reconcile 1: budget exhausted → stage-b frozen out, gauge set to 1.
+	start := tm("2026-01-01T00:00:00Z").Time
+	reconcileWithQuerier(t, c, ss, start, &fakeQuerier{value: 0.0})
+	if cmExists(t, c, ns, "clr-b") {
+		t.Fatal("stage-b must be held out by its exhausted budget on the first reconcile")
+	}
+	if v := testutil.ToFloat64(metrics.StageBudgetFrozen.WithLabelValues(ns, "stage-budget-clear", "stage-b")); v != 1 {
+		t.Fatalf("precondition: stage_budget_frozen gauge = %v, want 1", v)
+	}
+
+	// Reconcile 2: source now unreadable; onSourceError=Allow proceeds and applies
+	// stage-b. The gauge must fall back to 0 — the stage is no longer held.
+	reconcileWithQuerier(t, c, getStageSet(t, c, ns, "stage-budget-clear"), start.Add(time.Minute), &fakeQuerier{err: errors.New("prometheus unreachable")})
+	if !cmExists(t, c, ns, "clr-b") {
+		t.Fatal("stage-b should apply once the budget source is unreadable under onSourceError=Allow")
+	}
+	if v := testutil.ToFloat64(metrics.StageBudgetFrozen.WithLabelValues(ns, "stage-budget-clear", "stage-b")); v != 0 {
+		t.Errorf("stage_budget_frozen gauge = %v after proceeding under onSourceError=Allow, want 0 (stale freeze gauge)", v)
+	}
+}
+
 // The budget-override break-glass ships a per-stage-frozen rollout once.
 func TestReconcile_StageErrorBudget_OverrideShipsOnce(t *testing.T) {
 	c := testClient(t)
