@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +12,34 @@ import (
 	"golang.org/x/term"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/decryptor"
+	"github.com/metio/stageset-controller/internal/preview"
 )
+
+// stageSetDecryptor builds the spec.decryption SOPS decryptor for build, diff,
+// and apply, so the client-side render decrypts exactly where the controller
+// does (between fetch and build). The key Secret is read with the identity the
+// controller uses: the StageSet-level serviceAccountName under --as-tenant,
+// else the CLI's own credentials — regardless of any per-stage SA, matching
+// the reconcile path. Returns nil when decryption is not configured.
+func (o *options) stageSetDecryptor(ctx context.Context, c client.Client, asTenant bool, ss *stagesv1.StageSet) (*decryptor.Decryptor, error) {
+	if ss.Spec.Decryption == nil {
+		return nil, nil
+	}
+	readClient := c
+	if asTenant && ss.Spec.ServiceAccountName != "" {
+		ic, err := o.impersonatedClient(ss.Namespace, ss.Spec.ServiceAccountName)
+		if err != nil {
+			return nil, err
+		}
+		readClient = ic
+	}
+	return preview.BuildDecryptor(ctx, readClient, ss)
+}
 
 // osArgs0 is a seam over os.Args[0] so the kubectl-plugin name detection is
 // exercisable from tests.

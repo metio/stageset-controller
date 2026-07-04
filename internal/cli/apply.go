@@ -71,6 +71,13 @@ func runApply(ctx context.Context, o *options, opts applyOptions) error {
 		return runtimeErr(err)
 	}
 
+	// spec.decryption: decrypt where the controller does, or the apply below
+	// would SSA ciphertext the controller immediately rewrites decrypted.
+	dec, derr := o.stageSetDecryptor(ctx, c, opts.asTenant, &ss)
+	if derr != nil {
+		return runtimeErr(derr)
+	}
+
 	// Each stage renders and applies under its effective ServiceAccount (its own
 	// serviceAccountName, else the StageSet default), mirroring the controller.
 	// Without --as-tenant every stage uses the CLI's own credentials. Runtimes are
@@ -100,6 +107,7 @@ func runApply(ctx context.Context, o *options, opts applyOptions) error {
 		}
 		engine := preview.NewEngine(applyClient, false)
 		engine.SourceDirs = sourceDirs
+		engine.Decryptor = dec
 		rt := applyRuntime{engine: engine, applier: apply.New(applyClient, mapper, stagesv1.GroupVersion.Group)}
 		runtimes[key] = rt
 		return rt, nil

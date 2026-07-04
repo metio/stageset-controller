@@ -25,6 +25,7 @@ import (
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
+	"github.com/metio/stageset-controller/internal/decryptor"
 )
 
 // Engine renders stages for a StageSet. Construct one per command invocation.
@@ -42,6 +43,13 @@ type Engine struct {
 	// without its own entry. Used when the artifact storage URL is unreachable
 	// or for fully offline rendering.
 	SourceDirs map[string]string
+
+	// Decryptor decrypts SOPS-encrypted source files between fetch and build,
+	// the same order the controller runs. Build it with BuildDecryptor from
+	// spec.decryption; nil when decryption is not configured. Leaving it nil
+	// for a spec.decryption StageSet would render (and diff/apply) ciphertext
+	// the controller applies decrypted.
+	Decryptor *decryptor.Decryptor
 }
 
 // NewEngine builds an Engine with a permissive fetcher: the operator is dialing
@@ -56,6 +64,33 @@ func NewEngine(c client.Client, noCrossNamespace bool) *Engine {
 		Resolver: &artifact.Resolver{NoCrossNamespace: noCrossNamespace},
 		Fetcher:  f,
 	}
+}
+
+// BuildDecryptor constructs the SOPS decryptor for spec.decryption, mirroring
+// the controller's reconcile path: the key Secret is read in the StageSet's
+// namespace through c — pass the tenant-impersonating client under --as-tenant
+// so the tenant's RBAC bounds which key material the preview may use, exactly
+// as the controller reads it under spec.serviceAccountName. Cloud-KMS master
+// keys decrypt with the CLI's ambient credentials (the operator's own cloud
+// identity — the client-side analogue of the controller's ambient default).
+// Returns (nil, nil) when decryption is not configured.
+func BuildDecryptor(ctx context.Context, c client.Client, ss *stagesv1.StageSet) (*decryptor.Decryptor, error) {
+	if ss.Spec.Decryption == nil {
+		return nil, nil
+	}
+	d := ss.Spec.Decryption
+	if d.Provider != "sops" {
+		return nil, fmt.Errorf("spec.decryption.provider %q is not supported (only sops)", d.Provider)
+	}
+	var keys decryptor.Keys
+	if d.SecretRef != nil {
+		var sec corev1.Secret
+		if err := c.Get(ctx, types.NamespacedName{Namespace: ss.Namespace, Name: d.SecretRef.Name}, &sec); err != nil {
+			return nil, fmt.Errorf("decryption: read key secret %q: %w", d.SecretRef.Name, err)
+		}
+		keys = decryptor.KeysFromSecretData(sec.Data)
+	}
+	return decryptor.New(keys)
 }
 
 // StageRender is the rendered output of one stage.
@@ -94,13 +129,20 @@ func SelectStages(ss *stagesv1.StageSet, names []string) ([]stagesv1.Stage, erro
 	return out, nil
 }
 
-// RenderStage resolves the stage's source (cluster or local dir), runs the
-// kustomize build with the stage's patches and post-build substitutions, and
-// returns the apply-ready objects.
+// RenderStage resolves the stage's source (cluster or local dir), decrypts it
+// when spec.decryption is configured, runs the kustomize build with the
+// stage's patches and post-build substitutions, and returns the apply-ready
+// objects — the controller's fetch→decrypt→build order.
 func (e *Engine) RenderStage(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage) (StageRender, error) {
 	files, revision, local, err := e.sourceFiles(ctx, ss, stage)
 	if err != nil {
 		return StageRender{}, err
+	}
+	if e.Decryptor != nil {
+		files, err = e.Decryptor.DecryptFiles(files)
+		if err != nil {
+			return StageRender{}, fmt.Errorf("decrypt stage %q: %w", stage.Name, err)
+		}
 	}
 	vars, err := resolvePostBuildVars(ctx, e.Client, ss.Namespace, stage.PostBuild)
 	if err != nil {

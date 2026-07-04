@@ -65,6 +65,13 @@ func runBuild(ctx context.Context, o *options, opts buildOptions) error {
 		return err
 	}
 
+	// spec.decryption: decrypt where the controller does, or the render below
+	// would emit ciphertext the controller never applies.
+	dec, err := o.stageSetDecryptor(ctx, c, opts.asTenant, &ss)
+	if err != nil {
+		return err
+	}
+
 	// Each stage renders under its effective ServiceAccount (its own
 	// serviceAccountName, else the StageSet default), so a preview reflects what
 	// that stage's identity can read. Without --as-tenant every stage renders with
@@ -88,6 +95,7 @@ func runBuild(ctx context.Context, o *options, opts buildOptions) error {
 		}
 		engine := preview.NewEngine(renderClient, false)
 		engine.SourceDirs = sourceDirs
+		engine.Decryptor = dec
 		engines[key] = engine
 		return engine, nil
 	}

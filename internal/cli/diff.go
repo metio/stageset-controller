@@ -87,6 +87,14 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		return runtimeErr(err)
 	}
 
+	// spec.decryption: decrypt where the controller does, or the server-side
+	// dry-run below would diff ciphertext against the controller's plaintext
+	// and permanently report drift.
+	dec, derr := o.stageSetDecryptor(ctx, c, opts.asTenant, &ss)
+	if derr != nil {
+		return runtimeErr(derr)
+	}
+
 	// Each stage renders and dry-run-diffs under its effective ServiceAccount (its
 	// own serviceAccountName, else the StageSet default), mirroring the controller,
 	// so the preview reflects what that stage's identity can read and write.
@@ -117,6 +125,7 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		}
 		engine := preview.NewEngine(renderClient, false)
 		engine.SourceDirs = sourceDirs
+		engine.Decryptor = dec
 		rt := diffRuntime{engine: engine, applier: apply.New(renderClient, mapper, stagesv1.GroupVersion.Group), renderClient: renderClient}
 		runtimes[key] = rt
 		return rt, nil

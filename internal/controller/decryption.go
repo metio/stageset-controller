@@ -6,20 +6,12 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/decryptor"
-)
-
-// SOPS conventions for key material in a Secret: age private keys live under
-// data entries suffixed ".agekey", armored PGP private keys under ".asc".
-const (
-	ageKeySuffix = ".agekey"
-	pgpKeySuffix = ".asc"
 )
 
 // buildDecryptor constructs a SOPS decryptor from spec.decryption, reading the
@@ -48,14 +40,7 @@ func (r *StageSetReconciler) buildDecryptor(ctx context.Context, ss *stagesv1.St
 		if err := local.Get(ctx, types.NamespacedName{Namespace: ss.Namespace, Name: d.SecretRef.Name}, &sec); err != nil {
 			return nil, fmt.Errorf("decryption: read key secret %q: %w", d.SecretRef.Name, err)
 		}
-		for k, v := range sec.Data {
-			switch {
-			case strings.HasSuffix(k, ageKeySuffix):
-				keys.Age = append(keys.Age, string(v))
-			case strings.HasSuffix(k, pgpKeySuffix):
-				keys.PGP = append(keys.PGP, string(v))
-			}
-		}
+		keys = decryptor.KeysFromSecretData(sec.Data)
 	}
 
 	var opts []decryptor.Option
