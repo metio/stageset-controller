@@ -24,7 +24,16 @@ import (
 // ConfigMap in namespace "ns".
 func cmRef(name string) (inventory.ObjectRef, *corev1.ConfigMap) {
 	ref := inventory.ObjectRef{Group: "", Kind: "ConfigMap", Namespace: "ns", Name: name, Version: "v1"}
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name}}
+	// A live object stageset applied carries the StageSet's owner labels
+	// (ssa SetOwnerLabels), which the real Delete rechecks; the fixtures stamp
+	// them so the preview's owner-label recheck sees a genuinely-owned object.
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "ns", Name: name,
+		Labels: map[string]string{
+			stagesv1.GroupVersion.Group + "/name":      "app",
+			stagesv1.GroupVersion.Group + "/namespace": "ns",
+		},
+	}}
 	return ref, cm
 }
 
@@ -122,6 +131,52 @@ func TestPrunePlan_PerObjectAnnotationExcluded(t *testing.T) {
 // same case-insensitive match the ssa teardown uses (utils.AnyInMetadata's
 // EqualFold): a "Disabled" value must spare the object in the preview too, or
 // `stageset diff` would show a deletion the real prune does not perform.
+// TestPrunePlan_AdoptedObjectExcluded: an object whose live owner labels no
+// longer match this StageSet (adopted or relabelled by another manager) is
+// skipped by the real Delete's ssa Inclusions recheck, so the preview must not
+// show it as a deletion either.
+func TestPrunePlan_AdoptedObjectExcluded(t *testing.T) {
+	scheme := testScheme(t)
+	keepRef, keepCM := cmRef("keep")
+	dropRef, dropCM := cmRef("drop")
+	// Another manager adopted the dropped object: its owner-name label now
+	// points elsewhere.
+	dropCM.Labels[stagesv1.GroupVersion.Group+"/name"] = "someone-else"
+
+	ss := stageSet("s1")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(keepCM, dropCM).Build()
+	seedInventory(t, c, ss, "s1", 0, keepRef, dropRef)
+
+	items, err := NewEngine(c, false).PrunePlan(context.Background(), ss, map[string][]inventory.ObjectRef{"s1": {keepRef}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("an adopted object (owner labels changed) must not be shown as pruned, got %+v", items)
+	}
+}
+
+// TestPrunePlan_MissingOwnerLabelsExcluded: an object that lost its owner
+// labels entirely fails the Inclusions recheck too.
+func TestPrunePlan_MissingOwnerLabelsExcluded(t *testing.T) {
+	scheme := testScheme(t)
+	keepRef, keepCM := cmRef("keep")
+	dropRef, dropCM := cmRef("drop")
+	dropCM.Labels = nil
+
+	ss := stageSet("s1")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(keepCM, dropCM).Build()
+	seedInventory(t, c, ss, "s1", 0, keepRef, dropRef)
+
+	items, err := NewEngine(c, false).PrunePlan(context.Background(), ss, map[string][]inventory.ObjectRef{"s1": {keepRef}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("an object without owner labels must not be shown as pruned, got %+v", items)
+	}
+}
+
 func TestPrunePlan_PerObjectAnnotationExcludedMixedCase(t *testing.T) {
 	scheme := testScheme(t)
 	keepRef, keepCM := cmRef("keep")

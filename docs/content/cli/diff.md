@@ -21,6 +21,7 @@ stagesetctl diff NAME [flags]
 | `--source-dir` | _(none)_ | Use a local artifact tree as `[STAGE=]PATH`; repeatable. Skips the cluster fetch. |
 | `--server-side` | `true` | Server-side dry-run apply diff (needs update/patch RBAC). `false` renders client-side against live objects. |
 | `--as-tenant` | `false` | Server-side dry-run each stage as its effective `serviceAccountName` — the identity the controller _applies_ with (the stage's own, else `spec.serviceAccountName`). Reads (source resolve, `substituteFrom`, inventory) always use your credentials, mirroring the controller, which reads as itself (see [multi-cluster and tenancy](/security/multi-cluster/)). |
+| `--no-cross-namespace-refs` | `false` | Reject a stage `sourceRef` that targets another namespace, matching a controller run with `--no-cross-namespace-refs`, so the preview fails the way the controller would. |
 | `--show-secrets` | `false` | Reveal Secret values instead of masking. |
 | `--show-unchanged` | `false` | Include objects with no change. |
 | `--prune` | `true` | Show resources that would be deleted (fell out of inventory). |

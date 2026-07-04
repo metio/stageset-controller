@@ -26,6 +26,7 @@ stagesetctl apply NAME [flags]
 | `--stage` | _(all)_ | Apply only the named stage(s); repeatable. |
 | `--source-dir` | _(none)_ | Use a local artifact tree as `[STAGE=]PATH`; repeatable. Skips the cluster fetch. |
 | `--as-tenant` | `false` | Apply each stage as its effective `serviceAccountName` — the identity the controller applies with (the stage's own, else `spec.serviceAccountName`). Reads (source resolve, `substituteFrom`) always use your credentials, mirroring the controller, which reads as itself (see [multi-cluster and tenancy](/security/multi-cluster/)). |
+| `--no-cross-namespace-refs` | `false` | Reject a stage `sourceRef` that targets another namespace, matching a controller run with `--no-cross-namespace-refs`, so the preview fails the way the controller would. |
 | `--wait` | `false` | Wait for each stage's objects to become ready before applying the next stage. |
 | `--timeout` | `5m` | Per-stage readiness timeout with `--wait`. |
 

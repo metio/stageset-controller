@@ -4,10 +4,13 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
 func writeSourceTree(t *testing.T, files map[string]string) string {
@@ -101,5 +104,40 @@ func TestParseSourceDirs(t *testing.T) {
 
 	if _, err := parseSourceDirs([]string{"a=/x", "a=/y"}); err == nil {
 		t.Fatal("want error for duplicate stage")
+	}
+}
+
+// TestBuild_NoCrossNamespaceRefsFlag pins that --no-cross-namespace-refs makes
+// the preview reject a cross-namespace stage sourceRef the same way a
+// controller run with that flag would — and that without the flag the resolve
+// proceeds (failing later on the artifact, not on the namespace).
+func TestBuild_NoCrossNamespaceRefsFlag(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "xnsbuild")
+
+	ss := makeStageSet(t, c, ns, "app")
+	ss.Spec.Stages[0].SourceRef = stagesv1.SourceReference{Name: "elsewhere-artifact", Namespace: "other-ns"}
+	if err := c.Update(context.Background(), ss); err != nil {
+		t.Fatalf("set cross-namespace sourceRef: %v", err)
+	}
+
+	// With the flag: rejected as cross-namespace.
+	_, stderr, code := runCLI(t, cfg, "build", "app", "-n", ns, "--no-cross-namespace-refs")
+	if code == exitOK {
+		t.Fatalf("--no-cross-namespace-refs must reject a cross-namespace sourceRef (stderr=%s)", stderr)
+	}
+	if !strings.Contains(stderr, "cross-namespace") {
+		t.Errorf("expected a cross-namespace rejection, got: %s", stderr)
+	}
+
+	// Without the flag: the cross-namespace ref is allowed, so the resolve
+	// proceeds and fails on the (absent) artifact instead — NOT on the namespace.
+	_, stderr2, code2 := runCLI(t, cfg, "build", "app", "-n", ns)
+	if code2 == exitOK {
+		t.Fatalf("the artifact does not exist, so build should still fail (stderr=%s)", stderr2)
+	}
+	if strings.Contains(stderr2, "cross-namespace") {
+		t.Errorf("without the flag, the cross-namespace ref must be allowed, got: %s", stderr2)
 	}
 }

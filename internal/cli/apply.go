@@ -17,12 +17,13 @@ import (
 )
 
 type applyOptions struct {
-	name       string
-	stages     []string
-	sourceDirs []string
-	asTenant   bool
-	wait       bool
-	timeout    time.Duration
+	name             string
+	stages           []string
+	sourceDirs       []string
+	asTenant         bool
+	noCrossNamespace bool
+	wait             bool
+	timeout          time.Duration
 }
 
 func newApplyCommand(o *options) *cobra.Command {
@@ -46,6 +47,7 @@ func newApplyCommand(o *options) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.stages, "stage", nil, "Apply only the named stage(s); repeatable.")
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
 	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Apply each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName) — the identity the controller applies with. Reads (source resolve, substituteFrom) always use your credentials, as the controller reads as itself.")
+	cmd.Flags().BoolVar(&opts.noCrossNamespace, "no-cross-namespace-refs", false, "Match a controller run with --no-cross-namespace-refs: reject a stage sourceRef that targets another namespace, so the preview fails the same way the controller would.")
 	cmd.Flags().BoolVar(&opts.wait, "wait", false, "Wait for each stage's objects to become ready before applying the next stage.")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 5*time.Minute, "Per-stage readiness timeout with --wait.")
 	return cmd
@@ -108,7 +110,7 @@ func runApply(ctx context.Context, o *options, opts applyOptions) error {
 		// The engine's reads run with the caller's credentials — the
 		// controller resolves sources and substituteFrom as itself; only the
 		// APPLY runs as the tenant SA (see diff.go for the full rationale).
-		engine := preview.NewEngine(c, false)
+		engine := preview.NewEngine(c, opts.noCrossNamespace)
 		engine.SourceDirs = sourceDirs
 		engine.Decryptor = dec
 		rt := applyRuntime{engine: engine, applier: apply.New(applyClient, mapper, stagesv1.GroupVersion.Group)}

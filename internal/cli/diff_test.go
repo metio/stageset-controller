@@ -44,6 +44,26 @@ func createConfigMap(t *testing.T, c client.Client, ns, name string, data map[st
 	}
 }
 
+// createOwnedConfigMap creates a live ConfigMap already carrying the StageSet's
+// owner labels (name=app, the makeStageSet name), as an object stageset applied
+// would — so the prune preview's owner-label recheck treats it as genuinely
+// owned and prunable.
+func createOwnedConfigMap(t *testing.T, c client.Client, ns, name string, data map[string]any) {
+	t.Helper()
+	g := stagesv1.GroupVersion.Group
+	cm := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "ConfigMap",
+		"metadata": map[string]any{"name": name, "namespace": ns, "labels": map[string]any{
+			g + "/name":      "app",
+			g + "/namespace": ns,
+		}},
+		"data": data,
+	}}
+	if err := c.Create(context.Background(), cm); err != nil {
+		t.Fatalf("create owned ConfigMap %s: %v", name, err)
+	}
+}
+
 // createConfigMapWithStageLabel creates a live ConfigMap already carrying the
 // per-stage discovery label a reconcile would have stamped, so a faithful diff
 // against an unchanged render reports clean.
@@ -115,7 +135,7 @@ func TestDiff_ShowsPrune(t *testing.T) {
 	ss := makeStageSet(t, c, ns, "app")
 
 	// An object the stage used to own and that still exists in the cluster.
-	createConfigMap(t, c, ns, "obsolete", map[string]any{"k": "v"})
+	createOwnedConfigMap(t, c, ns, "obsolete", map[string]any{"k": "v"})
 	recorder := &stageinv.Recorder{Client: c}
 	if err := recorder.Write(context.Background(), ss, "first", 0, []inventory.ObjectRef{
 		{Group: "", Kind: "ConfigMap", Namespace: ns, Name: "obsolete", Version: "v1"},
@@ -148,7 +168,7 @@ func TestDiff_PruneSuppressedByFlag(t *testing.T) {
 	c := testClient(t, cfg)
 	ns := makeNamespace(t, c, "diffnoprune")
 	ss := makeStageSet(t, c, ns, "app")
-	createConfigMap(t, c, ns, "obsolete", map[string]any{"k": "v"})
+	createOwnedConfigMap(t, c, ns, "obsolete", map[string]any{"k": "v"})
 	recorder := &stageinv.Recorder{Client: c}
 	if err := recorder.Write(context.Background(), ss, "first", 0, []inventory.ObjectRef{
 		{Group: "", Kind: "ConfigMap", Namespace: ns, Name: "obsolete", Version: "v1"},

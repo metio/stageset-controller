@@ -17,11 +17,12 @@ import (
 )
 
 type buildOptions struct {
-	name        string
-	stages      []string
-	sourceDirs  []string
-	showSecrets bool
-	asTenant    bool
+	name             string
+	stages           []string
+	sourceDirs       []string
+	showSecrets      bool
+	asTenant         bool
+	noCrossNamespace bool
 }
 
 func newBuildCommand(o *options) *cobra.Command {
@@ -42,6 +43,7 @@ func newBuildCommand(o *options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
 	cmd.Flags().BoolVar(&opts.showSecrets, "show-secrets", false, "Reveal Secret values instead of masking them.")
 	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Read the SOPS decryption key Secret as spec.serviceAccountName, the identity the controller uses for it. Rendering itself always uses your credentials — the controller resolves sources and substituteFrom as itself.")
+	cmd.Flags().BoolVar(&opts.noCrossNamespace, "no-cross-namespace-refs", false, "Match a controller run with --no-cross-namespace-refs: reject a stage sourceRef that targets another namespace, so the preview fails the same way the controller would.")
 	return cmd
 }
 
@@ -78,7 +80,7 @@ func runBuild(ctx context.Context, o *options, opts buildOptions) error {
 	// operations (apply, prune, verify, actions), none of which build does.
 	// The decryptor above is the one tenant-scoped read, matching the
 	// controller. One engine serves every stage.
-	engine := preview.NewEngine(c, false)
+	engine := preview.NewEngine(c, opts.noCrossNamespace)
 	engine.SourceDirs = sourceDirs
 	engine.Decryptor = dec
 	engineFor := func(string) (*preview.Engine, error) { return engine, nil }

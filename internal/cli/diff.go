@@ -23,16 +23,17 @@ import (
 )
 
 type diffOptions struct {
-	name          string
-	stages        []string
-	sourceDirs    []string
-	serverSide    bool
-	asTenant      bool
-	showSecrets   bool
-	showUnchanged bool
-	prune         bool
-	color         string
-	exitCode      bool
+	name             string
+	stages           []string
+	sourceDirs       []string
+	serverSide       bool
+	asTenant         bool
+	noCrossNamespace bool
+	showSecrets      bool
+	showUnchanged    bool
+	prune            bool
+	color            string
+	exitCode         bool
 }
 
 func newDiffCommand(o *options) *cobra.Command {
@@ -54,6 +55,7 @@ func newDiffCommand(o *options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
 	cmd.Flags().BoolVar(&opts.serverSide, "server-side", true, "Server-side dry-run apply diff (needs update/patch RBAC). False compares the render against live objects client-side.")
 	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Server-side dry-run each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName) — the identity the controller applies with. Reads (source resolve, substituteFrom, inventory) always use your credentials, as the controller reads as itself.")
+	cmd.Flags().BoolVar(&opts.noCrossNamespace, "no-cross-namespace-refs", false, "Match a controller run with --no-cross-namespace-refs: reject a stage sourceRef that targets another namespace, so the preview fails the same way the controller would.")
 	cmd.Flags().BoolVar(&opts.showSecrets, "show-secrets", false, "Reveal Secret values instead of masking them.")
 	cmd.Flags().BoolVar(&opts.showUnchanged, "show-unchanged", false, "Include objects with no change.")
 	cmd.Flags().BoolVar(&opts.prune, "prune", true, "Show resources that would be deleted because they fell out of the inventory.")
@@ -130,7 +132,7 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		// actions). Impersonating the reads would demand RBAC the documented
 		// tenant role never grants and fail a diff the controller performs
 		// fine. Only the server-side dry-run (the apply mirror) impersonates.
-		engine := preview.NewEngine(c, false)
+		engine := preview.NewEngine(c, opts.noCrossNamespace)
 		engine.SourceDirs = sourceDirs
 		engine.Decryptor = dec
 		rt := diffRuntime{engine: engine, applier: apply.New(applyClient, mapper, stagesv1.GroupVersion.Group), applyClient: applyClient}

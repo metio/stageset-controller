@@ -59,15 +59,22 @@ func (e *Engine) PrunePlan(ctx context.Context, ss *stagesv1.StageSet, rendered 
 
 	plan := inventory.ComputePlan(previous, desired)
 
+	// The real teardown (apply.Applier.Delete) sets ssa Inclusions to the
+	// StageSet's owner labels, so ssa re-Gets each live object and SKIPS any
+	// whose labels no longer match — an object adopted or relabelled by another
+	// manager since it was recorded is left alone. Mirror that here so the
+	// preview doesn't show a deletion the controller would decline.
+	owner := ownerLabels(ss)
+
 	var items []PruneItem
 	for stage, refs := range plan.PrunePerStage {
 		if !pruneEnabled(ss, stage) {
 			continue
 		}
-		items = append(items, e.fetchPruneItems(ctx, stage, refs)...)
+		items = append(items, e.fetchPruneItems(ctx, stage, refs, owner)...)
 	}
 	for _, removed := range plan.RemovedStages {
-		items = append(items, e.fetchPruneItems(ctx, removed.Name, removed.Entries)...)
+		items = append(items, e.fetchPruneItems(ctx, removed.Name, removed.Entries, owner)...)
 	}
 
 	sort.Slice(items, func(i, j int) bool {
@@ -82,7 +89,7 @@ func (e *Engine) PrunePlan(ctx context.Context, ss *stagesv1.StageSet, rendered 
 // fetchPruneItems loads the live object behind each ref so the diff shows the
 // resource as it stands. An object already gone (NotFound) or opted out via the
 // prune annotation is dropped — nothing would be deleted.
-func (e *Engine) fetchPruneItems(ctx context.Context, stage string, refs []inventory.ObjectRef) []PruneItem {
+func (e *Engine) fetchPruneItems(ctx context.Context, stage string, refs []inventory.ObjectRef, owner map[string]string) []PruneItem {
 	var items []PruneItem
 	for _, ref := range refs {
 		live := &unstructured.Unstructured{}
@@ -97,6 +104,12 @@ func (e *Engine) fetchPruneItems(ctx context.Context, stage string, refs []inven
 			items = append(items, PruneItem{Stage: stage, Ref: ref})
 			continue
 		}
+		// Owner-label recheck, mirroring ssa's Inclusions: an object whose live
+		// labels no longer carry this StageSet's owner labels was adopted or
+		// relabelled by another manager, and the real Delete would skip it.
+		if !hasOwnerLabels(live.GetLabels(), owner) {
+			continue
+		}
 		// Case-insensitive to match the ssa teardown path (utils.AnyInMetadata
 		// compares with EqualFold), so `stageset diff` and the real prune agree on
 		// which objects the opt-out spares.
@@ -106,6 +119,27 @@ func (e *Engine) fetchPruneItems(ctx context.Context, stage string, refs []inven
 		items = append(items, PruneItem{Stage: stage, Ref: ref, Object: live})
 	}
 	return items
+}
+
+// ownerLabels returns the labels ssa stamps as the StageSet's owner and rechecks
+// as deletion Inclusions: "<group>/name" and "<group>/namespace".
+func ownerLabels(ss *stagesv1.StageSet) map[string]string {
+	g := stagesv1.GroupVersion.Group
+	return map[string]string{
+		g + "/name":      ss.Name,
+		g + "/namespace": ss.Namespace,
+	}
+}
+
+// hasOwnerLabels reports whether live carries every owner label with the
+// expected value — the same condition ssa's Delete Inclusions enforce.
+func hasOwnerLabels(live, owner map[string]string) bool {
+	for k, v := range owner {
+		if live[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func hasStage(stored map[string]stageinv.StageRecord, name string) bool {
