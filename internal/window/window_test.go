@@ -47,10 +47,13 @@ func TestDecision_NeverFiringScheduleIsInactiveNotHang(t *testing.T) {
 
 // A tight schedule held open by a very long duration covers "now" with a huge
 // number of starts. The covering-starts walk must stay bounded, not iterate once
-// per minute across the whole span.
+// per minute across the whole span. The bounded walk still does real work
+// (~2s under the race detector alone), so the hang guard needs generous
+// headroom for a fully loaded parallel test run — an actually unbounded walk
+// would run for months, so 30s still discriminates cleanly.
 func TestDecision_DeeplyOverlappingWindowIsBounded(t *testing.T) {
 	w := stagesv1.UpdateWindow{Type: TypeAllow, Schedule: "* * * * *", Duration: dur(1_000_000 * time.Hour)}
-	withinTimeout(t, 3*time.Second, func() {
+	withinTimeout(t, 30*time.Second, func() {
 		allowed, _, err := Decision([]stagesv1.UpdateWindow{w}, at("2026-06-13T02:30:00Z"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
