@@ -93,10 +93,16 @@ type StageSetReconciler struct {
 	client.Client
 
 	// APIReader is an uncached reader against the controller's own cluster, used
-	// for the promotion restart/event gates' pod and event reads. Going direct to
-	// the apiserver avoids spinning up cluster-wide pod/event informers behind the
-	// cached client. Set from mgr.GetAPIReader() in SetupWithManager; tests may
-	// leave it nil to fall back to the (fake) cached client.
+	// for the promotion restart/event gates' pod and event reads AND the
+	// cross-object dependency/source graph walk. Going direct to the apiserver
+	// avoids spinning up cluster-wide pod/event informers behind the cached
+	// client, and — for the graph walk — avoids the manager's cache scoping: with
+	// --watch-namespaces set, a cached Get for a dependency in an unwatched
+	// namespace returns "unknown namespace for the cache" (not NotFound), which
+	// the walk would misclassify as a transient error and back off on forever.
+	// Reading uncached matches what the actual apply/fetch path sees. Set from
+	// mgr.GetAPIReader() in SetupWithManager; tests may leave it nil to fall back
+	// to the (fake) cached client.
 	APIReader client.Reader
 
 	// Config is the manager's rest config, cloned per tenant to build the
@@ -360,7 +366,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if ref := ss.Spec.Stages[i].SourceRef; isProducerRef(ref) {
 			r.engageProducerWatch(producerGVK(ref))
 		}
-		ra, err := resolver.Resolve(ctx, r.Client, ss.Spec.Stages[i].SourceRef, ss.Namespace)
+		ra, err := resolver.Resolve(ctx, r.graphReader(), ss.Spec.Stages[i].SourceRef, ss.Namespace)
 		if err != nil {
 			return r.failResolution(ctx, patchHelper, &ss, ss.Spec.Stages[i].Name, ss.Spec.Stages[i].SourceRef, ss.Namespace, err)
 		}
@@ -1847,7 +1853,7 @@ func (r *StageSetReconciler) dependenciesReady(ctx context.Context, ss *stagesv1
 			return false, fmt.Sprintf("cross-namespace dependsOn %s/%s rejected", ns, dep.Name), nil
 		}
 		var d stagesv1.StageSet
-		if gerr := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: dep.Name}, &d); gerr != nil {
+		if gerr := r.graphReader().Get(ctx, types.NamespacedName{Namespace: ns, Name: dep.Name}, &d); gerr != nil {
 			if apierrors.IsNotFound(gerr) {
 				return false, fmt.Sprintf("dependency %s/%s not found", ns, dep.Name), nil
 			}
@@ -1871,6 +1877,19 @@ func (r *StageSetReconciler) dependenciesReady(ctx context.Context, ss *stagesv1
 	return true, "", nil
 }
 
+// graphReader is the reader the cross-object dependency/source walk uses: the
+// uncached APIReader when wired, else the embedded (possibly cache-scoped)
+// client. The uncached reader sees dependencies in namespaces the manager's
+// cache does not scope, so an out-of-scope dependsOn/sourceRef resolves (or is a
+// genuine NotFound leaf) instead of erroring with "unknown namespace for the
+// cache" and wedging the reconcile in transient backoff.
+func (r *StageSetReconciler) graphReader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
+}
+
 // hasDependencyCycle walks the dependsOn graph breadth-first and reports
 // whether a path leads back to the starting StageSet.
 func (r *StageSetReconciler) hasDependencyCycle(ctx context.Context, ss *stagesv1.StageSet) (bool, error) {
@@ -1892,7 +1911,7 @@ func (r *StageSetReconciler) hasDependencyCycle(ctx context.Context, ss *stagesv
 			continue
 		}
 		var d stagesv1.StageSet
-		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &d); err != nil {
+		if err := r.graphReader().Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &d); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
 			}

@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,8 +37,39 @@ func (v *StageSetValidator) ValidateCreate(_ context.Context, ss *stagesv1.Stage
 }
 
 // ValidateUpdate validates an updated StageSet.
-func (v *StageSetValidator) ValidateUpdate(_ context.Context, _, newObj *stagesv1.StageSet) (admission.Warnings, error) {
+//
+// It skips re-validation in two cases so a spec-unchanged update is never
+// blocked by a violation the update does not introduce:
+//   - the object is being deleted (a finalizer-removal update must not be
+//     denied, or the StageSet wedges in Terminating); and
+//   - the validation-relevant spec is unchanged (spec.suspend is normalized out
+//     because the webhook does not validate it). Because ValidateSpec is a pure
+//     function of the spec, a StageSet can only become retroactively invalid
+//     across an operator/CRD upgrade that tightens a check (or a create that
+//     bypassed the webhook). Without this skip, every later update to such an
+//     object — including `kubectl patch spec.suspend=true`, a `flux reconcile`
+//     annotation, and the MCP suspend/resume/reconcile tools — would be denied,
+//     blocking the very remediations meant to pause or unstick it.
+func (v *StageSetValidator) ValidateUpdate(_ context.Context, oldObj, newObj *stagesv1.StageSet) (admission.Warnings, error) {
+	if !newObj.GetDeletionTimestamp().IsZero() {
+		return nil, nil
+	}
+	if oldObj != nil && validationInputsUnchanged(oldObj, newObj) {
+		return nil, nil
+	}
 	return nil, ValidateSpec(newObj)
+}
+
+// validationInputsUnchanged reports whether the spec fields ValidateSpec checks
+// are identical between old and new. spec.suspend is normalized out — the
+// webhook does not validate it, so a pause/resume toggle must count as an
+// unchanged input. A metadata-only update (e.g. a reconcile annotation) leaves
+// the whole spec identical and is likewise treated as unchanged.
+func validationInputsUnchanged(oldObj, newObj *stagesv1.StageSet) bool {
+	a := oldObj.Spec
+	b := newObj.Spec
+	a.Suspend = b.Suspend
+	return reflect.DeepEqual(a, b)
 }
 
 // ValidateDelete is a no-op; deletion carries no spec to validate.

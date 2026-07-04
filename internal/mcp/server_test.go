@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -149,4 +150,17 @@ func TestRunbookURL_Property(t *testing.T) {
 			rt.Fatalf("malformed runbook URL %q", got)
 		}
 	})
+}
+
+// The streamable-HTTP handler must bound idle sessions: with the SDK's zero
+// SessionTimeout, a session created by an initialize POST is retained until an
+// explicit DELETE, so a dropped/looping client on the unauthenticated port
+// accumulates sessions until the pod OOMs. This pins the idle bound is set.
+func TestMCPSessionIdleTimeout_IsBounded(t *testing.T) {
+	if mcpSessionIdleTimeout <= 0 {
+		t.Fatal("mcpSessionIdleTimeout must be positive; a zero timeout never expires idle sessions")
+	}
+	if mcpSessionIdleTimeout > time.Hour {
+		t.Errorf("mcpSessionIdleTimeout = %s; an unbounded-in-practice idle window defeats the leak guard", mcpSessionIdleTimeout)
+	}
 }

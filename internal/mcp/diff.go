@@ -41,6 +41,13 @@ var errSnapshotMissing = errors.New("revision not in rollback store")
 // this is a heap guard, not an untrusted-input defense.
 const maxDiffSnapshotBytes = 32 << 20 // 32 MiB
 
+// diffSem bounds concurrent diff_revisions executions across the whole process.
+// Each in-flight call materializes up to two snapshots (~64 MiB) in memory, and
+// the streamable-HTTP transport is network-reachable and unauthenticated, so
+// unbounded concurrency could pin enough heap to OOM the pod. Past the limit the
+// handler returns a retryable "busy" result rather than admitting the work.
+var diffSem = make(chan struct{}, 3)
+
 type diffRevisionsInput struct {
 	Namespace string `json:"namespace" jsonschema:"the StageSet's namespace"`
 	Name      string `json:"name" jsonschema:"the StageSet's name"`
@@ -107,6 +114,16 @@ func (cfg Config) diffRevisionsHandler(ctx context.Context, _ *mcpsdk.CallToolRe
 	// 'from'.
 	if in.From == to {
 		return errorResult(fmt.Sprintf("from and to are the same revision %s; nothing to diff", to)), diffRevisionsOutput{}, nil
+	}
+
+	// Bound concurrent diffs: each holds up to ~64 MiB of snapshot content in
+	// memory, and the transport is unauthenticated. Past the limit, return a
+	// retryable busy result instead of admitting the heavy work.
+	select {
+	case diffSem <- struct{}{}:
+		defer func() { <-diffSem }()
+	default:
+		return errorResult("diff_revisions is busy (too many concurrent diffs in flight); retry shortly"), diffRevisionsOutput{}, nil
 	}
 
 	fromObjs, err := cfg.readSnapshot(ctx, in.Namespace, in.Name, in.Stage, in.From)

@@ -107,7 +107,7 @@ type Resolver struct {
 // carries the status.artifact. Any other Kind is a producer whose published
 // artifact is found through the RFC-0012 spec.sourceRef back-pointer. The
 // returned artifact is always Ready with a usable status.artifact.
-func (r *Resolver) Resolve(ctx context.Context, c client.Client, ref stagesv1.SourceReference, ownerNS string) (ResolvedArtifact, error) {
+func (r *Resolver) Resolve(ctx context.Context, c client.Reader, ref stagesv1.SourceReference, ownerNS string) (ResolvedArtifact, error) {
 	ns := ref.Namespace
 	if ns == "" {
 		ns = ownerNS
@@ -237,7 +237,7 @@ func isDirectSourceKind(ref stagesv1.SourceReference) bool {
 // getDirectSource fetches a CR that carries its own status.artifact (an
 // ExternalArtifact or a classic Flux source) by name. apiVersion defaults to the
 // source-controller group/version.
-func getDirectSource(ctx context.Context, c client.Client, ref stagesv1.SourceReference, ns, kind string) (*unstructured.Unstructured, error) {
+func getDirectSource(ctx context.Context, c client.Reader, ref stagesv1.SourceReference, ns, kind string) (*unstructured.Unstructured, error) {
 	apiVersion := ref.APIVersion
 	if apiVersion == "" {
 		apiVersion = externalArtifactGroup + "/" + externalArtifactVersion
@@ -259,7 +259,7 @@ func getDirectSource(ctx context.Context, c client.Client, ref stagesv1.SourceRe
 // spec.sourceRef back-pointer names the producer (matched on group, kind, and
 // name — version is ignored so a producer can bump its API version without
 // breaking consumers).
-func resolveProducer(ctx context.Context, c client.Client, ref stagesv1.SourceReference, ns string) (*unstructured.Unstructured, error) {
+func resolveProducer(ctx context.Context, c client.Reader, ref stagesv1.SourceReference, ns string) (*unstructured.Unstructured, error) {
 	if ref.APIVersion == "" {
 		// Without a group the back-pointer comparison below matches nothing:
 		// producers stamp a real group into spec.sourceRef.apiVersion, and

@@ -16,6 +16,7 @@ package mcp
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -72,9 +73,19 @@ func NewHTTPHandler(cfg Config) http.Handler {
 	server := NewServer(cfg)
 	return mcpsdk.NewStreamableHTTPHandler(
 		func(*http.Request) *mcpsdk.Server { return server },
-		&mcpsdk.StreamableHTTPOptions{Logger: cfg.Logger},
+		// SessionTimeout bounds idle sessions: the endpoint is network-reachable
+		// and unauthenticated, and a stateful session created by an initialize
+		// POST lives in the handler's session map until an explicit DELETE. A
+		// dropped/reconnecting client — or an attacker minting sessions in a loop
+		// — would otherwise grow that map without bound until the pod is
+		// OOMKilled. With the zero value the SDK never closes idle sessions.
+		&mcpsdk.StreamableHTTPOptions{Logger: cfg.Logger, SessionTimeout: mcpSessionIdleTimeout},
 	)
 }
+
+// mcpSessionIdleTimeout is how long an idle streamable-HTTP session is retained
+// before the SDK closes it and reclaims its server-side state.
+const mcpSessionIdleTimeout = 10 * time.Minute
 
 // errorResult builds an MCP tool-error result carrying msg as its text content.
 func errorResult(msg string) *mcpsdk.CallToolResult {

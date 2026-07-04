@@ -237,3 +237,74 @@ func TestValidateStages_ProducerSourceRefRequiresAPIVersion(t *testing.T) {
 		}
 	}
 }
+
+// An update that changes only spec.suspend (or only metadata) on a StageSet that
+// is ALREADY invalid — a violation introduced out-of-band, e.g. an operator
+// upgrade that tightened a check under an object admitted by an older binary —
+// must be admitted. Suspend and the reconcile annotation are the documented
+// remediations for a wedged StageSet, and the MCP suspend/resume/reconcile tools
+// patch the main resource through this webhook; re-validating an unchanged
+// violation would deny the very fix.
+func TestValidateUpdate_SuspendTogglePassesDespiteStaleViolation(t *testing.T) {
+	t.Parallel()
+	v := &StageSetValidator{}
+	// Duplicate stage names: invalid under ValidateStages, but present on both
+	// old and new (the update does not touch it).
+	invalid := stagesv1.StageSetSpec{
+		Stages: []stagesv1.Stage{
+			{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-1"}},
+			{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-2"}},
+		},
+	}
+	old := &stagesv1.StageSet{Spec: invalid}
+	updated := old.DeepCopy()
+	updated.Spec.Suspend = true // the only change
+
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err != nil {
+		t.Fatalf("suspend toggle on an already-invalid StageSet must be admitted: %v", err)
+	}
+
+	// A metadata-only update (spec byte-identical) is likewise admitted.
+	annotated := old.DeepCopy()
+	annotated.Annotations = map[string]string{"reconcile.fluxcd.io/requestedAt": "now"}
+	if _, err := v.ValidateUpdate(context.Background(), old, annotated); err != nil {
+		t.Fatalf("metadata-only update on an already-invalid StageSet must be admitted: %v", err)
+	}
+}
+
+// The escape hatch is narrow: an update that CHANGES a validated spec field is
+// still fully re-validated, so a suspend toggle cannot smuggle a new violation
+// past admission.
+func TestValidateUpdate_ChangingValidatedInputStillValidated(t *testing.T) {
+	t.Parallel()
+	v := &StageSetValidator{}
+	old := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{
+		Stages: []stagesv1.Stage{{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-1"}}},
+	}}
+	// Introduce a duplicate stage name in the same update that flips suspend.
+	updated := old.DeepCopy()
+	updated.Spec.Suspend = true
+	updated.Spec.Stages = append(updated.Spec.Stages, stagesv1.Stage{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-2"}})
+
+	if _, err := v.ValidateUpdate(context.Background(), old, updated); err == nil {
+		t.Fatal("an update that introduces a duplicate stage name must still be rejected")
+	}
+}
+
+// A finalizer-removal update on a terminating StageSet must be admitted even if
+// its spec is invalid, or the object wedges in Terminating.
+func TestValidateUpdate_DeletingObjectIsAdmitted(t *testing.T) {
+	t.Parallel()
+	v := &StageSetValidator{}
+	now := metav1.Now()
+	invalid := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now, Finalizers: []string{"x"}},
+		Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{
+			{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-1"}},
+			{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-2"}},
+		}},
+	}
+	if _, err := v.ValidateUpdate(context.Background(), invalid, invalid); err != nil {
+		t.Fatalf("update of a deleting StageSet must be admitted: %v", err)
+	}
+}

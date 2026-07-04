@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -194,5 +195,87 @@ func TestReconcile_TerminalReasonRequeuesForRecovery(t *testing.T) {
 	}
 	if res.RequeueAfter != permanentRetryInterval {
 		t.Fatalf("RequeueAfter = %v, want permanentRetryInterval %v", res.RequeueAfter, permanentRetryInterval)
+	}
+}
+
+// scopedCacheClient mimics the manager's cache-backed client when
+// --watch-namespaces scopes it: a Get for a key in an unwatched namespace
+// returns controller-runtime's plain "unknown namespace for the cache" error —
+// NOT apierrors.NotFound — which the dependency walk must not misclassify as a
+// transient failure. In-scope Gets delegate to the wrapped client.
+type scopedCacheClient struct {
+	client.Client
+	outOfScope map[types.NamespacedName]bool
+}
+
+func (s *scopedCacheClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if s.outOfScope[key] {
+		return fmt.Errorf("unable to get: %s because of unknown namespace for the cache", key)
+	}
+	return s.Client.Get(ctx, key, obj, opts...)
+}
+
+// TestDependenciesReady_UsesAPIReaderForOutOfScopeDep pins that a dependsOn
+// target in a namespace the manager's cache does not scope is read through the
+// uncached APIReader — so the reconcile evaluates its readiness instead of
+// wedging in transient backoff on an "unknown namespace for the cache" error.
+func TestDependenciesReady_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
+	scheme := watchScheme(t)
+	dep := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "platform", Name: "dep", Generation: 1},
+		Status: stagesv1.StageSetStatus{
+			ObservedGeneration: 1,
+			Conditions: []metav1.Condition{{
+				Type: "Ready", Status: metav1.ConditionTrue, Reason: ReasonReady,
+				ObservedGeneration: 1, LastTransitionTime: metav1.Now(),
+			}},
+		},
+	}
+	full := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep).WithStatusSubresource(dep).Build()
+	depKey := types.NamespacedName{Namespace: "platform", Name: "dep"}
+	cached := &scopedCacheClient{Client: full, outOfScope: map[types.NamespacedName]bool{depKey: true}}
+	r := &StageSetReconciler{Client: cached, APIReader: full}
+
+	dependent := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "dependent", Generation: 1},
+		Spec: stagesv1.StageSetSpec{
+			DependsOn: []meta.NamespacedObjectReference{{Namespace: "platform", Name: "dep"}},
+		},
+	}
+	ok, _, err := r.dependenciesReady(context.Background(), dependent)
+	if err != nil {
+		t.Fatalf("out-of-scope dependency must resolve via APIReader, got error: %v", err)
+	}
+	if !ok {
+		t.Fatal("the out-of-scope dependency is Ready; the gate should clear")
+	}
+}
+
+// TestHasDependencyCycle_UsesAPIReaderForOutOfScopeDep pins the same for the
+// cycle walk: an out-of-scope dependsOn hop is followed via the APIReader, so
+// the BFS reaches its verdict instead of erroring on the scoped-cache miss.
+func TestHasDependencyCycle_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
+	scheme := watchScheme(t)
+	dep := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "platform", Name: "dep", Generation: 1},
+		// dep has no further dependsOn — a clean leaf, so no cycle.
+	}
+	full := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep).Build()
+	depKey := types.NamespacedName{Namespace: "platform", Name: "dep"}
+	cached := &scopedCacheClient{Client: full, outOfScope: map[types.NamespacedName]bool{depKey: true}}
+	r := &StageSetReconciler{Client: cached, APIReader: full}
+
+	dependent := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "dependent"},
+		Spec: stagesv1.StageSetSpec{
+			DependsOn: []meta.NamespacedObjectReference{{Namespace: "platform", Name: "dep"}},
+		},
+	}
+	cycle, err := r.hasDependencyCycle(context.Background(), dependent)
+	if err != nil {
+		t.Fatalf("out-of-scope dependsOn hop must be walked via APIReader, got error: %v", err)
+	}
+	if cycle {
+		t.Error("no cycle exists through the out-of-scope leaf")
 	}
 }

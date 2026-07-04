@@ -215,3 +215,40 @@ func registeredTools(t *testing.T, cfg Config) map[string]bool {
 	}
 	return present
 }
+
+// When the diff concurrency limit is saturated, diff_revisions returns a
+// retryable "busy" result instead of admitting more heavy in-memory work — the
+// bound that keeps the unauthenticated MCP transport from being driven to OOM by
+// parallel large diffs.
+func TestDiffRevisionsHandler_BusyWhenSaturated(t *testing.T) {
+	const ns, name, stage = "team-a", "web", "prod"
+	from, to := "sha256:aaaa", "sha256:bbbb"
+	ss := newStageSet(ns, name, false, metav1.ConditionTrue, "Succeeded", "ok")
+	ss.Spec.Stages = []stagesv1.Stage{{Name: stage}}
+	ss.Status.LastAppliedSnapshot = []stagesv1.StageArtifactRef{{Stage: stage, URL: "u", Digest: to, Revision: "r"}}
+	store := &fakeRollback{data: map[string][]byte{
+		rollbackstore.Key(ns, name, stage, from): mustEncode(t, deployment("web", 1)),
+		rollbackstore.Key(ns, name, stage, to):   mustEncode(t, deployment("web", 2)),
+	}}
+	cfg := Config{KubeClient: fakeClient(t, ss), RollbackStore: store}
+
+	for range cap(diffSem) {
+		diffSem <- struct{}{}
+	}
+	defer func() {
+		for range cap(diffSem) {
+			<-diffSem
+		}
+	}()
+
+	res, _, err := cfg.diffRevisionsHandler(context.Background(), nil, diffRevisionsInput{Namespace: ns, Name: name, Stage: stage, From: from})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("saturated diff must return a busy tool error, got %+v", res)
+	}
+	if !strings.Contains(textContent(t, res), "busy") {
+		t.Fatalf("busy result should say so, got: %s", textContent(t, res))
+	}
+}
