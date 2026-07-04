@@ -104,11 +104,32 @@ func TestPlanShardsDoesNotMutateInput(t *testing.T) {
 
 func TestShardName(t *testing.T) {
 	t.Parallel()
-	if got := ShardName("platform", "operators", 0); got != "platform-operators-00" {
-		t.Fatalf("ShardName = %q", got)
+	// The readable "<stageset>-<stage>-<NN>" prefix is preserved; an injective
+	// hash suffix is appended.
+	if got := ShardName("platform", "operators", 0); !strings.HasPrefix(got, "platform-operators-00-") {
+		t.Fatalf("ShardName = %q, want a %q prefix", got, "platform-operators-00-")
 	}
-	if got := ShardName("platform", "operators", 12); got != "platform-operators-12" {
-		t.Fatalf("ShardName = %q", got)
+	if got := ShardName("platform", "operators", 12); !strings.HasPrefix(got, "platform-operators-12-") {
+		t.Fatalf("ShardName = %q, want a %q prefix", got, "platform-operators-12-")
+	}
+	// Deterministic: the same tuple always yields the same name.
+	first := ShardName("platform", "operators", 0)
+	if again := ShardName("platform", "operators", 0); first != again {
+		t.Fatalf("ShardName is not deterministic: %q vs %q", first, again)
+	}
+}
+
+// TestShardName_AliasingInputsStayDistinct pins that the hyphen is not the sole
+// field delimiter: ("a-b","c") and ("a","b-c") both begin "a-b-c" but must map
+// to distinct object names, or two StageSets in one namespace would collide on
+// the same StageInventory shard.
+func TestShardName_AliasingInputsStayDistinct(t *testing.T) {
+	t.Parallel()
+	if a, b := ShardName("a-b", "c", 0), ShardName("a", "b-c", 0); a == b {
+		t.Fatalf("aliasing inputs collide: ShardName(\"a-b\",\"c\",0) == ShardName(\"a\",\"b-c\",0) == %q", a)
+	}
+	if a, b := ShardName("x", "y-z", 0), ShardName("x-y", "z", 0); a == b {
+		t.Fatalf("aliasing inputs collide: %q", a)
 	}
 }
 

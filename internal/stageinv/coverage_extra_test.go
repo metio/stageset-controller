@@ -102,7 +102,7 @@ func TestWrite_CreateOrUpdateErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestDeleteSurplusShards_ListErrorPropagates(t *testing.T) {
+func TestDeleteObsoleteShards_ListErrorPropagates(t *testing.T) {
 	t.Parallel()
 	c := errClient(t, interceptor.Funcs{
 		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
@@ -110,12 +110,12 @@ func TestDeleteSurplusShards_ListErrorPropagates(t *testing.T) {
 		},
 	})
 	r := &Recorder{Client: c, ShardCap: 2}
-	if err := r.deleteSurplusShards(context.Background(), "ns", "app", "deploy", 0); err == nil {
-		t.Fatal("deleteSurplusShards with a failing List = nil error, want the wrapped list error")
+	if err := r.deleteObsoleteShards(context.Background(), "ns", "app", "deploy", 0); err == nil {
+		t.Fatal("deleteObsoleteShards with a failing List = nil error, want the wrapped list error")
 	}
 }
 
-func TestDeleteSurplusShards_DeleteErrorPropagates(t *testing.T) {
+func TestDeleteObsoleteShards_DeleteErrorPropagates(t *testing.T) {
 	t.Parallel()
 	// A surplus shard (index >= keep) present in the store, with Delete forced to
 	// fail with a non-NotFound error, drives the delete-error branch.
@@ -136,14 +136,14 @@ func TestDeleteSurplusShards_DeleteErrorPropagates(t *testing.T) {
 		},
 	}, surplus)
 	r := &Recorder{Client: c, ShardCap: 2}
-	if err := r.deleteSurplusShards(context.Background(), "ns", "app", "deploy", 0); err == nil {
-		t.Fatal("deleteSurplusShards with a failing Delete = nil error, want the wrapped delete error")
+	if err := r.deleteObsoleteShards(context.Background(), "ns", "app", "deploy", 0); err == nil {
+		t.Fatal("deleteObsoleteShards with a failing Delete = nil error, want the wrapped delete error")
 	}
 }
 
 // A shard whose index label is unparsable is skipped rather than deleted, so a
 // keep of 0 leaves it untouched.
-func TestDeleteSurplusShards_SkipsUnparsableShardIndex(t *testing.T) {
+func TestDeleteObsoleteShards_SkipsUnparsableShardIndex(t *testing.T) {
 	t.Parallel()
 	weird := &stagesv1.StageInventory{
 		ObjectMeta: metav1.ObjectMeta{
@@ -157,8 +157,8 @@ func TestDeleteSurplusShards_SkipsUnparsableShardIndex(t *testing.T) {
 		},
 	}
 	r := newRecorder(t, 2, weird)
-	if err := r.deleteSurplusShards(context.Background(), "ns", "app", "deploy", 0); err != nil {
-		t.Fatalf("deleteSurplusShards: %v", err)
+	if err := r.deleteObsoleteShards(context.Background(), "ns", "app", "deploy", 0); err != nil {
+		t.Fatalf("deleteObsoleteShards: %v", err)
 	}
 	var list stagesv1.StageInventoryList
 	if err := r.Client.List(context.Background(), &list); err != nil {

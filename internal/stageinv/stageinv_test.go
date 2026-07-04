@@ -9,6 +9,7 @@ import (
 	"sort"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -202,6 +203,76 @@ func TestWrite_ShrinkDeletesSurplusShards(t *testing.T) {
 	if len(stored) != 1 {
 		t.Fatalf("after shrink stored %d refs, want 1", len(stored))
 	}
+}
+
+// TestWrite_AliasingStageSetNamesDoNotCollide proves distinct StageSets whose
+// (name, stage) hyphen-join aliases still get distinct shard objects: "a-b"/"c"
+// and "a"/"b-c" both start "a-b-c", and with a non-injective shard name the
+// second Write would target the first's object and fail SetControllerReference
+// ("already owned by another controller").
+func TestWrite_AliasingStageSetNamesDoNotCollide(t *testing.T) {
+	t.Parallel()
+	r := newRecorder(t, 0)
+	ctx := context.Background()
+
+	if err := r.Write(ctx, stageSet("a-b", "ns"), "c", 0, []inventory.ObjectRef{ref("x")}); err != nil {
+		t.Fatalf("Write(a-b/c): %v", err)
+	}
+	if err := r.Write(ctx, stageSet("a", "ns"), "b-c", 0, []inventory.ObjectRef{ref("y")}); err != nil {
+		t.Fatalf("Write(a/b-c) must not collide with a-b/c: %v", err)
+	}
+
+	if got := sortedNames(mustStored(t, r, "a-b", "ns", "c")); len(got) != 1 || got[0] != "x" {
+		t.Errorf("a-b/c stored = %v, want [x]", got)
+	}
+	if got := sortedNames(mustStored(t, r, "a", "ns", "b-c")); len(got) != 1 || got[0] != "y" {
+		t.Errorf("a/b-c stored = %v, want [y]", got)
+	}
+}
+
+// TestWrite_MigratesNonCanonicalShardName seeds a shard under a stale name (as an
+// upgrade from an older naming scheme would leave) and proves the next Write
+// self-migrates it: the canonical shard is written and the stale-named one is
+// deleted, so a label-based read returns only the current entries — no
+// duplication from a lingering old shard.
+func TestWrite_MigratesNonCanonicalShardName(t *testing.T) {
+	t.Parallel()
+	ss := stageSet("app", "ns")
+	stale := &stagesv1.StageInventory{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-deploy-00", // the pre-injective name for shard 0
+			Namespace: "ns",
+			Labels: map[string]string{
+				stagesv1.StageSetLabel: "app",
+				stagesv1.StageLabel:    "deploy",
+				stagesv1.ShardLabel:    "0",
+			},
+		},
+		Spec: stagesv1.StageInventorySpec{Entries: []stagesv1.InventoryEntry{{ID: ref("old").ID(), V: "v1"}}},
+	}
+	r := newRecorder(t, 0, ss, stale)
+	ctx := context.Background()
+
+	if err := r.Write(ctx, ss, "deploy", 0, []inventory.ObjectRef{ref("new")}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	var check stagesv1.StageInventory
+	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: "ns", Name: "app-deploy-00"}, &check); !apierrors.IsNotFound(err) {
+		t.Errorf("stale shard app-deploy-00 should be deleted, got err=%v", err)
+	}
+	if got := sortedNames(mustStored(t, r, "app", "ns", "deploy")); len(got) != 1 || got[0] != "new" {
+		t.Errorf("stored = %v, want [new] (stale shard migrated away, no duplication)", got)
+	}
+}
+
+func mustStored(t *testing.T, r *Recorder, ssName, ns, stage string) []inventory.ObjectRef {
+	t.Helper()
+	stored, err := r.Stored(context.Background(), ssName, ns, stage)
+	if err != nil {
+		t.Fatalf("Stored(%s/%s): %v", ssName, stage, err)
+	}
+	return stored
 }
 
 func TestStored_SkipsMalformedEntries(t *testing.T) {

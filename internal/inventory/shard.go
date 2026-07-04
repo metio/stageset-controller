@@ -43,17 +43,23 @@ func PlanShards(entries []ObjectRef, capacity int) ([][]ObjectRef, error) {
 	return shards, nil
 }
 
-// ShardName returns the object name of a shard:
-// "<stageset>-<stage>-<NN>". Names exceeding the DNS-1123 subdomain limit
-// are truncated and suffixed with a hash of the full logical name so that
-// distinct long inputs can never collide after truncation.
+// ShardName returns the object name of a shard: a readable
+// "<stageset>-<stage>-<NN>" prefix plus a short hash suffix.
+//
+// The hyphen join alone is not injective — '-' is legal inside both stageSet
+// and stage (DNS-1123), so ("a-b","c") and ("a","b-c") would both render
+// "a-b-c-00" and two StageSets in one namespace would collide on the same
+// StageInventory object. The suffix hashes a length-delimited encoding of the
+// exact (stageSet, stage, shard) tuple, so distinct inputs always map to
+// distinct names. The readable prefix is truncated when the whole would exceed
+// the DNS-1123 subdomain limit; the suffix still keeps it unique.
 func ShardName(stageSet, stage string, shard int) string {
-	name := fmt.Sprintf("%s-%s-%02d", stageSet, stage, shard)
-	if len(name) <= maxNameLength {
-		return name
-	}
-	digest := sha256.Sum256([]byte(name))
+	digest := sha256.Sum256(fmt.Appendf(nil, "%d/%s/%d/%s/%d", len(stageSet), stageSet, len(stage), stage, shard))
 	suffix := hex.EncodeToString(digest[:])[:10]
-	truncated := strings.TrimRight(name[:maxNameLength-len(suffix)-1], "-")
+	base := fmt.Sprintf("%s-%s-%02d", stageSet, stage, shard)
+	if len(base)+1+len(suffix) <= maxNameLength {
+		return base + "-" + suffix
+	}
+	truncated := strings.TrimRight(base[:maxNameLength-len(suffix)-1], "-")
 	return truncated + "-" + suffix
 }

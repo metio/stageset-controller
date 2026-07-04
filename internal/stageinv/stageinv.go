@@ -152,12 +152,18 @@ func (r *Recorder) Write(ctx context.Context, ss *stagesv1.StageSet, stage strin
 			return fmt.Errorf("write shard %s: %w", si.Name, err)
 		}
 	}
-	return r.deleteSurplusShards(ctx, ss.Namespace, ss.Name, stage, len(shards))
+	return r.deleteObsoleteShards(ctx, ss.Namespace, ss.Name, stage, len(shards))
 }
 
-// deleteSurplusShards removes shards whose index is >= keep (so shrinking a
-// stage's object set drops the no-longer-needed shards).
-func (r *Recorder) deleteSurplusShards(ctx context.Context, namespace, ssName, stage string, keep int) error {
+// deleteObsoleteShards removes a stage's shards that the just-written set has
+// superseded: those whose index is >= keep (shrinking a stage's object set
+// drops the no-longer-needed shards), and those whose name is not the canonical
+// ShardName for their index. The latter self-migrates any shard written under an
+// older, non-injective naming scheme — Write has already created the canonical
+// shard for that index, so the stale-named one is redundant. Both are found by
+// the stage's label selector, and the canonical shards just written match their
+// own names, so only genuinely obsolete objects are removed.
+func (r *Recorder) deleteObsoleteShards(ctx context.Context, namespace, ssName, stage string, keep int) error {
 	var list stagesv1.StageInventoryList
 	if err := r.Client.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{
 		stagesv1.StageSetLabel: ssName,
@@ -167,11 +173,14 @@ func (r *Recorder) deleteSurplusShards(ctx context.Context, namespace, ssName, s
 	}
 	for i := range list.Items {
 		idx, err := strconv.Atoi(list.Items[i].Labels[stagesv1.ShardLabel])
-		if err != nil || idx < keep {
+		if err != nil {
+			continue
+		}
+		if idx < keep && list.Items[i].Name == inventory.ShardName(ssName, stage, idx) {
 			continue
 		}
 		if err := r.Client.Delete(ctx, &list.Items[i]); err != nil && client.IgnoreNotFound(err) != nil {
-			return fmt.Errorf("delete surplus shard %s: %w", list.Items[i].Name, err)
+			return fmt.Errorf("delete obsolete shard %s: %w", list.Items[i].Name, err)
 		}
 	}
 	return nil
