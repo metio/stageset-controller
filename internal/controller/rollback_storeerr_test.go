@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -29,7 +30,9 @@ func (e *errStore) Get(context.Context, string) ([]byte, bool, error) {
 	return e.data, e.found, e.err
 }
 
-// capturingRecorder records the (type, reason, note) of every event.
+// capturingRecorder records the (type, reason, note) of every event. The note
+// is fully formatted — the controller's event helper passes a "%s" format with
+// the message in args, so storing the raw format would record a literal "%s".
 type capturingRecorder struct {
 	mu     sync.Mutex
 	events []recordedEvent
@@ -40,7 +43,7 @@ type recordedEvent struct{ etype, reason, note string }
 func (c *capturingRecorder) Eventf(_ runtime.Object, _ runtime.Object, etype, reason, _ string, note string, args ...any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.events = append(c.events, recordedEvent{etype, reason, note})
+	c.events = append(c.events, recordedEvent{etype, reason, fmt.Sprintf(note, args...)})
 }
 
 func (c *capturingRecorder) has(reason string) bool {

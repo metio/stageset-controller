@@ -487,6 +487,44 @@ func TestRollbackAborted(t *testing.T) {
 	if rollbackAborted(ss, holdStage, blockedPrior, rev) {
 		t.Error("onFailure=Hold must not skip re-apply")
 	}
+
+	// A RESTART-GATE abort parks exactly like an analysis abort: the gate
+	// stamped AbortedRevision when it reverted, and re-applying would flap
+	// apply → crash → rollback each reconcile (or promote once the replacement
+	// pods' counters read clean).
+	restartGateStage := promoStage(&stagesv1.StagePromotion{RestartGate: &stagesv1.RestartGate{
+		OnFailure: "Rollback",
+		Checks:    []stagesv1.RestartCheck{{Name: "api"}},
+	}})
+	if !rollbackAborted(ss, restartGateStage, blockedPrior, rev) {
+		t.Error("a restart-gate onFailure=Rollback abort must park the aborted revision")
+	}
+	// The per-check override alone is abort-capable even under a gate-level Hold.
+	perCheckStage := promoStage(&stagesv1.StagePromotion{RestartGate: &stagesv1.RestartGate{
+		Checks: []stagesv1.RestartCheck{{Name: "api", OnFailure: "Rollback"}},
+	}})
+	if !rollbackAborted(ss, perCheckStage, blockedPrior, rev) {
+		t.Error("a per-check onFailure=Rollback must park the aborted revision")
+	}
+	// An EVENT-GATE abort parks too.
+	eventGateStage := promoStage(&stagesv1.StagePromotion{EventGate: &stagesv1.EventGate{
+		OnFailure: "Rollback",
+		Checks:    []stagesv1.EventCheck{{Name: "api"}},
+	}})
+	if !rollbackAborted(ss, eventGateStage, blockedPrior, rev) {
+		t.Error("an event-gate onFailure=Rollback abort must park the aborted revision")
+	}
+	// Gates configured Hold-only never park (the abort record cannot be theirs).
+	holdGateStage := promoStage(&stagesv1.StagePromotion{RestartGate: &stagesv1.RestartGate{
+		Checks: []stagesv1.RestartCheck{{Name: "api"}},
+	}})
+	if rollbackAborted(ss, holdGateStage, blockedPrior, rev) {
+		t.Error("a Hold-only gate must not park")
+	}
+	// A fresh promote token un-parks gate aborts exactly like analysis aborts.
+	if rollbackAborted(ssPromote, restartGateStage, blockedPrior, rev) {
+		t.Error("a fresh promote token should un-park a gate abort")
+	}
 }
 
 func TestParsePromote(t *testing.T) {

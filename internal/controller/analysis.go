@@ -104,13 +104,53 @@ func (r *StageSetReconciler) analysisInterval(ss *stagesv1.StageSet, an *stagesv
 	return r.retryInterval(ss)
 }
 
+// abortCapable reports whether the stage's promotion config can produce an
+// onFailure=Rollback abort: the analysis (non-dryRun), the restart gate, or the
+// event gate — each at gate level or via a per-check override. rollbackAborted
+// gates its park on the config still being present, so removing every rollback
+// config from the spec un-parks the stage.
+func abortCapable(p *stagesv1.StagePromotion) bool {
+	if p == nil {
+		return false
+	}
+	if p.Analysis != nil && p.Analysis.OnFailure == "Rollback" && !p.Analysis.DryRun {
+		return true
+	}
+	if g := p.RestartGate; g != nil {
+		if g.OnFailure == "Rollback" {
+			return true
+		}
+		for i := range g.Checks {
+			if g.Checks[i].OnFailure == "Rollback" {
+				return true
+			}
+		}
+	}
+	if g := p.EventGate; g != nil {
+		if g.OnFailure == "Rollback" {
+			return true
+		}
+		for i := range g.Checks {
+			if g.Checks[i].OnFailure == "Rollback" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // rollbackAborted reports whether a stage is parked reverted by a prior
 // onFailure=Rollback for the currently pinned revision — so the stage loop skips
-// re-applying (and re-failing) that revision. A fresh manual promote token
-// clears the abort (handled by not skipping, so the gate's break-glass fires).
+// re-applying (and re-failing) that revision. The abort can come from any
+// rollback-capable gate: the promotion analysis, a restart check, or an event
+// check — all stamp PromotionState.AbortedRevision when they revert, and all
+// must park equally, or the aborted revision is re-applied (and can even
+// promote once the replacement pods' restart counters read clean) on the next
+// reconcile. A fresh manual promote token clears the abort (handled by not
+// skipping, so the gate's break-glass fires); so does a revision change or
+// removing the rollback config.
 func rollbackAborted(ss *stagesv1.StageSet, stage *stagesv1.Stage, prior stagesv1.StageStatus, revision string) bool {
-	p := stage.Promotion
-	if p == nil || p.Analysis == nil || p.Analysis.OnFailure != "Rollback" || p.Analysis.DryRun {
+	if !abortCapable(stage.Promotion) {
 		return false
 	}
 	st := prior.PromotionState

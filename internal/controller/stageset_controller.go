@@ -809,6 +809,30 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// / manual). Holding parks the rollout here — the stage stays applied
 			// (drift is still corrected on the next reconcile) and later stages are
 			// never touched — so this is a hold, not a failure.
+
+			// recordGateInterrupted records the in-flight stage before a
+			// gate-unevaluable exit: the stage applied, verified, and ran its
+			// actions this pass, so its action ledger (and the handled
+			// force-reconcile token) must persist — otherwise every backoff retry
+			// re-runs the actions, and an unhandled force token would clear the
+			// ledger again on the next pass. Promotion fields stay at their prior
+			// values: no final gate verdict exists, so a pending promote token must
+			// remain pending and the soak clock untouched.
+			recordGateInterrupted := func() {
+				prior := priorStages[stage.Name]
+				stageStatuses = append(stageStatuses, stagesv1.StageStatus{
+					Name:                   stage.Name,
+					Phase:                  stagesv1.StageReady,
+					AppliedRevision:        ra.Revision,
+					EntriesCount:           int64(len(newRefs)),
+					ExecutedActions:        executed,
+					LedgerRevision:         ra.Revision,
+					LastHandledReconcileAt: lastHandledFor(stage.Name),
+					PromotionState:         prior.PromotionState,
+					LastHandledPromotion:   prior.LastHandledPromotion,
+					BudgetFreeze:           stageBudgetFreeze[stage.Name],
+				})
+			}
 			var verdict *analysisVerdict
 			if stage.Promotion != nil && stage.Promotion.Analysis != nil {
 				v := r.evaluatePromotionAnalysis(ctx, &ss, stage)
@@ -827,6 +851,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					// stage — the gate fails closed, like a promotion source error.
 					// The stage applied successfully, so this is not a stage failure:
 					// the sentinel keeps the post-loop handler from rolling back.
+					recordGateInterrupted()
 					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, rerr)
 				}
 				restart = rv
@@ -837,6 +862,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				if eerr != nil {
 					// Can't read events: fail closed, back off and retry. Not a stage
 					// failure — the sentinel keeps the handler from rolling back.
+					recordGateInterrupted()
 					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, eerr)
 				}
 				event = ev
@@ -859,6 +885,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				if rerr != nil {
 					// Transient revert failure: back off. Not a stage failure — the
 					// sentinel keeps the handler from also running attemptRollback.
+					// The revert didn't land, so the gate verdict was not acted on:
+					// record the stage with its prior promotion fields, like the
+					// unevaluable-read exits above, and let the retry re-judge.
+					recordGateInterrupted()
 					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, rerr)
 				}
 				if ok {
@@ -899,8 +929,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// A promotion gate is holding the rollout at promoteHoldStage. Persist the
 		// stage statuses (so the soak clock + handled token survive), set the held
 		// Ready condition, and requeue. Earlier stages stay applied; later stages
-		// were never processed.
-		ss.Status.Stages = stageStatuses
+		// were never processed, so the merge keeps their prior records.
+		ss.Status.Stages = mergeStageStatuses(&ss, stageStatuses)
 		publishStageReady(&ss)
 		ss.Status.ObservedGeneration = ss.Generation
 		reason, msg := promotionHoldCondition(&ss, promoteHoldStage, promoteHoldState)
@@ -911,9 +941,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	if errors.Is(loopErr, errHoldForBudget) {
 		// A stage's own errorBudget is holding a new revision out of that stage.
-		// Persist the stage statuses, set the held Ready condition (a deployed
-		// StageSet stays Ready=True — its current state is healthy), and requeue.
-		ss.Status.Stages = stageStatuses
+		// Persist the stage statuses (merged, so unprocessed later stages keep
+		// their records), set the held Ready condition (a deployed StageSet stays
+		// Ready=True — its current state is healthy), and requeue.
+		ss.Status.Stages = mergeStageStatuses(&ss, stageStatuses)
 		publishStageReady(&ss)
 		ss.Status.ObservedGeneration = ss.Generation
 		prevReady := readyConditionSnapshot(&ss)
@@ -931,6 +962,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// error on the watched pods/events, or a transient revert failure). The
 		// current stage applied successfully, so this is not a stage failure: back
 		// off and retry without rolling the healthy rollout back.
+		//
+		// The pass's progress MUST persist before the retry: the stage action
+		// ledgers (recordGateInterrupted appended the in-flight stage), the
+		// migration ledgers runStageMigrations mutated on ss.Status in memory, and
+		// the handled force-reconcile token. Without this write every backoff
+		// retry re-runs completed actions — including destructive migration
+		// actions the ledger exists to run exactly once. The Ready condition and
+		// observedGeneration stay untouched: the rollout state didn't change, a
+		// transient blip must not flap them.
+		ss.Status.Stages = mergeStageStatuses(&ss, stageStatuses)
+		publishStageReady(&ss)
+		if perr := r.patchStatus(ctx, patchHelper, &ss); perr != nil {
+			return loopResult, errors.Join(loopErr, perr)
+		}
 		return loopResult, loopErr
 	}
 	if loopErr != nil {
@@ -1340,14 +1385,18 @@ func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.He
 		readyMsg = fmt.Sprintf("stage %q %s: decryption failed", stage, op)
 	}
 
-	ss.Status.Stages = append(prior, stagesv1.StageStatus{
+	// Merge over the previously persisted entries: prior carries only the stages
+	// processed before the failure, and the stages after the failed one were
+	// never reached — their persisted records (ledgers, lastHandledPromotion)
+	// must survive this write.
+	ss.Status.Stages = mergeStageStatuses(ss, append(prior, stagesv1.StageStatus{
 		Name:            stage,
 		Phase:           stagesv1.StageFailed,
 		AppliedRevision: revision,
 		Message:         stageMsg,
 		ExecutedActions: executed,
 		LedgerRevision:  revision,
-	})
+	}))
 	publishStageReady(ss)
 	ss.Status.ObservedGeneration = ss.Generation
 	prevReady := readyConditionSnapshot(ss)
@@ -1393,6 +1442,33 @@ func indexStageStatuses(stages []stagesv1.StageStatus) map[string]stagesv1.Stage
 		m[s.Name] = s
 	}
 	return m
+}
+
+// mergeStageStatuses builds the status.stages to persist when a pass ends
+// before every spec stage was processed (a promotion or budget hold, a stage
+// failure, an unevaluable gate). Entries produced this pass win; a spec stage
+// the pass never reached keeps its previously persisted entry, so later
+// stages' records — applied revision, action ledger, lastHandledPromotion —
+// survive the early exit. Wholesale replacement would erase a later stage's
+// lastHandledPromotion, and the promote annotation (which the controller never
+// removes) would then replay through that stage's gates as a "fresh" token on
+// the next full pass. Entries for stages no longer in the spec drop, matching
+// the full-pass write; output is in spec order.
+func mergeStageStatuses(ss *stagesv1.StageSet, processed []stagesv1.StageStatus) []stagesv1.StageStatus {
+	current := indexStageStatuses(processed)
+	prior := indexStageStatuses(ss.Status.Stages)
+	merged := make([]stagesv1.StageStatus, 0, len(ss.Spec.Stages))
+	for i := range ss.Spec.Stages {
+		name := ss.Spec.Stages[i].Name
+		if entry, ok := current[name]; ok {
+			merged = append(merged, entry)
+			continue
+		}
+		if entry, ok := prior[name]; ok {
+			merged = append(merged, entry)
+		}
+	}
+	return merged
 }
 
 func toStringSet(items []string) map[string]bool {
