@@ -67,7 +67,7 @@ func startSharedEnv() {
 	env := &envtest.Environment{
 		CRDDirectoryPaths:     []string{crdDir},
 		ErrorIfCRDPathMissing: true,
-		CRDs:                  []*apiextv1.CustomResourceDefinition{externalArtifactStubCRD()},
+		CRDs:                  []*apiextv1.CustomResourceDefinition{externalArtifactStubCRD(), producerStubCRD()},
 	}
 	cfg, err := env.Start()
 	if err != nil {
@@ -118,6 +118,39 @@ func externalArtifactStubCRD() *apiextv1.CustomResourceDefinition {
 				Subresources: &apiextv1.CustomResourceSubresources{
 					Status: &apiextv1.CustomResourceSubresourceStatus{},
 				},
+				Schema: &apiextv1.CustomResourceValidation{
+					OpenAPIV3Schema: &apiextv1.JSONSchemaProps{
+						Type: "object",
+						Properties: map[string]apiextv1.JSONSchemaProps{
+							"spec":   {Type: "object", XPreserveUnknownFields: &preserve},
+							"status": {Type: "object", XPreserveUnknownFields: &preserve},
+						},
+					},
+				},
+			}},
+		},
+	}
+}
+
+// producerStubCRD registers a minimal JsonnetSnippet CRD so tests can create
+// producer CRs an ExternalArtifact back-references (for --with-source).
+func producerStubCRD() *apiextv1.CustomResourceDefinition {
+	preserve := true
+	return &apiextv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "jsonnetsnippets.jaas.metio.wtf"},
+		Spec: apiextv1.CustomResourceDefinitionSpec{
+			Group: "jaas.metio.wtf",
+			Names: apiextv1.CustomResourceDefinitionNames{
+				Kind:     "JsonnetSnippet",
+				ListKind: "JsonnetSnippetList",
+				Plural:   "jsonnetsnippets",
+				Singular: "jsonnetsnippet",
+			},
+			Scope: apiextv1.NamespaceScoped,
+			Versions: []apiextv1.CustomResourceDefinitionVersion{{
+				Name:    "v1",
+				Served:  true,
+				Storage: true,
 				Schema: &apiextv1.CustomResourceValidation{
 					OpenAPIV3Schema: &apiextv1.JSONSchemaProps{
 						Type: "object",

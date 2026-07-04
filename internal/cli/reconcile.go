@@ -166,6 +166,25 @@ func reconcileSources(ctx context.Context, c client.Client, ss *stagesv1.StageSe
 			failed++
 			continue
 		}
+		// Nothing watches requestedAt on an ExternalArtifact itself — the EA is
+		// the OUTPUT of a producer. Hop through its spec.sourceRef back-pointer
+		// and annotate the producer CR (whose controller honors the token and
+		// re-publishes the EA); without a back-pointer the request would be a
+		// silent no-op, so say so instead of counting success.
+		if src.GroupVersionKind() == artifact.ExternalArtifactGVK {
+			producer, ok, perr := producerFor(ctx, c, src)
+			if perr != nil {
+				fmt.Fprintf(errOut, "warning: cannot reconcile source %s: %v\n", key, perr)
+				failed++
+				continue
+			}
+			if !ok {
+				fmt.Fprintf(errOut, "warning: source %s is an ExternalArtifact without a producer back-pointer; nothing re-publishes it, so --with-source has no effect for it\n", key)
+				failed++
+				continue
+			}
+			src = producer
+		}
 		ann := src.GetAnnotations()
 		if ann == nil {
 			ann = map[string]string{}
@@ -247,6 +266,30 @@ func specStage(ss *stagesv1.StageSet, name string) *stagesv1.Stage {
 		}
 	}
 	return nil
+}
+
+// producerFor resolves an ExternalArtifact's spec.sourceRef back-pointer to
+// the producer CR that re-publishes it. Returns ok=false when the EA carries
+// no (complete) back-pointer.
+func producerFor(ctx context.Context, c client.Client, ea *unstructured.Unstructured) (*unstructured.Unstructured, bool, error) {
+	sr, found, err := unstructured.NestedStringMap(ea.Object, "spec", "sourceRef")
+	if err != nil || !found || sr["kind"] == "" || sr["name"] == "" || sr["apiVersion"] == "" {
+		return nil, false, nil
+	}
+	gv, err := schema.ParseGroupVersion(sr["apiVersion"])
+	if err != nil {
+		return nil, false, nil
+	}
+	producer := &unstructured.Unstructured{}
+	producer.SetGroupVersionKind(gv.WithKind(sr["kind"]))
+	ns := sr["namespace"]
+	if ns == "" {
+		ns = ea.GetNamespace()
+	}
+	if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: sr["name"]}, producer); err != nil {
+		return nil, false, fmt.Errorf("resolve producer %s %s/%s: %w", sr["kind"], ns, sr["name"], err)
+	}
+	return producer, true, nil
 }
 
 // sourceGVK returns the GVK to read a stage's source. A direct ExternalArtifact

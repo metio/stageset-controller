@@ -49,6 +49,12 @@ var (
 	// more than one ExternalArtifact, so the choice is undefined.
 	ErrAmbiguousProducer = errors.New("producer reference resolves to multiple ExternalArtifacts")
 
+	// ErrProducerAPIVersionRequired marks a producer-kind sourceRef without an
+	// apiVersion: the back-pointer match is on API group, and an empty group
+	// can never match a real producer's back-pointer (producers always stamp
+	// their group), so the reference is unresolvable by construction.
+	ErrProducerAPIVersionRequired = errors.New("producer sourceRef requires apiVersion")
+
 	// ErrCrossNamespaceForbidden reports a sourceRef targeting another
 	// namespace while --no-cross-namespace-refs is set.
 	ErrCrossNamespaceForbidden = errors.New("cross-namespace source reference rejected")
@@ -209,6 +215,14 @@ var directSourceKinds = map[string]bool{
 	"Bucket":        true,
 }
 
+// IsProducerRef reports whether ref resolves through a producer back-pointer —
+// any kind other than an ExternalArtifact (or empty kind, its default) or a
+// classic Flux source consumed directly. Producer refs need spec.apiVersion:
+// the back-pointer match is on API group.
+func IsProducerRef(ref stagesv1.SourceReference) bool {
+	return ref.Kind != "" && ref.Kind != externalArtifactKind && !isDirectSourceKind(ref)
+}
+
 // isDirectSourceKind reports whether ref names a classic Flux source consumed
 // directly. The group must be the source-controller group (or unset, which
 // defaults to it).
@@ -246,6 +260,14 @@ func getDirectSource(ctx context.Context, c client.Client, ref stagesv1.SourceRe
 // name — version is ignored so a producer can bump its API version without
 // breaking consumers).
 func resolveProducer(ctx context.Context, c client.Client, ref stagesv1.SourceReference, ns string) (*unstructured.Unstructured, error) {
+	if ref.APIVersion == "" {
+		// Without a group the back-pointer comparison below matches nothing:
+		// producers stamp a real group into spec.sourceRef.apiVersion, and
+		// groupOf("") is the empty group. Say so instead of the misleading
+		// "no ExternalArtifact back-references" that a correct back-pointer
+		// would otherwise earn.
+		return nil, fmt.Errorf("%w: sourceRef kind %q name %q needs apiVersion to identify the producer's API group", ErrProducerAPIVersionRequired, ref.Kind, ref.Name)
+	}
 	wantGroup := groupOf(ref.APIVersion)
 
 	list := newExternalArtifactList()

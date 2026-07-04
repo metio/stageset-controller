@@ -229,7 +229,10 @@ type StageSetReconciler struct {
 // authenticates as system:serviceaccount:<ns>:<sa>, so the tenant SA's RBAC
 // bounds the apply. (Remote-cluster apply via spec.kubeConfig uses the
 // provided kubeconfig and needs nothing here.)
-// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get
+// --object-level-kms resolves the tenant ServiceAccount (cloud workload
+// identity annotations) through the cached client, so the SA read needs the
+// informer verbs, not just get.
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
 // The controller's own cache-backed client reads Secrets and ConfigMaps for
@@ -565,6 +568,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// hold for the post-loop handler. stageBudgetFreeze records a dryRun
 	// would-freeze to stamp on the stage status of a stage that still proceeds.
 	var budgetHoldReason, budgetHoldMsg string
+	// When a promotion gate's read is PERMANENTLY denied (RBAC), this carries
+	// the operator-actionable message for the errGateDenied handler.
+	var gateDeniedMsg string
 	stageBudgetFreeze := map[string]*stagesv1.BudgetFreeze{}
 	// The stage loop runs in a closure so a stage failure can be intercepted
 	// for rollbackOnFailure before it is finalized; failStage's returns become
@@ -846,12 +852,18 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if stage.Promotion != nil && stage.Promotion.RestartGate != nil {
 				rv, rerr := r.evaluateRestartChecks(ctx, r.gateReader(rt.target), &ss, stage)
 				if rerr != nil {
-					// Can't read the watched pods (RBAC/API hiccup): never advance
-					// blind. Back off and retry rather than promote past an unverified
-					// stage — the gate fails closed, like a promotion source error.
-					// The stage applied successfully, so this is not a stage failure:
-					// the sentinel keeps the post-loop handler from rolling back.
+					// Can't read the watched pods: never advance blind — the gate
+					// fails closed. The stage applied successfully, so this is not
+					// a stage failure: the sentinels keep the post-loop handler
+					// from rolling back. A PERMANENT apiserver denial (Forbidden,
+					// missing kind) won't heal by backoff — surface it on the
+					// Ready condition and requeue at the bounded interval so a
+					// granted verb self-heals; anything else backs off and retries.
 					recordGateInterrupted()
+					if isPermanentAPIError(rerr) {
+						gateDeniedMsg = rbacDenialMessage(fmt.Sprintf("reading pods for stage %q restart gate", stage.Name), rerr)
+						return ctrl.Result{RequeueAfter: permanentRetryInterval}, errGateDenied
+					}
 					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, rerr)
 				}
 				restart = rv
@@ -860,9 +872,15 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if stage.Promotion != nil && stage.Promotion.EventGate != nil {
 				ev, eerr := r.evaluateEventChecks(ctx, r.gateReader(rt.target), &ss, stage)
 				if eerr != nil {
-					// Can't read events: fail closed, back off and retry. Not a stage
-					// failure — the sentinel keeps the handler from rolling back.
+					// Can't read events: fail closed. Not a stage failure — the
+					// sentinels keep the handler from rolling back. Permanent
+					// denials surface on Ready and requeue bounded, like the
+					// restart gate above; transients back off and retry.
 					recordGateInterrupted()
+					if isPermanentAPIError(eerr) {
+						gateDeniedMsg = rbacDenialMessage(fmt.Sprintf("reading events for stage %q event gate", stage.Name), eerr)
+						return ctrl.Result{RequeueAfter: permanentRetryInterval}, errGateDenied
+					}
 					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, eerr)
 				}
 				event = ev
@@ -977,6 +995,21 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return loopResult, errors.Join(loopErr, perr)
 		}
 		return loopResult, loopErr
+	}
+	if errors.Is(loopErr, errGateDenied) {
+		// A promotion gate's read is PERMANENTLY denied (the tenant SA lost
+		// pods/events read, a kind is missing). Backoff can't heal it and
+		// silence would leave the last-written condition — often Ready=True —
+		// on a rollout that is actually wedged. Persist the pass's progress,
+		// surface the denial on Ready so the operator sees what verb to grant,
+		// and requeue at the bounded interval so the granted verb self-heals.
+		ss.Status.Stages = mergeStageStatuses(&ss, stageStatuses)
+		publishStageReady(&ss)
+		ss.Status.ObservedGeneration = ss.Generation
+		prevReady := readyConditionSnapshot(&ss)
+		r.setReady(&ss, metav1.ConditionFalse, ReasonRBACDenied, gateDeniedMsg)
+		r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, ReasonRBACDenied, gateDeniedMsg)
+		return loopResult, r.patchStatus(ctx, patchHelper, &ss)
 	}
 	if loopErr != nil {
 		// A stage failed. failStage has already written the failure status. If
@@ -1162,6 +1195,10 @@ func (r *StageSetReconciler) failResolution(ctx context.Context, helper *fluxpat
 		reason, transient = ReasonSourceNotReady, true
 	case errors.Is(err, artifact.ErrArtifactNotFound), errors.Is(err, artifact.ErrArtifactMissing):
 		reason, transient = ReasonArtifactNotFound, true
+	case errors.Is(err, artifact.ErrProducerAPIVersionRequired):
+		// A spec problem: the reference can never resolve until the author
+		// adds the apiVersion the docs already require.
+		reason = ReasonInvalidSpec
 	case errors.Is(err, artifact.ErrAmbiguousProducer), errors.Is(err, artifact.ErrCrossNamespaceForbidden):
 		reason = ReasonResolveFailed
 	default:

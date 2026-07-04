@@ -41,7 +41,7 @@ func newBuildCommand(o *options) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.stages, "stage", nil, "Render only the named stage(s); repeatable.")
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
 	cmd.Flags().BoolVar(&opts.showSecrets, "show-secrets", false, "Reveal Secret values instead of masking them.")
-	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName) — the identity the controller uses.")
+	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Read the SOPS decryption key Secret as spec.serviceAccountName, the identity the controller uses for it. Rendering itself always uses your credentials — the controller resolves sources and substituteFrom as itself.")
 	return cmd
 }
 
@@ -72,33 +72,16 @@ func runBuild(ctx context.Context, o *options, opts buildOptions) error {
 		return err
 	}
 
-	// Each stage renders under its effective ServiceAccount (its own
-	// serviceAccountName, else the StageSet default), so a preview reflects what
-	// that stage's identity can read. Without --as-tenant every stage renders with
-	// the CLI's own credentials. Engines are cached per effective SA.
-	engines := map[string]*preview.Engine{}
-	engineFor := func(sa string) (*preview.Engine, error) {
-		key := ""
-		renderClient := c
-		if opts.asTenant && sa != "" {
-			key = sa
-			if e, ok := engines[key]; ok {
-				return e, nil
-			}
-			ic, ierr := o.impersonatedClient(ss.Namespace, sa)
-			if ierr != nil {
-				return nil, ierr
-			}
-			renderClient = ic
-		} else if e, ok := engines[key]; ok {
-			return e, nil
-		}
-		engine := preview.NewEngine(renderClient, false)
-		engine.SourceDirs = sourceDirs
-		engine.Decryptor = dec
-		engines[key] = engine
-		return engine, nil
-	}
+	// Rendering reads (source resolve, postBuild substituteFrom) always run
+	// with the caller's own credentials: the controller performs those reads
+	// as itself — spec.serviceAccountName scopes only a stage's cluster
+	// operations (apply, prune, verify, actions), none of which build does.
+	// The decryptor above is the one tenant-scoped read, matching the
+	// controller. One engine serves every stage.
+	engine := preview.NewEngine(c, false)
+	engine.SourceDirs = sourceDirs
+	engine.Decryptor = dec
+	engineFor := func(string) (*preview.Engine, error) { return engine, nil }
 
 	masker := diffrender.NewSecretMasker(opts.showSecrets)
 	first := true

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
@@ -138,16 +139,31 @@ func TestReconcile_SuspendedRefusedWithoutForce(t *testing.T) {
 	}
 }
 
+// --with-source must annotate the PRODUCER behind the stage's ExternalArtifact
+// (nothing acts on requestedAt on the EA itself — the EA is the producer's
+// output). The stage's EA carries a back-pointer to a JsonnetSnippet; that
+// snippet is what gets stamped.
 func TestReconcile_WithSource(t *testing.T) {
 	cfg := envtestConfig(t)
 	c := testClient(t, cfg)
 	ns := makeNamespace(t, c, "recsrc")
 	makeStageSet(t, c, ns, "app") // its stage sourceRef is "app-artifact"
 
+	// The producer snippet, and the EA it publishes with a back-pointer to it.
+	snip := &unstructured.Unstructured{}
+	snip.SetGroupVersionKind(schema.GroupVersionKind{Group: "jaas.metio.wtf", Version: "v1", Kind: "JsonnetSnippet"})
+	snip.SetNamespace(ns)
+	snip.SetName("dash")
+	if err := c.Create(context.Background(), snip); err != nil {
+		t.Fatalf("create JsonnetSnippet: %v", err)
+	}
 	ea := &unstructured.Unstructured{}
 	ea.SetGroupVersionKind(artifact.ExternalArtifactGVK)
 	ea.SetNamespace(ns)
 	ea.SetName("app-artifact")
+	_ = unstructured.SetNestedStringMap(ea.Object, map[string]string{
+		"apiVersion": "jaas.metio.wtf/v1", "kind": "JsonnetSnippet", "name": "dash",
+	}, "spec", "sourceRef")
 	if err := c.Create(context.Background(), ea); err != nil {
 		t.Fatalf("create ExternalArtifact: %v", err)
 	}
@@ -157,13 +173,57 @@ func TestReconcile_WithSource(t *testing.T) {
 		t.Fatalf("reconcile --with-source exit = %d (stderr=%s)", code, stderr)
 	}
 
+	// The PRODUCER snippet is annotated…
+	gotSnip := &unstructured.Unstructured{}
+	gotSnip.SetGroupVersionKind(schema.GroupVersionKind{Group: "jaas.metio.wtf", Version: "v1", Kind: "JsonnetSnippet"})
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "dash"}, gotSnip); err != nil {
+		t.Fatalf("get JsonnetSnippet: %v", err)
+	}
+	if gotSnip.GetAnnotations()[requestedAtAnnotation] == "" {
+		t.Errorf("producer snippet not annotated with requestedAt: %v", gotSnip.GetAnnotations())
+	}
+	// …and the EA itself is NOT (annotating it is the no-op the fix removes).
+	gotEA := &unstructured.Unstructured{}
+	gotEA.SetGroupVersionKind(artifact.ExternalArtifactGVK)
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "app-artifact"}, gotEA); err != nil {
+		t.Fatalf("get ExternalArtifact: %v", err)
+	}
+	if gotEA.GetAnnotations()[requestedAtAnnotation] != "" {
+		t.Errorf("the EA itself must not be annotated — nothing acts on requestedAt there: %v", gotEA.GetAnnotations())
+	}
+}
+
+// An ExternalArtifact with no producer back-pointer is a no-op for
+// --with-source: nothing re-publishes it. It must warn (and count as failed
+// under --strict) rather than silently annotate a CR no controller watches.
+func TestReconcile_WithSource_ProducerlessEAWarns(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "recnoproducer")
+	makeStageSet(t, c, ns, "app")
+
+	ea := &unstructured.Unstructured{}
+	ea.SetGroupVersionKind(artifact.ExternalArtifactGVK)
+	ea.SetNamespace(ns)
+	ea.SetName("app-artifact") // no spec.sourceRef back-pointer
+	if err := c.Create(context.Background(), ea); err != nil {
+		t.Fatalf("create ExternalArtifact: %v", err)
+	}
+
+	_, stderr, code := runCLI(t, cfg, "reconcile", "app", "-n", ns, "--with-source", "--strict")
+	if code == exitOK {
+		t.Fatalf("a producerless EA under --strict must exit non-zero (stderr=%s)", stderr)
+	}
+	if !strings.Contains(stderr, "without a producer back-pointer") {
+		t.Errorf("expected a producer-back-pointer warning, got: %s", stderr)
+	}
 	got := &unstructured.Unstructured{}
 	got.SetGroupVersionKind(artifact.ExternalArtifactGVK)
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "app-artifact"}, got); err != nil {
 		t.Fatalf("get ExternalArtifact: %v", err)
 	}
-	if got.GetAnnotations()[requestedAtAnnotation] == "" {
-		t.Errorf("source ExternalArtifact not annotated with requestedAt: %v", got.GetAnnotations())
+	if got.GetAnnotations()[requestedAtAnnotation] != "" {
+		t.Errorf("a producerless EA must not be annotated (it would be a silent no-op): %v", got.GetAnnotations())
 	}
 }
 
@@ -193,10 +253,20 @@ func TestReconcile_WithSourceStrictSucceeds(t *testing.T) {
 	ns := makeNamespace(t, c, "recstrictok")
 	makeStageSet(t, c, ns, "app")
 
+	snip := &unstructured.Unstructured{}
+	snip.SetGroupVersionKind(schema.GroupVersionKind{Group: "jaas.metio.wtf", Version: "v1", Kind: "JsonnetSnippet"})
+	snip.SetNamespace(ns)
+	snip.SetName("dash")
+	if err := c.Create(context.Background(), snip); err != nil {
+		t.Fatalf("create JsonnetSnippet: %v", err)
+	}
 	ea := &unstructured.Unstructured{}
 	ea.SetGroupVersionKind(artifact.ExternalArtifactGVK)
 	ea.SetNamespace(ns)
 	ea.SetName("app-artifact")
+	_ = unstructured.SetNestedStringMap(ea.Object, map[string]string{
+		"apiVersion": "jaas.metio.wtf/v1", "kind": "JsonnetSnippet", "name": "dash",
+	}, "spec", "sourceRef")
 	if err := c.Create(context.Background(), ea); err != nil {
 		t.Fatalf("create ExternalArtifact: %v", err)
 	}

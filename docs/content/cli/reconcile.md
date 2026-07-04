@@ -15,7 +15,7 @@ stagesetctl reconcile NAME [flags]
 | Flag | Default | Description |
 |---|---|---|
 | `--stage` | _(all)_ | Force only this stage to re-run its actions (single-stage reconcile). |
-| `--with-source` | `false` | Also re-request the stage sources before reconciling. |
+| `--with-source` | `false` | Also re-request each stage source before reconciling. For an `ExternalArtifact` source this stamps the _producer_ behind it (via the artifact's back-pointer); an artifact with no producer back-pointer is a no-op and warns. |
 | `--update-now` | `false` | Apply a window-held rollout immediately, bypassing update windows. |
 | `--force` | `false` | Proceed even when the StageSet is suspended. |
 | `--wait` | `false` | Block until the controller reports the request handled. |

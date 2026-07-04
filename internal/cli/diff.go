@@ -53,7 +53,7 @@ func newDiffCommand(o *options) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.stages, "stage", nil, "Diff only the named stage(s); repeatable.")
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "Local artifact tree as [STAGE=]PATH; repeatable. Skips the cluster fetch.")
 	cmd.Flags().BoolVar(&opts.serverSide, "server-side", true, "Server-side dry-run apply diff (needs update/patch RBAC). False compares the render against live objects client-side.")
-	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Render and dry-run each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName).")
+	cmd.Flags().BoolVar(&opts.asTenant, "as-tenant", false, "Server-side dry-run each stage as its effective serviceAccountName (the stage's own, else spec.serviceAccountName) — the identity the controller applies with. Reads (source resolve, substituteFrom, inventory) always use your credentials, as the controller reads as itself.")
 	cmd.Flags().BoolVar(&opts.showSecrets, "show-secrets", false, "Reveal Secret values instead of masking them.")
 	cmd.Flags().BoolVar(&opts.showUnchanged, "show-unchanged", false, "Include objects with no change.")
 	cmd.Flags().BoolVar(&opts.prune, "prune", true, "Show resources that would be deleted because they fell out of the inventory.")
@@ -102,14 +102,14 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 	// cached per effective SA; the RESTMapper is identity-independent so the base
 	// mapper is reused. The cross-stage prune plan reads under the default runtime.
 	type diffRuntime struct {
-		engine       *preview.Engine
-		applier      *apply.Applier
-		renderClient client.Client
+		engine      *preview.Engine
+		applier     *apply.Applier
+		applyClient client.Client
 	}
 	runtimes := map[string]diffRuntime{}
 	runtimeFor := func(sa string) (diffRuntime, error) {
 		key := ""
-		renderClient := c
+		applyClient := c
 		if opts.asTenant && sa != "" {
 			key = sa
 			if rt, ok := runtimes[key]; ok {
@@ -119,14 +119,21 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 			if ierr != nil {
 				return diffRuntime{}, ierr
 			}
-			renderClient = ic
+			applyClient = ic
 		} else if rt, ok := runtimes[key]; ok {
 			return rt, nil
 		}
-		engine := preview.NewEngine(renderClient, false)
+		// The ENGINE (source resolve, postBuild substituteFrom, inventory
+		// reads) always runs with the caller's own credentials — the
+		// controller performs those reads as itself, and spec.serviceAccountName
+		// scopes only the stage's CLUSTER OPERATIONS (apply, prune, verify,
+		// actions). Impersonating the reads would demand RBAC the documented
+		// tenant role never grants and fail a diff the controller performs
+		// fine. Only the server-side dry-run (the apply mirror) impersonates.
+		engine := preview.NewEngine(c, false)
 		engine.SourceDirs = sourceDirs
 		engine.Decryptor = dec
-		rt := diffRuntime{engine: engine, applier: apply.New(renderClient, mapper, stagesv1.GroupVersion.Group), renderClient: renderClient}
+		rt := diffRuntime{engine: engine, applier: apply.New(applyClient, mapper, stagesv1.GroupVersion.Group), applyClient: applyClient}
 		runtimes[key] = rt
 		return rt, nil
 	}
@@ -150,7 +157,7 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		if rtErr != nil {
 			return runtimeErr(rtErr)
 		}
-		engine, applier, renderClient := rt.engine, rt.applier, rt.renderClient
+		engine, applier, applyClient := rt.engine, rt.applier, rt.applyClient
 		render, rerr := engine.RenderStage(ctx, &ss, stage)
 		if rerr != nil {
 			return runtimeErr(rerr)
@@ -165,7 +172,7 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		}
 		renderedRefs[stage.Name] = refs
 
-		changes, cerr := stageChanges(ctx, applier, renderClient, &ss, stage.Name, render.Objects, opts.serverSide)
+		changes, cerr := stageChanges(ctx, applier, applyClient, &ss, stage.Name, render.Objects, opts.serverSide)
 		if cerr != nil {
 			return runtimeErr(cerr)
 		}

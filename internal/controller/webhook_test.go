@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,5 +193,47 @@ func TestReconcile_InvalidActionFallback(t *testing.T) {
 
 	if r := readyReason(getStageSet(t, c, ns, "bad-action")); r != ReasonInvalidSpec {
 		t.Fatalf("Ready reason = %q, want %q", r, ReasonInvalidSpec)
+	}
+}
+
+// A producer-kind sourceRef (JsonnetSnippet) without apiVersion can never
+// resolve — the back-pointer match is on API group. Reject it at admission
+// with the actionable message rather than let it fail not-found later.
+func TestValidateStages_ProducerSourceRefRequiresAPIVersion(t *testing.T) {
+	t.Parallel()
+	missing := &stagesv1.StageSet{
+		Spec: stagesv1.StageSetSpec{
+			Stages: []stagesv1.Stage{
+				{Name: "app", SourceRef: stagesv1.SourceReference{Kind: "JsonnetSnippet", Name: "dash"}},
+			},
+		},
+	}
+	if err := ValidateStages(missing); err == nil {
+		t.Fatal("a producer sourceRef without apiVersion must be rejected")
+	} else if !strings.Contains(err.Error(), "apiVersion") {
+		t.Errorf("error should name apiVersion, got: %v", err)
+	}
+
+	ok := &stagesv1.StageSet{
+		Spec: stagesv1.StageSetSpec{
+			Stages: []stagesv1.Stage{
+				{Name: "app", SourceRef: stagesv1.SourceReference{APIVersion: "jaas.metio.wtf/v1", Kind: "JsonnetSnippet", Name: "dash"}},
+			},
+		},
+	}
+	if err := ValidateStages(ok); err != nil {
+		t.Fatalf("a producer sourceRef with apiVersion must validate: %v", err)
+	}
+
+	// Direct kinds (ExternalArtifact default, GitRepository) need no apiVersion.
+	for _, ref := range []stagesv1.SourceReference{
+		{Name: "ea"},
+		{Kind: "ExternalArtifact", Name: "ea"},
+		{Kind: "GitRepository", Name: "repo"},
+	} {
+		direct := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{{Name: "app", SourceRef: ref}}}}
+		if err := ValidateStages(direct); err != nil {
+			t.Errorf("direct source %+v must validate without apiVersion: %v", ref, err)
+		}
 	}
 }

@@ -16,6 +16,8 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
 func optionsFor(cfg *rest.Config) *options {
@@ -191,5 +193,51 @@ func createSA(t *testing.T, c client.Client, ns, name string) {
 	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
 	if err := c.Create(context.Background(), sa); err != nil {
 		t.Fatalf("create ServiceAccount %s: %v", name, err)
+	}
+}
+
+// TestBuild_AsTenant_ReadsSubstituteFromAsCaller pins the identity split: with
+// --as-tenant and a spec.serviceAccountName that has NO RBAC, a build whose
+// stage reads postBuild.substituteFrom must still succeed — the controller
+// resolves substituteFrom as ITSELF (spec.serviceAccountName scopes only the
+// stage's cluster operations), so a faithful preview reads as the caller too.
+// Impersonating the read would fail a build the controller performs fine.
+func TestBuild_AsTenant_ReadsSubstituteFromAsCaller(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "astenantsubst")
+	ctx := context.Background()
+
+	// The tenant SA exists but is granted NOTHING.
+	createSA(t, c, ns, "powerless")
+
+	// A substitution ConfigMap only the caller (envtest admin) can read.
+	vars := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "vars"},
+		Data:       map[string]string{"greeting": "from-caller"},
+	}
+	if err := c.Create(ctx, vars); err != nil {
+		t.Fatalf("create vars ConfigMap: %v", err)
+	}
+
+	ss := makeStageSet(t, c, ns, "app")
+	ss.Spec.ServiceAccountName = "powerless"
+	ss.Spec.Stages[0].PostBuild = &stagesv1.PostBuild{
+		SubstituteFrom: []stagesv1.SubstituteReference{{Kind: "ConfigMap", Name: "vars"}},
+	}
+	if err := c.Update(ctx, ss); err != nil {
+		t.Fatalf("set spec: %v", err)
+	}
+
+	dir := writeSourceTree(t, map[string]string{
+		"cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\ndata:\n  greeting: ${greeting}\n",
+	})
+
+	stdout, stderr, code := runCLI(t, cfg, "build", "app", "-n", ns, "--source-dir", dir, "--as-tenant")
+	if code != exitOK {
+		t.Fatalf("build --as-tenant reading substituteFrom must succeed under a powerless tenant SA (the read runs as the caller); exit=%d stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "greeting: from-caller") {
+		t.Errorf("substituteFrom value not resolved (read did not run as the caller):\n%s", stdout)
 	}
 }

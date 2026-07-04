@@ -38,6 +38,12 @@ var errHoldForPromotion = errors.New("hold for promotion")
 // the only thing that may engage rollbackOnFailure.
 var errGateUnevaluable = errors.New("promotion gate unevaluable")
 
+// errGateDenied is the stage-loop sentinel for a promotion-gate read that is
+// PERMANENTLY denied (RBAC, missing kind): unlike errGateUnevaluable it does
+// not engage backoff — the handler writes Ready=False/RBACDenied and requeues
+// at the bounded permanent-retry interval so an out-of-band grant self-heals.
+var errGateDenied = errors.New("promotion gate read permanently denied")
+
 // parsePromote extracts the requested stage and token from the promote
 // annotation. An empty stage means no (or malformed) request.
 func parsePromote(ss *stagesv1.StageSet) (stage, token string) {

@@ -18,7 +18,7 @@ stagesetctl build NAME [flags]
 | `--stage` | _(all)_ | Render only the named stage(s); repeatable. |
 | `--source-dir` | _(none)_ | Use a local artifact tree as `[STAGE=]PATH` instead of fetching from the cluster; repeatable. |
 | `--show-secrets` | `false` | Reveal Secret values instead of masking them. |
-| `--as-tenant` | `false` | Render each stage impersonating its effective `serviceAccountName` — the stage's own, else the StageSet's `spec.serviceAccountName` (see [multi-cluster and tenancy](/security/multi-cluster/)). |
+| `--as-tenant` | `false` | Read the SOPS decryption key Secret as `spec.serviceAccountName`, the identity the controller uses for it. Rendering itself always uses your credentials — the controller resolves sources and `substituteFrom` as itself (see [multi-cluster and tenancy](/security/multi-cluster/)). |
 
 Secret values are masked by default, so the output is safe to paste into a review.
 `build` writes YAML unconditionally — there is no output-format flag.

@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/migrations"
 	"github.com/metio/stageset-controller/internal/window"
 )
@@ -500,6 +501,14 @@ func ValidateStages(ss *stagesv1.StageSet) error {
 		seen[name] = true
 	}
 	for i := range ss.Spec.Stages {
+		// A producer-kind sourceRef (e.g. JsonnetSnippet) is matched against
+		// ExternalArtifact back-pointers by API GROUP; without apiVersion the
+		// group is empty and can never match a real producer's back-pointer —
+		// the reference is unresolvable by construction, so reject it here
+		// with the actionable message instead of a misleading not-found later.
+		if ref := ss.Spec.Stages[i].SourceRef; artifact.IsProducerRef(ref) && ref.APIVersion == "" {
+			return fmt.Errorf("stage %q sourceRef: kind %q is a producer reference and requires apiVersion (the API group identifies the producer's ExternalArtifact back-pointer)", ss.Spec.Stages[i].Name, ref.Kind)
+		}
 		stage := &ss.Spec.Stages[i]
 		if stage.Actions == nil {
 			continue

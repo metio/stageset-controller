@@ -370,3 +370,45 @@ func TestPinnedState(t *testing.T) {
 		})
 	}
 }
+
+// A producer-kind sourceRef WITHOUT apiVersion can never match a producer's
+// back-pointer (the match is on API group, empty group matches nothing), so it
+// must fail with the actionable ErrProducerAPIVersionRequired — not the
+// misleading "no ExternalArtifact back-references" a valid back-pointer earns.
+func TestResolve_ProducerWithoutAPIVersionRejected(t *testing.T) {
+	t.Parallel()
+	// A perfectly good producer EA exists; the ref just omits apiVersion.
+	c := buildClient(t, externalArtifactFixture("ns", "snip-artifact", snippetBackPointer("dashboards"), true, readyArtifact()))
+	ref := stagesv1.SourceReference{Kind: "JsonnetSnippet", Name: "dashboards"} // no APIVersion
+	_, err := (&Resolver{}).Resolve(context.Background(), c, ref, "ns")
+	if !errors.Is(err, ErrProducerAPIVersionRequired) {
+		t.Fatalf("want ErrProducerAPIVersionRequired, got %v", err)
+	}
+	if errors.Is(err, ErrArtifactNotFound) {
+		t.Fatal("must not masquerade as not-found: a correct back-pointer exists, the ref is under-specified")
+	}
+}
+
+func TestIsProducerRef(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		ref  stagesv1.SourceReference
+		want bool
+	}{
+		{"empty kind is direct EA", stagesv1.SourceReference{Name: "x"}, false},
+		{"explicit ExternalArtifact is direct", stagesv1.SourceReference{Kind: "ExternalArtifact", Name: "x"}, false},
+		{"GitRepository is direct", stagesv1.SourceReference{Kind: "GitRepository", Name: "x"}, false},
+		{"OCIRepository is direct", stagesv1.SourceReference{Kind: "OCIRepository", Name: "x"}, false},
+		{"Bucket is direct", stagesv1.SourceReference{Kind: "Bucket", Name: "x"}, false},
+		{"JsonnetSnippet is a producer", stagesv1.SourceReference{Kind: "JsonnetSnippet", Name: "x"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsProducerRef(tc.ref); got != tc.want {
+				t.Fatalf("IsProducerRef(%+v) = %v, want %v", tc.ref, got, tc.want)
+			}
+		})
+	}
+}
