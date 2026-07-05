@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+permissions:
+  contents: read
 
 # Angle 1 of the two-angle e2e strategy: the DEV binary (this PR's HEAD build)
 # deployed via the LATEST RELEASED chart (oci://ghcr.io/metio/helm-charts/stageset-controller),
@@ -29,6 +31,7 @@ jobs:
   discover:
     name: Discover released chart + Kubernetes versions
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       chart_version: ${{ steps.find.outputs.version }}
       k8s_versions: ${{ steps.versions.outputs.k8s }}
@@ -44,9 +47,13 @@ jobs:
           fetch-depth: 0
       - id: scope
         name: Did this PR touch the binary, CRDs, or smoke wiring?
+        env:
+          # base_ref is attacker-influenced; expand it as a shell variable, never
+          # directly into the script.
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
           set -uo pipefail
-          base="origin/${{ github.base_ref || 'main' }}"
+          base="origin/${BASE_REF}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] || \
              git diff --name-only "$base" HEAD \
                | grep -qE '^(api|cmd|config|internal)/|^Dockerfile$|^hack/smoke/|^\.github/workflows/kind-smoke\.yml$|^go\.(mod|sum)$'; then
@@ -129,6 +136,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -229,6 +237,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -290,6 +299,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -358,6 +368,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -409,6 +420,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -465,6 +477,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -515,6 +528,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -565,6 +579,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -621,6 +636,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -708,6 +724,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -780,6 +797,7 @@ jobs:
     needs: [discover, smoke, s3, s3-seaweedfs, ha, selfsigned, scale-smoke, new-fields, rollout-gates, networkpolicy-enforcement, servicemesh]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Verify every job succeeded or skipped
         env:
