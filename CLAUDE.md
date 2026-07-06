@@ -40,23 +40,30 @@ delivery (`spec.updateWindows`).
 
 ## Common commands
 
-No host toolchain; commands run in a containerized dev shell driven by
-`dev/Containerfile`. A `.ilo.rc` at the repo root supplies the args (it mounts
-the Go module cache and sets `GOSUMDB=off`), so the short form works:
+The toolchain is a **nix flake** (`flake.nix` + `flake.lock`, Renovate-maintained):
+the Go correctness gates run in CI via the shared `metio/ci` reusable `golang.yml`,
+and the same tools live in the flake so a local run reproduces them.
+`KUBEBUILDER_ASSETS` is set by the devShell (etcd + kube-apiserver + kubectl from
+nixpkgs), so envtest tests run offline. Run any command through the devShell:
 
 ```shell
-ilo bash -c 'go build ./...'
-ilo bash -c 'go vet ./...'
-ilo bash -c 'staticcheck ./...'                       # checks=all via staticcheck.conf
-ilo bash -c 'gofumpt -l .'                            # strict formatting (empty == clean)
-ilo bash -c 'gosec ./...'                             # security scanner
-ilo bash -c 'arch-go'                                 # architecture rules (arch-go.yml)
-ilo bash -c 'govulncheck ./...'
-ilo bash -c 'modernize ./...'                         # newer-Go idiom check (CI lint gate; ignore zz_generated.deepcopy.go maps.Copy hits)
-ilo bash -c 'go test -count=1 -race -shuffle=on -cover ./...'   # full suite (envtest assets prestaged in the image)
-ilo bash -c 'go tool controller-gen object:headerFile="hack/boilerplate.go.txt" paths=./api/v1/...'  # regenerate deepcopy — headerFile is REQUIRED so the SPDX header is kept (REUSE)
-ilo bash -c 'go tool controller-gen crd paths=./api/... output:crd:artifacts:config=config/crd'  # regenerate CRDs (or `make manifests`)
+nix develop --command go build ./...
+nix develop --command go vet ./...
+nix develop --command staticcheck ./...                # checks=all via staticcheck.conf
+nix develop --command gofumpt -l .                     # strict formatting (empty == clean)
+nix develop --command gosec ./...                      # security scanner
+nix develop --command arch-go                          # architecture rules (arch-go.yml)
+nix develop --command govulncheck ./...
+nix develop --command modernize ./...                  # newer-Go idiom check (ignore zz_generated.deepcopy.go maps.Copy hits)
+nix develop --command go test -count=1 -race -shuffle=on -cover ./...   # full suite (envtest wired)
+nix develop --command go tool controller-gen object:headerFile="hack/boilerplate.go.txt" paths=./api/v1/...  # regenerate deepcopy — headerFile REQUIRED so the SPDX header is kept (REUSE)
+nix develop --command go tool controller-gen crd paths=./api/... output:crd:artifacts:config=config/crd  # regenerate CRDs
 ```
+
+Or `nix develop` to drop into the shell and run tools bare. On this host `nix` is
+nix-portable (see the root `CLAUDE.md`'s nix section). arch-go, modernize, and
+helm-schema aren't in nixpkgs, so the flake builds them from source; `update-flake.yml`
+runs `nix-update` weekly to bump them (Renovate can't compute nix hashes).
 
 **Static analysis is the standalone tools above — never golangci-lint** (banned
 project-wide). The Go gate is `go vet` + `staticcheck` + `gosec` +

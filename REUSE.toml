@@ -11,3 +11,11 @@ path = ["go.mod", "go.sum", ".gitignore", ".gitmodules", "renovate.json", "docs/
 precedence = "aggregate"
 SPDX-FileCopyrightText = "The stageset-controller Authors"
 SPDX-License-Identifier = "0BSD"
+
+# flake.lock is nix-generated JSON; it pins the toolchain both CI and local
+# shells resolve from flake.nix.
+[[annotations]]
+path = "flake.lock"
+precedence = "override"
+SPDX-FileCopyrightText = "The stageset-controller Authors"
+SPDX-License-Identifier = "0BSD"

@@ -76,16 +76,13 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: metio/ci/nix-devshell@50117191bb36382ab22777be480c539fc4c37fed # 2026.7.5211151
       - id: build
         name: Build & Archive (controller + CLI)
         # Cross-compile both binaries for this platform and archive each: tar.gz
         # on linux/darwin, zip on windows (with a .exe binary). Ships the
         # controller daemon (./cmd) and the stagesetctl CLI (./cmd/stagesetctl).
+        # go comes from the flake; GOOS/GOARCH/CGO_ENABLED ride the step env.
         run: |
           set -euo pipefail
           ver="${{ needs.prepare.outputs.version }}"
@@ -96,7 +93,7 @@ jobs:
           ldflags="-s -w -X main.version=${ver} -X main.commit=${{ github.sha }}"
           pack() {
             name="$1"; pkg="$2"
-            go build -o "${name}_v${ver}${ext}" -trimpath -ldflags="${ldflags}" "${pkg}"
+            nix develop --command go build -o "${name}_v${ver}${ext}" -trimpath -ldflags="${ldflags}" "${pkg}"
             if [ "$os" = windows ]; then
               zip "${name}_${ver}_${os}_${arch}.zip" "${name}_v${ver}${ext}" LICENSE README.md
             else

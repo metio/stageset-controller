@@ -20,3 +20,8 @@ docs/.hugo_build.lock
 # htmltest writes a ref cache here when it runs (ilo bash -c "htmltest").
 tmp/.htmltest/
 .local/
+
+# direnv nix-direnv build cache (real-nix contributors may add a local .envrc).
+.direnv/
+result
+result-*
