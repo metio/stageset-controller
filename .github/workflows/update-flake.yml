@@ -25,7 +25,7 @@ jobs:
       pull-requests: write # open the PR
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: metio/ci/nix-devshell@50117191bb36382ab22777be480c539fc4c37fed # 2026.7.5211151
+      - uses: metio/ci/nix-devshell@ec60a096bd59b2b46e358bfca757f243c081ae13 # 2026.7.6074350
       - name: Bump the from-source flake packages (version + hashes)
         run: |
           for pkg in arch-go modernize helm-schema; do
