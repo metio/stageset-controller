@@ -15,7 +15,7 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.31.0
 	github.com/fluxcd/pkg/auth v0.55.0
 	github.com/fluxcd/pkg/envsubst v1.7.0
-	github.com/fluxcd/pkg/kustomize v1.36.0
+	github.com/fluxcd/pkg/kustomize v1.37.0
 	github.com/fluxcd/pkg/runtime v0.111.0
 	github.com/fluxcd/pkg/ssa v0.77.0
 	github.com/getsops/sops/v3 v3.13.2
@@ -33,7 +33,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.21.0
+	golang.org/x/sync v0.22.0
 	golang.org/x/term v0.44.0
 	google.golang.org/grpc v1.82.0
 	k8s.io/api v0.36.2
@@ -248,7 +248,7 @@ require (
 	k8s.io/component-base v0.36.2 // indirect
 	k8s.io/gengo/v2 v2.0.0-20250922181213-ec3ebc5fd46b // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260427204847-8949caaa1199 // indirect
+	k8s.io/kube-openapi v0.0.0-20260603220949-865597e52e25 // indirect
 	k8s.io/kubectl v0.36.2 // indirect
 	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2 // indirect
 	sigs.k8s.io/controller-tools v0.21.0 // indirect
