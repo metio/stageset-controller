@@ -15,7 +15,7 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.31.0
 	github.com/fluxcd/pkg/auth v0.55.0
 	github.com/fluxcd/pkg/envsubst v1.7.0
-	github.com/fluxcd/pkg/kustomize v1.37.0
+	github.com/fluxcd/pkg/kustomize v1.38.0
 	github.com/fluxcd/pkg/runtime v0.111.0
 	github.com/fluxcd/pkg/ssa v0.77.0
 	github.com/getsops/sops/v3 v3.13.2
