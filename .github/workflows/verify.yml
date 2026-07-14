@@ -128,7 +128,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
-      - uses: metio/ci/dco@68ccaa80327a09d6be7ee72fc81ffa370bd73fff # main
+      - uses: metio/ci/dco@ea61d45334e3168b830e6aff85446858b8e60031 # main
   policy:
     # Org convention policies (conftest/Rego from metio/ci): SHA-pinned uses
     # refs, top-level permissions, job timeouts, no untrusted interpolation in
