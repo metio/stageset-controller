@@ -37,6 +37,13 @@ spec:
           image: nginx
 `
 
+// renderedJSONList mirrors what a JaaS JsonnetSnippet publishes: the whole
+// rendered output as a single rendered.json holding a kind:List.
+const renderedJSONList = `{"apiVersion":"v1","kind":"List","items":[` +
+	`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"app-config"},"data":{"key":"value"}},` +
+	`{"apiVersion":"v1","kind":"Service","metadata":{"name":"web"},"spec":{"ports":[{"port":80}]}}` +
+	`]}`
+
 func byKindName(t *testing.T, objs []*unstructured.Unstructured, kind, name string) *unstructured.Unstructured {
 	t.Helper()
 	for _, o := range objs {
@@ -90,6 +97,21 @@ func TestBuild_ExistingKustomization(t *testing.T) {
 	}
 	// namePrefix from the artifact's own kustomization.yaml must apply.
 	byKindName(t, objs, "ConfigMap", "prod-app-config")
+}
+
+func TestBuild_JSONRenderedListExpands(t *testing.T) {
+	t.Parallel()
+	// A .json artifact (JaaS's rendered.json) must be scanned despite kustomize's
+	// .yaml/.yml-only default, and its kind:List flattened into individual objects.
+	objs, err := Build(map[string]string{"rendered.json": renderedJSONList}, Options{}, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(objs) != 2 {
+		t.Fatalf("want 2 objects from the JSON List, got %d", len(objs))
+	}
+	byKindName(t, objs, "ConfigMap", "app-config")
+	byKindName(t, objs, "Service", "web")
 }
 
 func TestBuild_Patches(t *testing.T) {
