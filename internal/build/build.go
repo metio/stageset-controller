@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,7 +69,7 @@ func Build(files map[string]string, opts Options, vars map[string]string) ([]*un
 	// bytes. Skipped when the build root carries its own kustomization (it selects
 	// resources explicitly, and an explicitly-listed .json is already accepted).
 	if !hasKustomization(buildDir) {
-		if err := normalizeJSONManifests(buildDir); err != nil {
+		if err := normalizeJSONManifests(root, buildDir, files); err != nil {
 			return nil, fmt.Errorf("normalize json manifests: %w", err)
 		}
 	}
@@ -187,29 +186,28 @@ func hasKustomization(dir string) bool {
 	return false
 }
 
-// normalizeJSONManifests renames *.json files under dir to *.yaml so kustomize's
-// .yaml/.yml-only resource scanner includes them (JSON is a subset of YAML, so
-// the bytes parse unchanged). A subdirectory that carries its own kustomization
-// is a separate base and left untouched, as is any .json that already has a .yaml
-// sibling.
-func normalizeJSONManifests(dir string) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+// normalizeJSONManifests renames the artifact's *.json entries that sit directly
+// in the build root to *.yaml so kustomize's .yaml/.yml-only resource scanner
+// includes them (JSON is a subset of YAML, so the bytes parse unchanged). This
+// covers a producer that publishes its rendered output as a single file at the
+// root — a JaaS JsonnetSnippet's rendered.json. It works off the trusted `files`
+// map (materialize already rejected absolute and traversing entries) rather than
+// walking the filesystem, so a swapped symlink cannot redirect the rename. A
+// .json that already has a .yaml sibling is left alone.
+func normalizeJSONManifests(root, buildDir string, files map[string]string) error {
+	buildDir = filepath.Clean(buildDir)
+	for name := range files {
+		dest := filepath.Join(root, filepath.Clean(name))
+		if filepath.Dir(dest) != buildDir || filepath.Ext(dest) != ".json" {
+			continue
+		}
+		yamlPath := strings.TrimSuffix(dest, ".json") + ".yaml"
+		if _, err := os.Stat(yamlPath); err == nil {
+			continue
+		}
+		if err := os.Rename(dest, yamlPath); err != nil {
 			return err
 		}
-		if d.IsDir() {
-			if path != dir && hasKustomization(path) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if filepath.Ext(path) != ".json" {
-			return nil
-		}
-		yamlPath := strings.TrimSuffix(path, ".json") + ".yaml"
-		if _, statErr := os.Stat(yamlPath); statErr == nil {
-			return nil
-		}
-		return os.Rename(path, yamlPath)
-	})
+	}
+	return nil
 }
