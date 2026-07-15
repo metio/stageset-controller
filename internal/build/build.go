@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,19 @@ func Build(files map[string]string, opts Options, vars map[string]string) ([]*un
 		}
 		if fi, statErr := os.Stat(buildDir); statErr != nil || !fi.IsDir() {
 			return nil, fmt.Errorf("build path %q not found in artifact", opts.Path)
+		}
+	}
+
+	// The kustomize resource scanner only picks up .yaml/.yml files, but a
+	// producer may publish a rendered manifest as .json — a JaaS JsonnetSnippet
+	// publishes its whole rendered output as a single rendered.json. Without this
+	// the scanner skips it and the build applies nothing. JSON is a subset of
+	// YAML, so renaming .json manifests to .yaml lets kustomize parse the same
+	// bytes. Skipped when the build root carries its own kustomization (it selects
+	// resources explicitly, and an explicitly-listed .json is already accepted).
+	if !hasKustomization(buildDir) {
+		if err := normalizeJSONManifests(buildDir); err != nil {
+			return nil, fmt.Errorf("normalize json manifests: %w", err)
 		}
 	}
 
@@ -160,4 +174,42 @@ func materialize(files map[string]string) (root string, cleanup func(), err erro
 		}
 	}
 	return root, cleanup, nil
+}
+
+// hasKustomization reports whether dir holds a kustomization file kustomize would
+// treat as the build root (rather than auto-generating one by scanning).
+func hasKustomization(dir string) bool {
+	for _, n := range []string{"kustomization.yaml", "kustomization.yml", "Kustomization"} {
+		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeJSONManifests renames *.json files under dir to *.yaml so kustomize's
+// .yaml/.yml-only resource scanner includes them (JSON is a subset of YAML, so
+// the bytes parse unchanged). A subdirectory that carries its own kustomization
+// is a separate base and left untouched, as is any .json that already has a .yaml
+// sibling.
+func normalizeJSONManifests(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != dir && hasKustomization(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".json" {
+			return nil
+		}
+		yamlPath := strings.TrimSuffix(path, ".json") + ".yaml"
+		if _, statErr := os.Stat(yamlPath); statErr == nil {
+			return nil
+		}
+		return os.Rename(path, yamlPath)
+	})
 }
