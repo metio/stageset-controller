@@ -744,6 +744,358 @@ spec:
                 required:
                 - sourceRef
                 type: object
+              onRollback:
+                description: |-
+                  OnRollback runs best-effort after a rollback restores the previous
+                  revision's manifests — both the spec.rollbackOnFailure whole-run rollback
+                  and a promotion gate's single-stage onFailure=Rollback revert. Unlike a
+                  stage's actions.onFailure (which fires at the moment of failure, before any
+                  rollback), these run against the RESTORED state, so they are the place for
+                  cleanup that only makes sense once the old manifests are back — e.g. a job
+                  action that lifts an application maintenance mode a failed upgrade left on.
+                  They are ungated by the per-revision action ledger, so they fire on every
+                  rollback, and run under spec.serviceAccountName. A failure only emits a
+                  Warning event; it never blocks the rollback report. Action names must be
+                  unique within this list.
+                items:
+                  description: |-
+                    Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
+                    Apply must be set — enforced by the validating admission webhook (and a
+                    reconciler fallback), not a CRD CEL rule, so spec.stages and the action lists
+                    stay unbounded (CEL cost is multiplied by enclosing array sizes).
+                  properties:
+                    apply:
+                      description: |-
+                        Apply applies manifests from an ExternalArtifact path as a transient
+                        action step — for resources that should live only across a rollout
+                        (e.g. a maintenance-page pod), not as steady-state stage members.
+                      properties:
+                        path:
+                          description: Path inside the artifact to build. Defaults
+                            to "./".
+                          type: string
+                        sourceRef:
+                          description: |-
+                            SourceRef references the ExternalArtifact (directly or via a producer)
+                            holding the manifests to apply.
+                          properties:
+                            apiVersion:
+                              description: |-
+                                APIVersion of the referent. Defaults to
+                                source.toolkit.fluxcd.io/v1. Required when Kind is set to a
+                                producer kind.
+                              type: string
+                            kind:
+                              description: |-
+                                Kind of the referent. Defaults to ExternalArtifact; any other kind
+                                is treated as a producer and resolved via the back-pointer index.
+                              type: string
+                            name:
+                              description: Name of the referent.
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the referent; defaults to the StageSet's namespace.
+                                Cross-namespace references are gated by --no-cross-namespace-refs.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        wait:
+                          description: |-
+                            Wait blocks until the applied objects report Ready (kstatus), bounded
+                            by the action Timeout — so a following patch action can repoint traffic
+                            only once the resource is serving.
+                          type: boolean
+                      required:
+                      - sourceRef
+                      type: object
+                    delete:
+                      description: |-
+                        Delete removes an existing in-cluster object — primarily for
+                        migrations that recreate immutable objects. A missing target is
+                        success (idempotent).
+                      properties:
+                        cascade:
+                          description: |-
+                            Cascade controls what happens to the target's dependents, mirroring
+                            kubectl's --cascade. Background (the default) deletes the target and
+                            garbage-collects dependents asynchronously; Foreground deletes dependents
+                            before the target; Orphan deletes the target but leaves dependents running
+                            (their controller ownerReferences are removed). Orphan is the building block
+                            for recreating an object whose immutable fields changed without downtime:
+                            orphan-delete it, then re-apply the new spec, which adopts the still-running
+                            dependents by selector.
+                          enum:
+                          - Background
+                          - Foreground
+                          - Orphan
+                          type: string
+                        target:
+                          description: Target object to delete.
+                          properties:
+                            apiVersion:
+                              description: API version of the referent, if not specified
+                                the Kubernetes preferred version will be used.
+                              type: string
+                            kind:
+                              description: Kind of the referent.
+                              type: string
+                            name:
+                              description: Name of the referent.
+                              type: string
+                            namespace:
+                              description: Namespace of the referent, when not specified
+                                it acts as LocalObjectReference.
+                              type: string
+                          required:
+                          - kind
+                          - name
+                          type: object
+                      required:
+                      - target
+                      type: object
+                    http:
+                      description: HTTP calls an endpoint; gated by --allowed-action-hosts.
+                      properties:
+                        body:
+                          description: Body inline.
+                          type: string
+                        bodyFrom:
+                          description: BodyFrom reads the body from a Secret key.
+                          properties:
+                            key:
+                              description: Key in the Secret, when not specified an
+                                implementation-specific default key is used.
+                              type: string
+                            name:
+                              description: Name of the Secret.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        expectedStatus:
+                          description: ExpectedStatus codes; defaults to any 2xx.
+                          items:
+                            format: int32
+                            maximum: 599
+                            minimum: 100
+                            type: integer
+                          type: array
+                        headersFrom:
+                          description: HeadersFrom reads headers from Secret keys.
+                          items:
+                            description: |-
+                              SecretKeyReference contains enough information to locate the referenced Kubernetes Secret object in the same
+                              namespace. Optionally a key can be specified.
+                              Use this type instead of core/v1 SecretKeySelector when the Key is optional and the Optional field is not
+                              applicable.
+                            properties:
+                              key:
+                                description: Key in the Secret, when not specified
+                                  an implementation-specific default key is used.
+                                type: string
+                              name:
+                                description: Name of the Secret.
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          type: array
+                        method:
+                          description: Method defaults to POST.
+                          enum:
+                          - GET
+                          - POST
+                          - PUT
+                          - PATCH
+                          - DELETE
+                          - HEAD
+                          type: string
+                        url:
+                          description: URL to call; validated against --allowed-action-hosts.
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    job:
+                      description: Job renders and awaits Jobs from an ExternalArtifact
+                        path.
+                      properties:
+                        path:
+                          description: Path inside the artifact. Defaults to "./".
+                          type: string
+                        sourceRef:
+                          description: SourceRef references the ExternalArtifact containing
+                            the Jobs.
+                          properties:
+                            apiVersion:
+                              description: |-
+                                APIVersion of the referent. Defaults to
+                                source.toolkit.fluxcd.io/v1. Required when Kind is set to a
+                                producer kind.
+                              type: string
+                            kind:
+                              description: |-
+                                Kind of the referent. Defaults to ExternalArtifact; any other kind
+                                is treated as a producer and resolved via the back-pointer index.
+                              type: string
+                            name:
+                              description: Name of the referent.
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the referent; defaults to the StageSet's namespace.
+                                Cross-namespace references are gated by --no-cross-namespace-refs.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                      required:
+                      - sourceRef
+                      type: object
+                    name:
+                      description: Name of the action, for status and Events.
+                      type: string
+                    patch:
+                      description: Patch modifies an existing in-cluster object.
+                      properties:
+                        patch:
+                          description: Patch content.
+                          type: string
+                        target:
+                          description: |-
+                            Target selects what to patch: a single named object, or every object of a
+                            kind matching a label selector.
+                          properties:
+                            apiVersion:
+                              description: APIVersion of the object(s); empty uses
+                                the API server's preferred version.
+                              type: string
+                            kind:
+                              description: Kind of the object(s).
+                              type: string
+                            name:
+                              description: Name of a single object to patch. Mutually
+                                exclusive with selector.
+                              type: string
+                            namespace:
+                              description: Namespace of the object(s); defaults to
+                                the StageSet's namespace.
+                              type: string
+                            selector:
+                              description: |-
+                                Selector patches every object of Kind in the namespace whose labels match.
+                                Mutually exclusive with name; an empty selector is rejected. Use it to patch
+                                a set in one step — e.g. every PVC of a StatefulSet to grow its storage
+                                request.
+                              properties:
+                                matchExpressions:
+                                  description: matchExpressions is a list of label
+                                    selector requirements. The requirements are ANDed.
+                                  items:
+                                    description: |-
+                                      A label selector requirement is a selector that contains values, a key, and an operator that
+                                      relates the key and values.
+                                    properties:
+                                      key:
+                                        description: key is the label key that the
+                                          selector applies to.
+                                        type: string
+                                      operator:
+                                        description: |-
+                                          operator represents a key's relationship to a set of values.
+                                          Valid operators are In, NotIn, Exists and DoesNotExist.
+                                        type: string
+                                      values:
+                                        description: |-
+                                          values is an array of string values. If the operator is In or NotIn,
+                                          the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                          the values array must be empty. This array is replaced during a strategic
+                                          merge patch.
+                                        items:
+                                          type: string
+                                        type: array
+                                        x-kubernetes-list-type: atomic
+                                    required:
+                                    - key
+                                    - operator
+                                    type: object
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                                matchLabels:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                    map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                    operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                  type: object
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          required:
+                          - kind
+                          type: object
+                        type:
+                          description: 'Type of the patch: merge or json6902. Defaults
+                            to merge.'
+                          enum:
+                          - merge
+                          - json6902
+                          type: string
+                      required:
+                      - patch
+                      - target
+                      type: object
+                    retries:
+                      description: Retries before the action is considered failed.
+                      format: int32
+                      maximum: 100
+                      minimum: 0
+                      type: integer
+                    timeout:
+                      description: Timeout for the action.
+                      type: string
+                    wait:
+                      description: Wait blocks for a duration or until a CEL expression
+                        holds.
+                      properties:
+                        duration:
+                          description: Duration of a fixed wait.
+                          type: string
+                        expr:
+                          description: Expr is a CEL expression over the target's
+                            state.
+                          type: string
+                        target:
+                          description: Target object for Expr.
+                          properties:
+                            apiVersion:
+                              description: API version of the referent, if not specified
+                                the Kubernetes preferred version will be used.
+                              type: string
+                            kind:
+                              description: Kind of the referent.
+                              type: string
+                            name:
+                              description: Name of the referent.
+                              type: string
+                            namespace:
+                              description: Namespace of the referent, when not specified
+                                it acts as LocalObjectReference.
+                              type: string
+                          required:
+                          - kind
+                          - name
+                          type: object
+                        timeout:
+                          description: Timeout for expression-based waits.
+                          type: string
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
               retryInterval:
                 description: RetryInterval overrides Interval after a failed run.
                 type: string

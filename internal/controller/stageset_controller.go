@@ -920,6 +920,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					promoState.AbortedRevision = ra.Revision
 					r.event(&ss, corev1.EventTypeWarning, ReasonPromotionBlocked,
 						fmt.Sprintf("stage %q %s failed; rolled back to revision %s", stage.Name, cause, reverted))
+					// The stage's manifests are restored; run post-rollback cleanup.
+					r.runOnRollback(ctx, &ss, fetcher, runtimes)
 				} else {
 					r.event(&ss, corev1.EventTypeWarning, ReasonPromotionBlocked,
 						fmt.Sprintf("stage %q %s failed and onFailure=Rollback, but no last-good revision is available to roll back to (enable spec.rollbackOnFailure); holding", stage.Name, cause))
@@ -1048,6 +1050,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			r.event(&ss, corev1.EventTypeWarning, eventReasonRolledBack,
 				"rolled back to the last-applied revisions after a failed run")
 			logger.Info("rolled back to the last-applied revisions after a failed run")
+			// Post-rollback cleanup runs only when a snapshot was actually
+			// restored; an empty snapshot means nothing rolled back, so there is
+			// nothing to clean up.
+			if len(ss.Status.LastAppliedSnapshot) > 0 {
+				r.runOnRollback(rbCtx, &ss, fetcher, runtimes)
+			}
 		}
 		// A terminal stage failure (RBAC denial, digest mismatch, oversized
 		// tarball) halts the run but must not requeue — the failure status is
@@ -1476,6 +1484,26 @@ func (r *StageSetReconciler) runOnFailure(ctx context.Context, ss *stagesv1.Stag
 	}
 	if err := executor.Run(ctx, ss.Namespace, stage.Actions.OnFailure, done, record); err != nil {
 		r.event(ss, corev1.EventTypeWarning, "OnFailureAction", fmt.Sprintf("stage %q onFailure: %v", stage.Name, err))
+	}
+}
+
+// runOnRollback runs the StageSet-level spec.onRollback actions best-effort after
+// a rollback has restored the previous manifests. It runs under
+// spec.serviceAccountName and passes a nil done-set and nil record so the
+// per-revision action ledger never suppresses it — the actions fire on every
+// rollback (e.g. lifting a maintenance mode a failed upgrade left enabled). A
+// failure only emits a Warning event, never blocking the rollback report.
+func (r *StageSetReconciler) runOnRollback(ctx context.Context, ss *stagesv1.StageSet, fetcher *artifact.Fetcher, runtimes map[string]*stageRuntime) {
+	if len(ss.Spec.OnRollback) == 0 {
+		return
+	}
+	rt, err := r.stageRuntime(ctx, ss, ss.Spec.ServiceAccountName, fetcher, runtimes)
+	if err != nil {
+		r.event(ss, corev1.EventTypeWarning, "OnRollbackAction", fmt.Sprintf("onRollback: connect to target cluster: %v", err))
+		return
+	}
+	if err := rt.executor.Run(ctx, ss.Namespace, ss.Spec.OnRollback, nil, nil); err != nil {
+		r.event(ss, corev1.EventTypeWarning, "OnRollbackAction", fmt.Sprintf("onRollback: %v", err))
 	}
 }
 

@@ -23,6 +23,46 @@ On a failed run the controller restores each stage's last-good artifact revision
 best-effort, and emits a `RolledBack` event. The coordinates it restores from are
 recorded in `status.lastAppliedSnapshot`.
 
+## Cleaning up after a rollback
+
+Restoring the manifests is not always enough. A failed upgrade may have left
+external state behind — an application maintenance mode switched on by a pre-apply
+job, a feature flag, an external load balancer drained. Restoring the old manifests
+does not undo that, and a stage's `actions.onFailure` runs at the *moment* of
+failure, before the rollback — too early to clean up against the restored version.
+
+The StageSet-level `spec.onRollback` list runs best-effort **after** the rollback
+has restored the previous manifests, against the restored state:
+
+```yaml
+spec:
+  rollbackOnFailure: true
+  serviceAccountName: deployer
+  onRollback:
+    - name: disable-maintenance-mode
+      job:
+        sourceRef:
+          name: moodle-maintenance-off   # runs `php admin/cli/maintenance.php --disable`
+  stages:
+    - name: moodle
+      sourceRef:
+        name: moodle
+      actions:
+        pre:
+          - name: enable-maintenance-mode
+            job:
+              sourceRef:
+                name: moodle-maintenance-on
+```
+
+If the `moodle` upgrade fails after maintenance mode was switched on, the previous
+manifests are restored and then the `disable-maintenance-mode` job runs — so the
+site comes back on the old version instead of being stranded in maintenance mode.
+`onRollback` is **not** gated by the per-revision action ledger, so it fires on
+every rollback (including a repeated rollback to the same revision), and it also
+runs after a promotion gate's single-stage `onFailure: Rollback` revert. See
+[post-rollback cleanup](/defining-a-release/actions/#post-rollback-cleanup-onrollback).
+
 ## The rollback store
 
 Rollback needs the prior revision to still be fetchable, so the controller keeps a

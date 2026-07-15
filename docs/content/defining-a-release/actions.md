@@ -16,6 +16,10 @@ A stage has three action hooks:
   all succeed.
 - **`onFailure`** — best-effort steps run on any failure from the apply onward.
 
+A stage's `onFailure` fires at the *moment* of failure, before any rollback. For
+cleanup that must run *after* the previous manifests are restored, use the
+StageSet-level [`onRollback`](#post-rollback-cleanup-onrollback) hook instead.
+
 Each action has a `name`, optional `timeout` and `retries`, and **exactly one**
 operation type (`patch`, `http`, `wait`, `job`, `delete`, or `apply`) — enforced
 by the validating admission webhook. Actions within a hook run in list order.
@@ -175,17 +179,18 @@ stages:
   - name: app
     sourceRef:
       name: my-app          # carries the new StatefulSet spec
-    preActions:
-      - name: orphan-old-sts
-        delete:
-          target:
-            apiVersion: apps/v1
-            kind: StatefulSet
-            name: web
-          cascade: Orphan     # keep the pods; the apply below re-adopts them
+    actions:
+      pre:
+        - name: orphan-old-sts
+          delete:
+            target:
+              apiVersion: apps/v1
+              kind: StatefulSet
+              name: web
+            cascade: Orphan   # keep the pods; the apply below re-adopts them
 ```
 
-Doing it in `preActions` of the same stage that re-applies keeps the orphan window
+Doing it in `pre` of the same stage that re-applies keeps the orphan window
 tight — the pods are ownerless only between the delete and the stage's apply in the
 same reconcile. (A delete in one stage and the re-apply in a later stage works too,
 but the pods stay ownerless across the gate between them.)
@@ -238,3 +243,51 @@ restart never re-applies or re-deletes the resource for the same snapshot.
 
 To run a `job` action only when the deployed version crosses a release boundary,
 see [versioned migrations](/gating/versioned-migrations/).
+
+## Post-rollback cleanup (`onRollback`)
+
+A stage's `onFailure` actions run at the moment the stage fails — *before* the
+controller rolls anything back. That is the wrong moment for cleanup that only
+makes sense once the previous manifests are back: a failed upgrade that turned on
+an application maintenance mode still needs that mode lifted *after* the old
+version is restored, not while the broken one is still live.
+
+The StageSet-level `spec.onRollback` list runs best-effort **after** a rollback
+has restored the previous revision — both the whole-run
+[`rollbackOnFailure`](/gating/rollback/) rollback and a promotion gate's
+single-stage `onFailure: Rollback` revert. The actions run against the restored
+state, under `spec.serviceAccountName`, and use the same six operation types as
+stage actions.
+
+Unlike stage actions, `onRollback` is **not** gated by the per-revision action
+ledger — it fires on *every* rollback, so a cleanup step like lifting a
+maintenance mode always runs even if the same revision is rolled back repeatedly.
+A failure only emits a Warning event; it never blocks the rollback report.
+
+```yaml
+spec:
+  rollbackOnFailure: true
+  serviceAccountName: deployer
+  onRollback:
+    - name: disable-maintenance-mode
+      timeout: 5m
+      job:
+        sourceRef:
+          name: moodle-maintenance-off   # a Job that runs `php admin/cli/maintenance.php --disable`
+  stages:
+    - name: moodle
+      sourceRef:
+        name: moodle
+      actions:
+        pre:
+          - name: enable-maintenance-mode
+            job:
+              sourceRef:
+                name: moodle-maintenance-on
+```
+
+If the upgrade of the `moodle` stage fails after maintenance mode was switched on,
+`rollbackOnFailure` restores the previous manifests and then `onRollback` runs the
+`disable-maintenance-mode` job — so the site comes back on the old version instead
+of being stranded in maintenance mode. Action `name`s must be unique within the
+`onRollback` list.

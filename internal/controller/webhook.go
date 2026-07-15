@@ -574,5 +574,22 @@ func ValidateStages(ss *stagesv1.StageSet) error {
 			}
 		}
 	}
+	// spec.onRollback is a StageSet-level action list, ledger-free, so it has its
+	// own namespace of names — validate the oneof verb and name uniqueness within
+	// the list, independent of the per-stage phases above.
+	rbSeen := make(map[string]bool, len(ss.Spec.OnRollback))
+	for i := range ss.Spec.OnRollback {
+		a := &ss.Spec.OnRollback[i]
+		if n := a.VerbCount(); n != 1 {
+			return fmt.Errorf("onRollback action %q: exactly one of patch, http, wait, job, delete, apply must be set, found %d", a.Name, n)
+		}
+		if a.Name == "" {
+			return fmt.Errorf("onRollback has an action with an empty name; action names identify the action in events and must be set")
+		}
+		if rbSeen[a.Name] {
+			return fmt.Errorf("onRollback has duplicate action name %q; action names must be unique", a.Name)
+		}
+		rbSeen[a.Name] = true
+	}
 	return nil
 }

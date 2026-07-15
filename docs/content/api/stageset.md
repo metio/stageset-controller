@@ -142,9 +142,24 @@ version. The migration fires only when the deployed version satisfies `from`
 ```yaml
 spec:
   rollbackOnFailure: true       # restore last-good revisions on a failed run
+  onRollback:                   # best-effort cleanup after the restore
+    - name: disable-maintenance-mode
+      job:
+        sourceRef:
+          name: moodle-maintenance-off
 ```
 
 Needs a rollback store configured; see [rollback](/gating/rollback/).
+
+- **`onRollback`** — StageSet-level actions run best-effort **after** a rollback
+  restores the previous manifests (both `rollbackOnFailure` and a promotion gate's
+  `onFailure: Rollback` revert). They run against the restored state under
+  [`serviceAccountName`](#serviceaccountname), are **not** gated by the
+  per-revision action ledger (so they fire on every rollback), and take the same
+  operation types as stage [actions](#actions). Names must be unique within the
+  list. Use it for cleanup that only makes sense once the old version is back —
+  e.g. lifting an application maintenance mode a failed upgrade enabled. See
+  [post-rollback cleanup](/defining-a-release/actions/#post-rollback-cleanup-onrollback).
 
 ## Update windows
 

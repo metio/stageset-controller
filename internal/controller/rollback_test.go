@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -93,6 +95,60 @@ func TestReconcile_RollbackOnFailure_RestoresPreviousRevision(t *testing.T) {
 	}
 	if got := restored.Labels[stagesv1.StageLabel]; got != "stage-a" {
 		t.Errorf("restored ConfigMap %s=%q, want stage-a", stagesv1.StageLabel, got)
+	}
+}
+
+// spec.onRollback actions run after a whole-run rollback has restored the
+// previous manifests — the place to clean up state a failed run left behind
+// (e.g. lift an application maintenance mode). A sentinel ConfigMap standing in
+// for that state is deleted by an onRollback action only once the rollback has
+// restored shared=v1.
+func TestReconcile_OnRollback_RunsAfterRestore(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea-a", "", map[string]string{"cm.yaml": cmValManifest(ns, "shared", "v1")})
+	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj-b")})
+
+	// The maintenance sentinel a pre-upgrade step would have created.
+	sentinel := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "maintenance"}}
+	if err := c.Create(context.Background(), sentinel); err != nil {
+		t.Fatalf("create sentinel: %v", err)
+	}
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-onrollback"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:          metav1.Duration{Duration: time.Minute},
+			RollbackOnFailure: true,
+			OnRollback: []stagesv1.Action{{
+				Name:   "lift-maintenance",
+				Delete: &stagesv1.DeleteAction{Target: meta.NamespacedObjectKindReference{APIVersion: "v1", Kind: "ConfigMap", Name: "maintenance", Namespace: ns}},
+			}},
+			Stages: []stagesv1.Stage{
+				{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea-a"}},
+				{Name: "stage-b", SourceRef: stagesv1.SourceReference{Name: "ea-b"}},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	reconcileOnce(t, c, ss) // success: snapshot {shared=v1, obj-b}
+
+	// Roll stage A forward to v2, break stage B so the run fails after A applied.
+	repointArtifact(t, c, ns, "ea-a", map[string]string{"cm.yaml": cmValManifest(ns, "shared", "v2")})
+	repointArtifact(t, c, ns, "ea-b", map[string]string{"cm.yaml": cmValManifest(ns, "Bad_Name", "x")})
+	_ = reconcileWith(t, c, ss, nil)
+
+	if readyReason(getStageSet(t, c, ns, "rb-onrollback")) != ReasonStageFailed {
+		t.Fatal("run should have failed")
+	}
+	if v := cmDataKey(t, c, ns, "shared"); v != "v1" {
+		t.Fatalf("rollback should have restored shared to v1, got %q", v)
+	}
+	var gone corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "maintenance"}, &gone); !apierrors.IsNotFound(err) {
+		t.Fatalf("onRollback action should have deleted the sentinel after restore, get err = %v", err)
 	}
 }
 

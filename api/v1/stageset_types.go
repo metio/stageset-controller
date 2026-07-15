@@ -82,6 +82,20 @@ type StageSetSpec struct {
 	// +optional
 	RollbackOnFailure bool `json:"rollbackOnFailure,omitempty"`
 
+	// OnRollback runs best-effort after a rollback restores the previous
+	// revision's manifests — both the spec.rollbackOnFailure whole-run rollback
+	// and a promotion gate's single-stage onFailure=Rollback revert. Unlike a
+	// stage's actions.onFailure (which fires at the moment of failure, before any
+	// rollback), these run against the RESTORED state, so they are the place for
+	// cleanup that only makes sense once the old manifests are back — e.g. a job
+	// action that lifts an application maintenance mode a failed upgrade left on.
+	// They are ungated by the per-revision action ledger, so they fire on every
+	// rollback, and run under spec.serviceAccountName. A failure only emits a
+	// Warning event; it never blocks the rollback report. Action names must be
+	// unique within this list.
+	// +optional
+	OnRollback []Action `json:"onRollback,omitempty"`
+
 	// UpdateWindows gate when new revisions may roll out. Empty means always.
 	// Deny windows take precedence; if any Allow window is declared, updates
 	// happen only while an Allow is active and no Deny is.

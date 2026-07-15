@@ -1120,6 +1120,13 @@ func (in *StageSetSpec) DeepCopyInto(out *StageSetSpec) {
 		*out = new(MigrationsSource)
 		**out = **in
 	}
+	if in.OnRollback != nil {
+		in, out := &in.OnRollback, &out.OnRollback
+		*out = make([]Action, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.UpdateWindows != nil {
 		in, out := &in.UpdateWindows, &out.UpdateWindows
 		*out = make([]UpdateWindow, len(*in))

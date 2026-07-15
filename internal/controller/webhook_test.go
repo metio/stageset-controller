@@ -79,6 +79,44 @@ func TestValidateStages_StageNameUniqueness(t *testing.T) {
 	}
 }
 
+// spec.onRollback is a StageSet-level action list validated for the oneof verb
+// and name uniqueness within itself, independent of the per-stage phases.
+func TestValidateStages_OnRollback(t *testing.T) {
+	t.Parallel()
+	withOnRollback := func(acts ...stagesv1.Action) *stagesv1.StageSet {
+		ss := stageSetWith(nil)
+		ss.Spec.OnRollback = acts
+		return ss
+	}
+	tests := []struct {
+		name    string
+		ss      *stagesv1.StageSet
+		wantErr bool
+	}{
+		{"valid single action", withOnRollback(stagesv1.Action{Name: "disable-maintenance", Job: &stagesv1.JobAction{}}), false},
+		{"no verb set rejected", withOnRollback(stagesv1.Action{Name: "bad"}), true},
+		{"two verbs rejected", withOnRollback(stagesv1.Action{Name: "bad", Job: &stagesv1.JobAction{}, HTTP: &stagesv1.HTTPAction{}}), true},
+		{"empty name rejected", withOnRollback(stagesv1.Action{Name: "", Wait: &stagesv1.WaitAction{}}), true},
+		{"duplicate name rejected", withOnRollback(
+			stagesv1.Action{Name: "dup", Wait: &stagesv1.WaitAction{}},
+			stagesv1.Action{Name: "dup", Wait: &stagesv1.WaitAction{}},
+		), true},
+		{"shares a name with a stage action (own namespace)", func() *stagesv1.StageSet {
+			ss := stageSetWith(&stagesv1.StageActions{Pre: []stagesv1.Action{{Name: "same", Wait: &stagesv1.WaitAction{}}}})
+			ss.Spec.OnRollback = []stagesv1.Action{{Name: "same", Wait: &stagesv1.WaitAction{}}}
+			return ss
+		}(), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidateStages(tc.ss); (err != nil) != tc.wantErr {
+				t.Fatalf("ValidateStages err = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateStages_NoActions(t *testing.T) {
 	t.Parallel()
 	if err := ValidateStages(stageSetWith(nil)); err != nil {
