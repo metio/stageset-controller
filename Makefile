@@ -3,7 +3,6 @@
 
 # controller-gen is a go.mod `tool` directive — its version lives only in go.mod
 # (Renovate's gomod manager bumps it); no pinned version here.
-CONTROLLER_GEN ?= go tool controller-gen
 GOVULNCHECK    ?= go run golang.org/x/vuln/cmd/govulncheck@latest
 GOFUMPT        ?= go run mvdan.cc/gofumpt@latest
 STATICCHECK    ?= go run honnef.co/go/tools/cmd/staticcheck@latest
@@ -21,12 +20,12 @@ deps: ## Resolve Go dependencies (run once after cloning the scaffold)
 	go mod tidy
 
 .PHONY: generate
-generate: ## Generate DeepCopy implementations
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
-
-.PHONY: manifests
-manifests: ## Generate CRD manifests into config/crd
-	$(CONTROLLER_GEN) crd rbac:roleName=stageset-controller paths="./..." output:crd:artifacts:config=config/crd
+generate: ## Generate DeepCopy, CRDs, RBAC and webhook manifests
+	# Delegates to the flake command so this and CI share one definition.
+	# scripts/generate.sh carries no shebang by design — nix's
+	# writeShellApplication supplies it, along with `set -euo pipefail` and a
+	# build-time shellcheck — so it is run through the command, not directly.
+	nix develop --command generate
 
 .PHONY: fmt
 fmt: ## Format sources
