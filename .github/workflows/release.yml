@@ -186,7 +186,7 @@ jobs:
           ## Usage
 
           Pull the container from \`ghcr.io/metio/stageset-controller:${VERSION}\`.
-          See **Upgrading** — https://stageset.projects.metio.wtf/installation/upgrading/ — for any required actions on your part.
+          See **Upgrading** — https://stageset.projects.metio.wtf/reference/upgrading/ — for any required actions on your part.
 
           Prebuilt binaries are attached below for both the **controller**
           (\`stageset-controller_*\`) and the **\`stagesetctl\` CLI** (\`stagesetctl_*\`):
@@ -200,7 +200,7 @@ jobs:
 
           ## Verify
 
-          All release artifacts are signed with cosign keyless. See **Verifying releases** — https://stageset.projects.metio.wtf/installation/verifying-releases/ — for the verification commands.
+          All release artifacts are signed with cosign keyless. See **Verifying releases** — https://stageset.projects.metio.wtf/reference/verifying-releases/ — for the verification commands.
           EOF
       - name: Create Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3

@@ -33,7 +33,7 @@ The full, current documentation lives at <https://stageset.projects.metio.wtf/>,
 with a machine-readable index at `/llms.txt` and the whole site concatenated at
 `/llms-full.txt`. When you need an exact field, default, or example, prefer those
 over memory. Key pages: the [API reference](https://stageset.projects.metio.wtf/api/stageset/),
-[usage](https://stageset.projects.metio.wtf/usage/) (one feature each), and
+[defining a release](https://stageset.projects.metio.wtf/defining-a-release/) (one feature each), and
 [CLI](https://stageset.projects.metio.wtf/cli/).
 
 `references/reference.md` in this skill is a compact cheat-sheet of the same.
@@ -119,4 +119,4 @@ tools (Ready status, reason, runbook URL, version, per-stage phases, applied
 revisions, pending migrations). `--mcp-allow-mutations` additionally exposes
 gated `reconcile_stageset` / `suspend_stageset` / `resume_stageset` write tools,
 all acting as the controller's ServiceAccount. Full reference:
-`https://stageset.projects.metio.wtf/usage/mcp-server/`.
+`https://stageset.projects.metio.wtf/integrations/mcp-server/`.
