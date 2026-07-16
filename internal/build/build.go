@@ -12,6 +12,7 @@ package build
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,51 @@ import (
 // empty build directory (kustomize rejects an empty kustomization). It is not
 // a real resource and is dropped from the output.
 const placeholderNamespace = "_placeholder"
+
+// manifestExts are the extensions a build can produce objects from. kustomize's
+// scanner reads .yaml/.yml, and normalizeJSONManifests brings .json in; a
+// kustomization.yaml is itself a .yaml, so a directory holding none of these
+// cannot yield an object by any route — including a remote-resource
+// kustomization, which needs a kustomization.yaml to declare one.
+var manifestExts = map[string]bool{".yaml": true, ".yml": true, ".json": true}
+
+// ErrNoManifests reports a build whose path holds no file a manifest could come
+// from. It is deliberately about FILES, not objects: a source that publishes
+// nothing is a mistake, while a render that legitimately produces zero objects
+// (a JsonnetSnippet emitting [] for a disabled feature) is a real pattern and
+// stays permitted — that artifact still carries its rendered.json.
+//
+// Refusing an empty artifact does withdraw one behavior: it used to mean "prune
+// everything this stage owns". That reading is not worth keeping. Removing the
+// stage from spec.stages already tears its objects down in reverse recorded
+// order, and does so explicitly — a reviewable spec change, through admission.
+// An emptied artifact says the same thing implicitly, from another repository,
+// while the spec still asks for a deployment. The two also fail in opposite
+// directions: a bad ignore rule cannot delete a stage from a spec, but it can
+// empty an artifact, so the permissive reading turns a typo into a mass
+// deletion of everything the stage owns.
+var ErrNoManifests = errors.New("artifact contains no .yaml, .yml, or .json files")
+
+// hasManifests reports whether any file under path could yield a manifest.
+// path is the artifact-relative build directory; empty means the root.
+func hasManifests(files map[string]string, path string) bool {
+	prefix := strings.Trim(path, "/")
+	if prefix == "" || prefix == "." {
+		prefix = ""
+	} else {
+		prefix = filepath.Clean(prefix) + string(os.PathSeparator)
+	}
+	for name := range files {
+		clean := filepath.Clean(name)
+		if prefix != "" && !strings.HasPrefix(clean, prefix) {
+			continue
+		}
+		if manifestExts[strings.ToLower(filepath.Ext(clean))] {
+			return true
+		}
+	}
+	return false
+}
 
 // Options carries the per-stage build inputs.
 type Options struct {
@@ -59,6 +105,23 @@ func Build(files map[string]string, opts Options, vars map[string]string) ([]*un
 		if fi, statErr := os.Stat(buildDir); statErr != nil || !fi.IsDir() {
 			return nil, fmt.Errorf("build path %q not found in artifact", opts.Path)
 		}
+	}
+
+	// Fail here rather than let the build succeed with nothing. kustomize's
+	// generator injects a placeholder namespace for an empty directory and the
+	// output drops it, so the stage would apply zero objects, record itself
+	// applied, and only fail minutes later at readyChecks — naming objects that
+	// were never in the artifact instead of the source that never shipped them.
+	// The ladder path (migrations.ParseLadder) already refuses this; a stage
+	// source in the same state should read the same way.
+	//
+	// Checked after the path resolution above so a mistyped path keeps its more
+	// precise error.
+	if !hasManifests(files, opts.Path) {
+		if p := strings.Trim(opts.Path, "/"); p != "" && p != "." {
+			return nil, fmt.Errorf("%w under path %q (wrong path, or the source published something else)", ErrNoManifests, opts.Path)
+		}
+		return nil, fmt.Errorf("%w (the source published something else, or its ignore rules pruned everything)", ErrNoManifests)
 	}
 
 	// The kustomize resource scanner only picks up .yaml/.yml files, but a

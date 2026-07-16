@@ -123,5 +123,31 @@ spec:
   and Secrets at delivery time — see [parameterizing a rollout](/guides/parameters/)
   for the full render-time-vs-delivery-time treatment.
 
+## An artifact with no manifests fails the stage
+
+A stage whose artifact carries no `.yaml`, `.yml`, or `.json` file under its
+`path` fails immediately, naming the path rather than letting the stage apply
+nothing and report success. The usual causes are a `path` that doesn't match the
+artifact's layout, a source publishing something other than manifests, or ignore
+rules that pruned more than intended:
+
+```yaml
+# A GitRepository that publishes an empty artifact: /* excludes everything,
+# and the re-include never matches because its parent directory is excluded.
+ignore: |
+  /*
+  !/releases/app-1.30.0.yaml
+```
+
+A render that legitimately produces **zero objects** is different and still
+allowed — a JsonnetSnippet emitting `[]` for a disabled feature publishes a
+`rendered.json`, so its artifact has a manifest file and simply builds nothing.
+
+To remove a stage's objects, delete the stage from `spec.stages` (or the whole
+StageSet): its objects are torn down in reverse recorded order. Emptying the
+artifact is not a way to ask for that — the spec would still be asking for a
+deployment, and a mistaken ignore rule would be indistinguishable from the
+request.
+
 From here, layer on [actions](/defining-a-release/actions/) to gate the stage, or
 [ready checks](/defining-a-release/ready-checks/) to define what "healthy" means.

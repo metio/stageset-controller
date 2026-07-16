@@ -21,8 +21,9 @@ func TestReconcile_PruneSkipsObjectsNoLongerOwned(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	servedArtifact(t, c, ns, "bundle", "", map[string]string{
-		"a.yaml": configMapManifest(ns, "obj-a"),
-		"b.yaml": configMapManifest(ns, "obj-b"),
+		"a.yaml":    configMapManifest(ns, "obj-a"),
+		"b.yaml":    configMapManifest(ns, "obj-b"),
+		"keep.yaml": configMapManifest(ns, "obj-keep"),
 	})
 	ss := newStageSet(t, c, ns, "owner-prune", stagesv1.SourceReference{Name: "bundle"})
 	reconcileOnce(t, c, ss)
@@ -44,8 +45,13 @@ func TestReconcile_PruneSkipsObjectsNoLongerOwned(t *testing.T) {
 		t.Fatalf("strip owner labels from obj-b: %v", err)
 	}
 
-	// Run 2: the render drops both objects, so both are pruned by inventory.
-	repointArtifact(t, c, ns, "bundle", map[string]string{})
+	// Run 2: the render drops obj-a and obj-b, so both are pruned by inventory.
+	// A third object keeps the artifact non-empty — an artifact with no manifest
+	// files at all is refused (build.ErrNoManifests) rather than read as "prune
+	// everything", since the usual cause is a source that shipped nothing.
+	repointArtifact(t, c, ns, "bundle", map[string]string{
+		"keep.yaml": configMapManifest(ns, "obj-keep"),
+	})
 	reconcileOnce(t, c, ss)
 
 	// obj-a was still owned and is pruned; obj-b was relabeled and survives.

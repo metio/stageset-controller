@@ -4,6 +4,7 @@
 package build
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -27,17 +28,67 @@ func newConfigMap(name string) *unstructured.Unstructured {
 	}}
 }
 
-// An empty input set forces the Flux generator to inject its placeholder
-// Namespace so kustomize has something to build; Build must drop it and return
-// no objects.
-func TestBuild_EmptyInputDropsPlaceholder(t *testing.T) {
+// A manifest file that yields no objects forces the Flux generator to inject its
+// placeholder Namespace so kustomize has something to build; Build must drop it
+// and return no objects.
+//
+// Rendering zero objects from a file that exists is a legitimate pattern — a
+// JsonnetSnippet emitting [] for a disabled feature lands here — and stays
+// permitted, unlike an artifact carrying no manifest files at all.
+func TestBuild_NoObjectsDropsPlaceholder(t *testing.T) {
 	t.Parallel()
-	objs, err := Build(map[string]string{}, Options{}, nil)
+	objs, err := Build(map[string]string{"rendered.yaml": "# nothing to apply yet\n"}, Options{}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if len(objs) != 0 {
 		t.Fatalf("placeholder namespace must be dropped, got %d objects", len(objs))
+	}
+}
+
+// An artifact with no manifest file at all is a mistake, not a render decision:
+// the source published something else, or its ignore rules pruned everything.
+// Without this the stage applies nothing, records itself applied, and fails
+// minutes later at readyChecks naming objects the artifact never carried.
+func TestBuild_NoManifestFilesFailsFast(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		files map[string]string
+		opts  Options
+	}{
+		// The reporter's case: a GitRepository whose ignore rules pruned
+		// everything, so Flux publishes an empty artifact.
+		"empty artifact":         {files: map[string]string{}},
+		"no manifest extensions": {files: map[string]string{"README.md": "# docs", "go.mod": "module x"}},
+		// A path that exists but holds nothing buildable. A path that does not
+		// exist at all keeps its own, more precise error — see
+		// TestBuild_PathIsFileFails.
+		"non-manifests under path": {files: map[string]string{"releases/NOTES.txt": "hi"}, opts: Options{Path: "releases"}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Build(tc.files, tc.opts, nil)
+			if !errors.Is(err, ErrNoManifests) {
+				t.Fatalf("err = %v, want ErrNoManifests", err)
+			}
+		})
+	}
+}
+
+// A JSON-only artifact builds: a JsonnetSnippet publishes its whole rendered
+// output as rendered.json, and normalizeJSONManifests brings it in. The
+// no-manifests guard must not mistake that for an empty artifact.
+func TestBuild_JSONOnlyArtifactIsNotEmpty(t *testing.T) {
+	t.Parallel()
+	objs, err := Build(map[string]string{
+		"rendered.json": `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"from-json"}}`,
+	}, Options{}, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(objs) != 1 || objs[0].GetName() != "from-json" {
+		t.Fatalf("got %d objects, want the ConfigMap from rendered.json", len(objs))
 	}
 }
 
