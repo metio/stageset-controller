@@ -28,11 +28,27 @@ import (
 // fix while out of budget — the SRE policy explicitly exempts such changes.
 const budgetOverrideAnnotation = "stages.metio.wtf/budget-override"
 
-// readSecretData reads a Secret in a namespace through the controller's client,
-// for the metric-source bearer token. Returns the data map.
-func (r *StageSetReconciler) readSecretData(ctx context.Context, namespace, name string) (map[string][]byte, error) {
+// readSecretData reads a metric source's bearer-token Secret and returns its
+// data map.
+//
+// The read is bounded by serviceAccount — the StageSet's — because the Secret
+// name comes from that same StageSet's spec, as does the URL the token is then
+// sent to. Reading it as the controller would turn a metric source into a
+// read-any-Secret-in-the-namespace primitive for anyone who can write a
+// StageSet: name a Secret the author's own ServiceAccount cannot read, point the
+// webhook at a host they control, and the token arrives in an Authorization
+// header. Matching buildDecryptor's rule for key material closes that.
+//
+// An empty serviceAccount falls back to the controller's client inside
+// targetCluster; that is the single-tenant path, where there is no tenant
+// identity to bound the read to.
+func (r *StageSetReconciler) readSecretData(ctx context.Context, namespace, serviceAccount, name string) (map[string][]byte, error) {
+	local, _, err := r.targetCluster(ctx, namespace, serviceAccount, nil)
+	if err != nil {
+		return nil, err
+	}
 	var sec corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &sec); err != nil {
+	if err := local.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &sec); err != nil {
 		return nil, err
 	}
 	return sec.Data, nil
@@ -66,12 +82,12 @@ type budgetVerdict struct {
 // evaluateBudget queries eb's source and decides, with hysteresis against
 // prevFreeze, whether the budget is frozen. It carries no status/condition/metric
 // side effects so both the rollout-wide and per-stage gates can share it.
-func (r *StageSetReconciler) evaluateBudget(ctx context.Context, namespace string, eb *stagesv1.ErrorBudget, prevFreeze *stagesv1.BudgetFreeze) budgetVerdict {
+func (r *StageSetReconciler) evaluateBudget(ctx context.Context, ss *stagesv1.StageSet, eb *stagesv1.ErrorBudget, prevFreeze *stagesv1.BudgetFreeze) budgetVerdict {
 	freezeAt, resumeAt, perr := budgetThresholds(eb)
 	if perr != nil {
 		return budgetVerdict{specErr: perr}
 	}
-	value, qerr := r.MetricQuerier.Query(ctx, namespace, eb.Source)
+	value, qerr := r.MetricQuerier.Query(ctx, ss.Namespace, ss.Spec.ServiceAccountName, eb.Source)
 	if qerr != nil {
 		return budgetVerdict{sourceErr: qerr}
 	}
@@ -142,7 +158,7 @@ func (r *StageSetReconciler) gateErrorBudget(ctx context.Context, helper *fluxpa
 	}
 
 	interval := r.budgetInterval(ss, eb)
-	v := r.evaluateBudget(ctx, ss.Namespace, eb, ss.Status.BudgetFreeze)
+	v := r.evaluateBudget(ctx, ss, eb, ss.Status.BudgetFreeze)
 	switch {
 	case v.specErr != nil:
 		// A malformed threshold normally fails admission; this is the fallback.
@@ -207,7 +223,7 @@ type stageBudgetGate struct {
 func (r *StageSetReconciler) gateStageBudget(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, prior stagesv1.StageStatus) stageBudgetGate {
 	eb := stage.ErrorBudget
 	interval := r.budgetInterval(ss, eb)
-	v := r.evaluateBudget(ctx, ss.Namespace, eb, prior.BudgetFreeze)
+	v := r.evaluateBudget(ctx, ss, eb, prior.BudgetFreeze)
 	switch {
 	case v.specErr != nil:
 		return stageBudgetGate{specErr: v.specErr}

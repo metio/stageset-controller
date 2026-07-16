@@ -94,6 +94,22 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
   **single-tenant** sets the chart's `rbac.clusterAdmin: true` to bind the
   controller SA to `cluster-admin` (the helm-controller default-install model), so
   StageSets without `serviceAccountName` apply under the controller's own identity.
+  **The rule that keeps the multi-tenant model honest: every object a StageSet
+  names in its own spec is read through `targetCluster(ctx, ns, sa, nil)`, never
+  through the controller's client.** The controller's ClusterRole carries
+  cluster-wide `secrets`/`configmaps` reads, so a spec-named read on that identity
+  hands a StageSet author whatever their own SA cannot reach. This covers
+  `postBuild.substituteFrom`, a metric source's `secretRef`, `spec.decryption`'s
+  key Secret, and an action's `secretRef` — all four resolve as the tenant. The
+  documented exception is `spec.kubeConfig`'s Secret/ConfigMap (`kubeconfigBytes`,
+  `configMapResourceVersion`), read as the controller because connecting to a
+  remote cluster is the controller's job; its bytes never flow back to the tenant,
+  and Flux's kustomize-controller reads kubeconfig refs the same way. An empty
+  `serviceAccountName` resolves to the controller's client inside `targetCluster` —
+  the single-tenant path, where there is no tenant identity to bound a read to.
+  Outbound HTTP that carries a spec-named credential (http actions, metric
+  sources) additionally passes `--allowed-action-hosts` before the credential is
+  read, so a refused host cannot trigger the lookup.
 - `api/v1/` — `StageSet` + `StageInventory` types with kubebuilder annotations +
   handwritten `zz_generated.deepcopy.go`.
 - `config/` — controller-gen output only: `crd/`, `rbac/role.yaml`,

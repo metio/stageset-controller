@@ -42,7 +42,7 @@ func srcFor(srv *httptest.Server, query string) stagesv1.MetricSource {
 
 func TestQuery_ScalarResult(t *testing.T) {
 	srv := promServer(t, `{"status":"success","data":{"resultType":"scalar","result":[1700000000,"0.42"]}}`, 200)
-	got, err := querierFor(srv).Query(context.Background(), "ns", srcFor(srv, "up"))
+	got, err := querierFor(srv).Query(context.Background(), "ns", "sa", srcFor(srv, "up"))
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestQuery_ScalarResult(t *testing.T) {
 
 func TestQuery_VectorSingleSample(t *testing.T) {
 	srv := promServer(t, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1700000000,"0.9"]}]}}`, 200)
-	got, err := querierFor(srv).Query(context.Background(), "ns", srcFor(srv, "budget"))
+	got, err := querierFor(srv).Query(context.Background(), "ns", "sa", srcFor(srv, "budget"))
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestQuery_VectorSingleSample(t *testing.T) {
 
 func TestQuery_VectorMultiSampleIsUnavailable(t *testing.T) {
 	srv := promServer(t, `{"status":"success","data":{"resultType":"vector","result":[{"value":[0,"1"]},{"value":[0,"2"]}]}}`, 200)
-	_, err := querierFor(srv).Query(context.Background(), "ns", srcFor(srv, "x"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", srcFor(srv, "x"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
@@ -72,7 +72,7 @@ func TestQuery_VectorMultiSampleIsUnavailable(t *testing.T) {
 
 func TestQuery_EmptyVectorIsUnavailable(t *testing.T) {
 	srv := promServer(t, `{"status":"success","data":{"resultType":"vector","result":[]}}`, 200)
-	_, err := querierFor(srv).Query(context.Background(), "ns", srcFor(srv, "x"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", srcFor(srv, "x"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
@@ -80,7 +80,7 @@ func TestQuery_EmptyVectorIsUnavailable(t *testing.T) {
 
 func TestQuery_ErrorStatusIsUnavailable(t *testing.T) {
 	srv := promServer(t, `{"status":"error","error":"bad query"}`, 200)
-	_, err := querierFor(srv).Query(context.Background(), "ns", srcFor(srv, "x"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", srcFor(srv, "x"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
@@ -88,7 +88,7 @@ func TestQuery_ErrorStatusIsUnavailable(t *testing.T) {
 
 func TestQuery_HTTP500IsUnavailable(t *testing.T) {
 	srv := promServer(t, `boom`, 500)
-	_, err := querierFor(srv).Query(context.Background(), "ns", srcFor(srv, "x"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", srcFor(srv, "x"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
@@ -96,7 +96,7 @@ func TestQuery_HTTP500IsUnavailable(t *testing.T) {
 
 func TestQuery_NaNIsRejected(t *testing.T) {
 	srv := promServer(t, `{"status":"success","data":{"resultType":"scalar","result":[0,"NaN"]}}`, 200)
-	_, err := querierFor(srv).Query(context.Background(), "ns", srcFor(srv, "x"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", srcFor(srv, "x"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable (NaN must not pass)", err)
 	}
@@ -112,9 +112,14 @@ func TestQuery_BearerTokenSent(t *testing.T) {
 	q := &HTTPQuerier{
 		IPValidator: PermissiveIP,
 		HTTPClient:  srv.Client(),
-		Secrets: func(_ context.Context, ns, name string) (map[string][]byte, error) {
+		Secrets: func(_ context.Context, ns, sa, name string) (map[string][]byte, error) {
 			if ns != "team-a" || name != "prom-auth" {
 				t.Errorf("secret lookup = %s/%s", ns, name)
+			}
+			// The identity must reach the reader: it is what bounds the read to
+			// what the StageSet's own ServiceAccount may see.
+			if sa != "tenant-sa" {
+				t.Errorf("secret lookup serviceAccount = %q, want %q", sa, "tenant-sa")
 			}
 			return map[string][]byte{"token": []byte("s3cr3t")}, nil
 		},
@@ -122,7 +127,7 @@ func TestQuery_BearerTokenSent(t *testing.T) {
 	src := stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{
 		Address: srv.URL, Query: "up", SecretRef: &meta.LocalObjectReference{Name: "prom-auth"},
 	}}
-	if _, err := q.Query(context.Background(), "team-a", src); err != nil {
+	if _, err := q.Query(context.Background(), "team-a", "tenant-sa", src); err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 	if gotAuth != "Bearer s3cr3t" {
@@ -133,19 +138,19 @@ func TestQuery_BearerTokenSent(t *testing.T) {
 func TestQuery_SecretMissingTokenKey(t *testing.T) {
 	srv := promServer(t, `{"status":"success","data":{"resultType":"scalar","result":[0,"1"]}}`, 200)
 	q := querierFor(srv)
-	q.Secrets = func(context.Context, string, string) (map[string][]byte, error) {
+	q.Secrets = func(context.Context, string, string, string) (map[string][]byte, error) {
 		return map[string][]byte{"other": []byte("x")}, nil
 	}
 	src := srcFor(srv, "up")
 	src.Prometheus.SecretRef = &meta.LocalObjectReference{Name: "prom-auth"}
-	if _, err := q.Query(context.Background(), "ns", src); !errors.Is(err, ErrSourceUnavailable) {
+	if _, err := q.Query(context.Background(), "ns", "sa", src); !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
 }
 
 func TestQuery_NoProvider(t *testing.T) {
 	q := &HTTPQuerier{IPValidator: PermissiveIP}
-	if _, err := q.Query(context.Background(), "ns", stagesv1.MetricSource{}); !errors.Is(err, ErrNoSource) {
+	if _, err := q.Query(context.Background(), "ns", "sa", stagesv1.MetricSource{}); !errors.Is(err, ErrNoSource) {
 		t.Fatalf("err = %v, want ErrNoSource", err)
 	}
 }
@@ -153,7 +158,7 @@ func TestQuery_NoProvider(t *testing.T) {
 func TestQuery_BadAddress(t *testing.T) {
 	q := &HTTPQuerier{IPValidator: PermissiveIP}
 	src := stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: "://nope", Query: "up"}}
-	if _, err := q.Query(context.Background(), "ns", src); !errors.Is(err, ErrSourceUnavailable) {
+	if _, err := q.Query(context.Background(), "ns", "sa", src); !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
 }
@@ -240,7 +245,7 @@ func webhookSrc(srv *httptest.Server, jsonPath string) stagesv1.MetricSource {
 
 func TestQuery_WebhookNumber(t *testing.T) {
 	srv := webhookServer(t, `{"objectives":[{"errorBudgetRemaining":0.73}]}`, 200)
-	got, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.objectives[0].errorBudgetRemaining}"))
+	got, err := querierFor(srv).Query(context.Background(), "ns", "sa", webhookSrc(srv, "{.objectives[0].errorBudgetRemaining}"))
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -251,7 +256,7 @@ func TestQuery_WebhookNumber(t *testing.T) {
 
 func TestQuery_WebhookNumericString(t *testing.T) {
 	srv := webhookServer(t, `{"remaining":"0.5"}`, 200)
-	got, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.remaining}"))
+	got, err := querierFor(srv).Query(context.Background(), "ns", "sa", webhookSrc(srv, "{.remaining}"))
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -262,7 +267,7 @@ func TestQuery_WebhookNumericString(t *testing.T) {
 
 func TestQuery_WebhookNoMatchIsUnavailable(t *testing.T) {
 	srv := webhookServer(t, `{"other":1}`, 200)
-	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.missing}"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", webhookSrc(srv, "{.missing}"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
@@ -270,7 +275,7 @@ func TestQuery_WebhookNoMatchIsUnavailable(t *testing.T) {
 
 func TestQuery_WebhookMultiMatchIsUnavailable(t *testing.T) {
 	srv := webhookServer(t, `{"vals":[1,2,3]}`, 200)
-	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.vals[*]}"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", webhookSrc(srv, "{.vals[*]}"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
@@ -278,7 +283,7 @@ func TestQuery_WebhookMultiMatchIsUnavailable(t *testing.T) {
 
 func TestQuery_WebhookNonNumericIsUnavailable(t *testing.T) {
 	srv := webhookServer(t, `{"obj":{"a":1}}`, 200)
-	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.obj}"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", webhookSrc(srv, "{.obj}"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable (an object is not a scalar)", err)
 	}
@@ -286,7 +291,7 @@ func TestQuery_WebhookNonNumericIsUnavailable(t *testing.T) {
 
 func TestQuery_WebhookHTTP500IsUnavailable(t *testing.T) {
 	srv := webhookServer(t, `boom`, 500)
-	_, err := querierFor(srv).Query(context.Background(), "ns", webhookSrc(srv, "{.x}"))
+	_, err := querierFor(srv).Query(context.Background(), "ns", "sa", webhookSrc(srv, "{.x}"))
 	if !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
@@ -302,12 +307,12 @@ func TestQuery_WebhookBearerTokenSent(t *testing.T) {
 	q := &HTTPQuerier{
 		IPValidator: PermissiveIP,
 		HTTPClient:  srv.Client(),
-		Secrets: func(context.Context, string, string) (map[string][]byte, error) {
+		Secrets: func(context.Context, string, string, string) (map[string][]byte, error) {
 			return map[string][]byte{"token": []byte("hook-tok")}, nil
 		},
 	}
 	src := stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: srv.URL, JSONPath: "{.v}", SecretRef: &meta.LocalObjectReference{Name: "nobl9"}}}
-	if _, err := q.Query(context.Background(), "ns", src); err != nil {
+	if _, err := q.Query(context.Background(), "ns", "sa", src); err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 	if gotAuth != "Bearer hook-tok" {
@@ -318,7 +323,81 @@ func TestQuery_WebhookBearerTokenSent(t *testing.T) {
 func TestQuery_WebhookBadURL(t *testing.T) {
 	q := &HTTPQuerier{IPValidator: PermissiveIP}
 	src := stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: "://nope", JSONPath: "{.v}"}}
-	if _, err := q.Query(context.Background(), "ns", src); !errors.Is(err, ErrSourceUnavailable) {
+	if _, err := q.Query(context.Background(), "ns", "sa", src); !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
 	}
+}
+
+// AllowedHosts bounds which hosts a metric query may reach, mirroring the http
+// action's allowlist. A metric source is an outbound call to a URL the StageSet
+// author supplied, carrying a bearer token — the same exposure an action has.
+func TestQuery_AllowedHostsBoundsBothProviders(t *testing.T) {
+	srv := promServer(t, `{"status":"success","data":{"resultType":"scalar","result":[0,"1"]}}`, 200)
+	host, _, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort: %v", err)
+	}
+
+	t.Run("empty list allows any host", func(t *testing.T) {
+		q := querierFor(srv)
+		if _, err := q.Query(context.Background(), "ns", "sa", srcFor(srv, "up")); err != nil {
+			t.Fatalf("Query: %v", err)
+		}
+	})
+
+	t.Run("listed host is reachable", func(t *testing.T) {
+		q := querierFor(srv)
+		q.AllowedHosts = []string{host}
+		if _, err := q.Query(context.Background(), "ns", "sa", srcFor(srv, "up")); err != nil {
+			t.Fatalf("Query: %v", err)
+		}
+	})
+
+	t.Run("unlisted prometheus host is refused", func(t *testing.T) {
+		q := querierFor(srv)
+		q.AllowedHosts = []string{"prometheus.monitoring"}
+		if _, err := q.Query(context.Background(), "ns", "sa", srcFor(srv, "up")); !errors.Is(err, ErrSourceUnavailable) {
+			t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+		}
+	})
+
+	// The webhook provider is the exfiltration-shaped one: it sends a bearer
+	// token to an author-chosen URL, so the allowlist must cover it too.
+	t.Run("unlisted webhook host is refused", func(t *testing.T) {
+		q := querierFor(srv)
+		q.AllowedHosts = []string{"nobl9.example.com"}
+		src := stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{URL: srv.URL, JSONPath: "{.v}"}}
+		if _, err := q.Query(context.Background(), "ns", "sa", src); !errors.Is(err, ErrSourceUnavailable) {
+			t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+		}
+	})
+
+	t.Run("glob patterns match", func(t *testing.T) {
+		q := querierFor(srv)
+		q.AllowedHosts = []string{"*"}
+		if _, err := q.Query(context.Background(), "ns", "sa", srcFor(srv, "up")); err != nil {
+			t.Fatalf("Query: %v", err)
+		}
+	})
+
+	// A refused host must be refused before the token is read, so an unlisted
+	// endpoint cannot even trigger the Secret lookup.
+	t.Run("refused host never reads the secret", func(t *testing.T) {
+		read := false
+		q := querierFor(srv)
+		q.AllowedHosts = []string{"elsewhere.example.com"}
+		q.Secrets = func(context.Context, string, string, string) (map[string][]byte, error) {
+			read = true
+			return map[string][]byte{"token": []byte("s3cr3t")}, nil
+		}
+		src := stagesv1.MetricSource{Webhook: &stagesv1.WebhookSource{
+			URL: srv.URL, JSONPath: "{.v}", SecretRef: &meta.LocalObjectReference{Name: "tok"},
+		}}
+		if _, err := q.Query(context.Background(), "ns", "sa", src); !errors.Is(err, ErrSourceUnavailable) {
+			t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+		}
+		if read {
+			t.Error("secret was read for a host outside the allowlist")
+		}
+	})
 }

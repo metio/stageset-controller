@@ -23,15 +23,23 @@ import (
 )
 
 // fakeQuerier returns a scriptable scalar/error for the metric gates, counting
-// calls so a test can assert a gate short-circuited before querying.
+// calls so a test can assert a gate short-circuited before querying. It records
+// the identity it was handed so a test can assert the StageSet's
+// serviceAccountName — not the controller's identity — bounds the secret read
+// behind the query.
 type fakeQuerier struct {
 	value float64
 	err   error
 	calls int
+
+	gotNamespace      string
+	gotServiceAccount string
 }
 
-func (f *fakeQuerier) Query(context.Context, string, stagesv1.MetricSource) (float64, error) {
+func (f *fakeQuerier) Query(_ context.Context, namespace, serviceAccount string, _ stagesv1.MetricSource) (float64, error) {
 	f.calls++
+	f.gotNamespace = namespace
+	f.gotServiceAccount = serviceAccount
 	return f.value, f.err
 }
 

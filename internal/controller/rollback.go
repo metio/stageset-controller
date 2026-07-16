@@ -257,7 +257,7 @@ func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stage
 		return nil, ReasonPreviousRevisionUnavailable,
 			fmt.Sprintf("cannot roll back stage %q: decrypting the previous revision failed (%v)", ref.Stage, ferr), nil
 	}
-	vars, verr := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
+	vars, verr := r.resolvePostBuildVars(ctx, ss, stage.PostBuild)
 	if verr != nil {
 		return nil, ReasonPreviousRevisionUnavailable,
 			fmt.Sprintf("cannot roll back stage %q: resolving postBuild variables failed (%v)", ref.Stage, verr), nil

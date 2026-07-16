@@ -41,7 +41,7 @@ func (r *StageSetReconciler) evaluatePromotionAnalysis(ctx context.Context, ss *
 	for i := range an.Checks {
 		c := &an.Checks[i]
 		cr := stagesv1.AnalysisCheckResult{Name: c.Name}
-		value, err := r.MetricQuerier.Query(ctx, ss.Namespace, c.Source)
+		value, err := r.MetricQuerier.Query(ctx, ss.Namespace, ss.Spec.ServiceAccountName, c.Source)
 		switch {
 		case err != nil:
 			metrics.MetricSourceErrorsTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
@@ -89,7 +89,7 @@ func (r *StageSetReconciler) evaluateFastTrack(ctx context.Context, ss *stagesv1
 	if err != nil {
 		return false
 	}
-	value, err := r.MetricQuerier.Query(ctx, ss.Namespace, ft.Source)
+	value, err := r.MetricQuerier.Query(ctx, ss.Namespace, ss.Spec.ServiceAccountName, ft.Source)
 	if err != nil {
 		return false
 	}

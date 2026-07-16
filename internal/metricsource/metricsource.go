@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -39,14 +40,25 @@ var ErrSourceUnavailable = errors.New("metric source unavailable")
 // normally rejects; surfaced here for the reconciler fallback.
 var ErrNoSource = errors.New("metric source has no provider")
 
-// SecretReader returns the data of a Secret in a namespace. The querier uses it
-// to read a Prometheus bearer token; a nil reader means no secret lookups.
-type SecretReader func(ctx context.Context, namespace, name string) (map[string][]byte, error)
+// SecretReader returns the data of a Secret in a namespace, read as the given
+// ServiceAccount. The querier uses it to read a bearer token; a nil reader means
+// no secret lookups.
+//
+// serviceAccount carries the tenant identity the read must be bounded by: the
+// Secret name comes from the StageSet's own spec, so reading it as the
+// controller would hand a StageSet author the contents of any Secret in the
+// namespace — the token is stamped onto a request whose URL that same spec
+// chooses. An empty serviceAccount is the single-tenant path, where there is no
+// tenant identity to bound the read to.
+type SecretReader func(ctx context.Context, namespace, serviceAccount, name string) (map[string][]byte, error)
 
 // Querier resolves a MetricSource to a scalar. The reconciler holds one; tests
 // substitute a fake so the gate logic is exercised without a live Prometheus.
+//
+// serviceAccount is threaded through solely to reach SecretReader — see its
+// doc for why the identity has to travel this far.
 type Querier interface {
-	Query(ctx context.Context, namespace string, src stagesv1.MetricSource) (float64, error)
+	Query(ctx context.Context, namespace, serviceAccount string, src stagesv1.MetricSource) (float64, error)
 }
 
 // HTTPQuerier resolves a MetricSource (Prometheus instant query or a JSON
@@ -63,33 +75,61 @@ type HTTPQuerier struct {
 	IPValidator func(net.IP) error
 	// Secrets reads the optional bearer-token Secret; nil disables secret reads.
 	Secrets SecretReader
+	// AllowedHosts is the --allowed-action-hosts glob list. Empty means every
+	// host is reachable (bounded only by IPValidator at dial time), which is the
+	// default. A metric query is an outbound call to a URL the StageSet author
+	// chose, carrying a bearer token — the same shape as an http action, so the
+	// same allowlist governs it.
+	AllowedHosts []string
 
 	client *http.Client
 }
 
-// New builds an HTTPQuerier with a secret reader and optional IP validator.
-func New(secrets SecretReader, ipValidator func(net.IP) error) *HTTPQuerier {
-	return &HTTPQuerier{Secrets: secrets, IPValidator: ipValidator}
+// New builds an HTTPQuerier with a secret reader, optional IP validator, and
+// optional host allowlist.
+func New(secrets SecretReader, ipValidator func(net.IP) error, allowedHosts []string) *HTTPQuerier {
+	return &HTTPQuerier{Secrets: secrets, IPValidator: ipValidator, AllowedHosts: allowedHosts}
 }
 
 // Query resolves src to a single scalar, dispatching on its provider. Every
 // failure path wraps ErrSourceUnavailable so callers route it through their
 // onSourceError policy rather than treating it as a normal numeric result.
-func (q *HTTPQuerier) Query(ctx context.Context, namespace string, src stagesv1.MetricSource) (float64, error) {
+func (q *HTTPQuerier) Query(ctx context.Context, namespace, serviceAccount string, src stagesv1.MetricSource) (float64, error) {
 	switch {
 	case src.Prometheus != nil:
-		return q.queryPrometheus(ctx, namespace, src.Prometheus)
+		return q.queryPrometheus(ctx, namespace, serviceAccount, src.Prometheus)
 	case src.Webhook != nil:
-		return q.queryWebhook(ctx, namespace, src.Webhook)
+		return q.queryWebhook(ctx, namespace, serviceAccount, src.Webhook)
 	default:
 		return 0, ErrNoSource
 	}
 }
 
-func (q *HTTPQuerier) queryPrometheus(ctx context.Context, namespace string, p *stagesv1.PrometheusSource) (float64, error) {
+// allowedHost reports whether host is permitted by AllowedHosts. An empty list
+// allows every host — the IPValidator dial-time pin is then the only bound,
+// which is the default posture. The patterns are the same path.Match globs the
+// http action's allowlist uses; both are outbound calls from the controller to
+// a URL a StageSet author supplied, so one flag governs both.
+func (q *HTTPQuerier) allowedHost(host string) error {
+	if len(q.AllowedHosts) == 0 {
+		return nil
+	}
+	host = strings.TrimSuffix(host, ".")
+	for _, pattern := range q.AllowedHosts {
+		if ok, _ := path.Match(pattern, host); ok {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s not in --allowed-action-hosts", ErrSourceUnavailable, host)
+}
+
+func (q *HTTPQuerier) queryPrometheus(ctx context.Context, namespace, serviceAccount string, p *stagesv1.PrometheusSource) (float64, error) {
 	endpoint, err := url.Parse(p.Address)
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
 		return 0, fmt.Errorf("%w: invalid prometheus address %q", ErrSourceUnavailable, p.Address)
+	}
+	if err := q.allowedHost(endpoint.Hostname()); err != nil {
+		return 0, err
 	}
 	endpoint.Path += "/api/v1/query"
 	qv := url.Values{}
@@ -101,7 +141,7 @@ func (q *HTTPQuerier) queryPrometheus(ctx context.Context, namespace string, p *
 		return 0, fmt.Errorf("%w: %v", ErrSourceUnavailable, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if err := q.applyBearer(ctx, req, namespace, p.SecretRef); err != nil {
+	if err := q.applyBearer(ctx, req, namespace, serviceAccount, p.SecretRef); err != nil {
 		return 0, err
 	}
 
@@ -119,17 +159,20 @@ func (q *HTTPQuerier) queryPrometheus(ctx context.Context, namespace string, p *
 	return scalarFromResult(pr.Data)
 }
 
-func (q *HTTPQuerier) queryWebhook(ctx context.Context, namespace string, w *stagesv1.WebhookSource) (float64, error) {
+func (q *HTTPQuerier) queryWebhook(ctx context.Context, namespace, serviceAccount string, w *stagesv1.WebhookSource) (float64, error) {
 	endpoint, err := url.Parse(w.URL)
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
 		return 0, fmt.Errorf("%w: invalid webhook url %q", ErrSourceUnavailable, w.URL)
+	}
+	if err := q.allowedHost(endpoint.Hostname()); err != nil {
+		return 0, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrSourceUnavailable, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if err := q.applyBearer(ctx, req, namespace, w.SecretRef); err != nil {
+	if err := q.applyBearer(ctx, req, namespace, serviceAccount, w.SecretRef); err != nil {
 		return 0, err
 	}
 	body, err := q.fetch(req)
@@ -145,14 +188,14 @@ func (q *HTTPQuerier) queryWebhook(ctx context.Context, namespace string, w *sta
 
 // applyBearer reads an optional bearer-token Secret and stamps the
 // Authorization header.
-func (q *HTTPQuerier) applyBearer(ctx context.Context, req *http.Request, namespace string, ref *meta.LocalObjectReference) error {
+func (q *HTTPQuerier) applyBearer(ctx context.Context, req *http.Request, namespace, serviceAccount string, ref *meta.LocalObjectReference) error {
 	if ref == nil || ref.Name == "" {
 		return nil
 	}
 	if q.Secrets == nil {
 		return fmt.Errorf("%w: secretRef set but no secret reader configured", ErrSourceUnavailable)
 	}
-	data, err := q.Secrets(ctx, namespace, ref.Name)
+	data, err := q.Secrets(ctx, namespace, serviceAccount, ref.Name)
 	if err != nil {
 		return fmt.Errorf("%w: reading secret %q: %v", ErrSourceUnavailable, ref.Name, err)
 	}

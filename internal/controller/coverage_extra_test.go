@@ -312,7 +312,11 @@ func TestResolvePostBuildVars_MergeAndPrecedence(t *testing.T) {
 		},
 	)
 
-	if vars, err := r.resolvePostBuildVars(context.Background(), ns, nil); err != nil || vars != nil {
+	// No serviceAccountName: targetCluster hands back the controller's client,
+	// which is the single-tenant path this harness exercises.
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"}}
+
+	if vars, err := r.resolvePostBuildVars(context.Background(), ss, nil); err != nil || vars != nil {
 		t.Fatalf("nil PostBuild = (%v,%v), want (nil,nil)", vars, err)
 	}
 
@@ -323,7 +327,7 @@ func TestResolvePostBuildVars_MergeAndPrecedence(t *testing.T) {
 			{Kind: "Secret", Name: "sec"},
 		},
 	}
-	vars, err := r.resolvePostBuildVars(context.Background(), ns, pb)
+	vars, err := r.resolvePostBuildVars(context.Background(), ss, pb)
 	if err != nil {
 		t.Fatalf("resolvePostBuildVars err = %v", err)
 	}
@@ -341,11 +345,12 @@ func TestResolvePostBuildVars_MissingSource(t *testing.T) {
 	t.Parallel()
 	const ns = "team-a"
 	r := builderWith(t)
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"}}
 
 	hard := &stagesv1.PostBuild{SubstituteFrom: []stagesv1.SubstituteReference{
 		{Kind: "ConfigMap", Name: "absent"},
 	}}
-	if _, err := r.resolvePostBuildVars(context.Background(), ns, hard); err == nil {
+	if _, err := r.resolvePostBuildVars(context.Background(), ss, hard); err == nil {
 		t.Fatal("missing required ConfigMap = nil error, want a failure")
 	}
 
@@ -353,12 +358,65 @@ func TestResolvePostBuildVars_MissingSource(t *testing.T) {
 		{Kind: "Secret", Name: "absent", Optional: true},
 		{Kind: "ConfigMap", Name: "absent", Optional: true},
 	}}
-	vars, err := r.resolvePostBuildVars(context.Background(), ns, soft)
+	vars, err := r.resolvePostBuildVars(context.Background(), ss, soft)
 	if err != nil {
 		t.Fatalf("optional missing sources err = %v, want nil", err)
 	}
 	if len(vars) != 0 {
 		t.Errorf("vars = %v, want empty for skipped optional sources", vars)
+	}
+}
+
+// substituteFrom resolves through the StageSet's serviceAccountName, so a
+// tenant can only substitute from data its own ServiceAccount may read. The
+// Secret named here exists and the controller's client can see it, but the
+// resolve must not use that client: this harness carries no rest.Config, so
+// minting the tenant token fails and the error is the assertion. A read that
+// fell back to the controller's identity would return "xyz" instead — which is
+// exactly the escalation the tenant client prevents, since a StageSet author
+// picks the Secret name.
+func TestResolvePostBuildVars_SubstituteFromReadsAsTheStageSetServiceAccount(t *testing.T) {
+	t.Parallel()
+	const ns = "team-a"
+	r := builderWith(t, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "not-mine"},
+		Data:       map[string][]byte{"token": []byte("xyz")},
+	})
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Spec:       stagesv1.StageSetSpec{ServiceAccountName: "tenant-sa"},
+	}
+	pb := &stagesv1.PostBuild{SubstituteFrom: []stagesv1.SubstituteReference{
+		{Kind: "Secret", Name: "not-mine"},
+	}}
+
+	vars, err := r.resolvePostBuildVars(context.Background(), ss, pb)
+	if err == nil {
+		t.Fatalf("substituteFrom resolved without the tenant identity: vars = %v", vars)
+	}
+	if !strings.Contains(err.Error(), "tenant-sa") {
+		t.Errorf("err = %v, want it to name the ServiceAccount it could not act as", err)
+	}
+}
+
+// Inline substitute values touch no API at all, so a StageSet naming a
+// ServiceAccount the controller cannot mint a token for still renders. Only
+// substituteFrom needs the tenant client.
+func TestResolvePostBuildVars_InlineSubstituteNeedsNoClient(t *testing.T) {
+	t.Parallel()
+	r := builderWith(t)
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "app"},
+		Spec:       stagesv1.StageSetSpec{ServiceAccountName: "tenant-sa"},
+	}
+	pb := &stagesv1.PostBuild{Substitute: map[string]string{"region": "eu"}}
+
+	vars, err := r.resolvePostBuildVars(context.Background(), ss, pb)
+	if err != nil {
+		t.Fatalf("inline-only substitute err = %v, want nil", err)
+	}
+	if vars["region"] != "eu" {
+		t.Errorf("vars = %v, want region=eu", vars)
 	}
 }
 

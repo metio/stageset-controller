@@ -77,9 +77,18 @@ namespace with the token under the `token` key:
           name: prometheus-auth
 ```
 
-The source address is dialed with the same SSRF guard as HTTP actions: loopback,
-link-local, cloud-metadata, multicast, and unspecified addresses are refused,
-while in-cluster private addresses (where Prometheus usually lives) are allowed.
+A metric source is an outbound call to an address the StageSet names, so it
+carries the same two guards an HTTP action does. Every resolved address is
+pinned through the SSRF guard: loopback, link-local, cloud-metadata, multicast,
+and unspecified addresses are refused, while in-cluster private addresses (where
+Prometheus usually lives) are allowed. And when the controller runs with
+`--allowed-action-hosts`, the source's host must match one of its patterns —
+leave the flag unset to reach any host the SSRF guard permits.
+
+The `secretRef` bearer token is read as the StageSet's `spec.serviceAccountName`,
+in the StageSet's own namespace, so grant that ServiceAccount `get` on the Secret
+you reference. The token reaches only endpoints your ServiceAccount's own
+credentials could already reach.
 
 ## Reading from a SaaS SLO API (webhook)
 

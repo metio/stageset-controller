@@ -242,10 +242,11 @@ type StageSetReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
 // The controller's own cache-backed client reads Secrets and ConfigMaps for
-// postBuild substituteFrom, the metric-source bearer token, and remote
-// spec.kubeConfig (secretRef/configMapRef) — a cached read needs list+watch to
-// start the informer, not just get. (Decryption key Secrets are read via the
-// tenant-impersonated client, so they are covered by tenant RBAC, not here.)
+// remote spec.kubeConfig (secretRef/configMapRef) — a cached read needs
+// list+watch to start the informer, not just get. Every Secret/ConfigMap a
+// StageSet names in its own spec — postBuild substituteFrom, the metric-source
+// bearer token, decryption keys, action secretRefs — is read via the
+// tenant-impersonated client instead, so tenant RBAC bounds it, not this rule.
 // +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;watch
 
 // Reconcile drives one StageSet through the design's state machine: resolve +
@@ -710,7 +711,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "decrypt", err, stageStatuses, ra.Revision, executed)
 			}
 			decryptSpan.End()
-			vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
+			vars, err := r.resolvePostBuildVars(ctx, &ss, stage.PostBuild)
 			if err != nil {
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, ra.Revision, executed)
 			}
@@ -1992,33 +1993,53 @@ func stageTimeout(ss *stagesv1.StageSet, stage *stagesv1.Stage) time.Duration {
 // resolvePostBuildVars assembles the substitution map from substituteFrom
 // (ConfigMaps/Secrets in the StageSet's namespace) overlaid with inline
 // substitute values, which take precedence.
-func (r *StageSetReconciler) resolvePostBuildVars(ctx context.Context, ns string, pb *stagesv1.PostBuild) (map[string]string, error) {
+//
+// The referenced objects are read under the StageSet's serviceAccountName, so a
+// tenant can only substitute from data its ServiceAccount can read — the same
+// rule buildDecryptor applies to key material. Reading them as the controller
+// would let anyone who can write a StageSet fold any Secret in the namespace
+// into the rendered manifests, which are then applied as objects they can read
+// back, regardless of their own RBAC.
+//
+// An empty serviceAccountName falls back to the controller's client inside
+// targetCluster; that is the single-tenant path, where there is no tenant
+// identity to bound the read to.
+func (r *StageSetReconciler) resolvePostBuildVars(ctx context.Context, ss *stagesv1.StageSet, pb *stagesv1.PostBuild) (map[string]string, error) {
 	if pb == nil {
 		return nil, nil
 	}
 	vars := map[string]string{}
-	for _, ref := range pb.SubstituteFrom {
-		key := types.NamespacedName{Namespace: ns, Name: ref.Name}
-		switch ref.Kind {
-		case "ConfigMap":
-			var cm corev1.ConfigMap
-			if err := r.Get(ctx, key, &cm); err != nil {
-				if ref.Optional && apierrors.IsNotFound(err) {
-					continue
+	// Only substituteFrom reaches the API. A spec carrying just inline
+	// substitute values resolves without a client at all, so it neither mints a
+	// token nor fails when the ServiceAccount is missing.
+	if len(pb.SubstituteFrom) > 0 {
+		tenant, _, err := r.targetCluster(ctx, ss.Namespace, ss.Spec.ServiceAccountName, nil)
+		if err != nil {
+			return nil, fmt.Errorf("substituteFrom: %w", err)
+		}
+		for _, ref := range pb.SubstituteFrom {
+			key := types.NamespacedName{Namespace: ss.Namespace, Name: ref.Name}
+			switch ref.Kind {
+			case "ConfigMap":
+				var cm corev1.ConfigMap
+				if err := tenant.Get(ctx, key, &cm); err != nil {
+					if ref.Optional && apierrors.IsNotFound(err) {
+						continue
+					}
+					return nil, fmt.Errorf("substituteFrom ConfigMap %q: %w", ref.Name, err)
 				}
-				return nil, fmt.Errorf("substituteFrom ConfigMap %q: %w", ref.Name, err)
-			}
-			maps.Copy(vars, cm.Data)
-		case "Secret":
-			var sec corev1.Secret
-			if err := r.Get(ctx, key, &sec); err != nil {
-				if ref.Optional && apierrors.IsNotFound(err) {
-					continue
+				maps.Copy(vars, cm.Data)
+			case "Secret":
+				var sec corev1.Secret
+				if err := tenant.Get(ctx, key, &sec); err != nil {
+					if ref.Optional && apierrors.IsNotFound(err) {
+						continue
+					}
+					return nil, fmt.Errorf("substituteFrom Secret %q: %w", ref.Name, err)
 				}
-				return nil, fmt.Errorf("substituteFrom Secret %q: %w", ref.Name, err)
-			}
-			for k, v := range sec.Data {
-				vars[k] = string(v)
+				for k, v := range sec.Data {
+					vars[k] = string(v)
+				}
 			}
 		}
 	}
@@ -2061,11 +2082,14 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.remoteConfig = defaultRemoteConfigBuilder{r: r}
 	}
 	// Default the metric-source querier for the error-budget freeze and
-	// promotion-analysis gates. Its dialer pins every resolved address through
-	// MetricIPValidator (production denylist when nil), and it reads optional
-	// bearer-token Secrets through the controller's client.
+	// promotion-analysis gates. A metric query is an outbound call to a URL the
+	// StageSet author chose, so it carries the same two guards an http action
+	// does: its dialer pins every resolved address through MetricIPValidator
+	// (production denylist when nil), and AllowedActionHosts bounds the hosts it
+	// may reach. Optional bearer-token Secrets are read as the StageSet's
+	// ServiceAccount — see readSecretData.
 	if r.MetricQuerier == nil {
-		r.MetricQuerier = metricsource.New(r.readSecretData, r.MetricIPValidator)
+		r.MetricQuerier = metricsource.New(r.readSecretData, r.MetricIPValidator, r.AllowedActionHosts)
 	}
 
 	// Spread interval-based requeues by +/- defaultIntervalJitterFraction so a

@@ -78,6 +78,31 @@ spec:
 A manifest field like `value: "${cluster_name}"` becomes `value: "prod-eu"` for
 this stage.
 
+Each `substituteFrom` ConfigMap and Secret is read as the StageSet's
+`spec.serviceAccountName`, in the StageSet's own namespace. Grant that
+ServiceAccount `get` on the objects you reference:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: web-substitute
+  namespace: apps
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [cluster-vars]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cluster-secrets]
+    verbs: [get]
+```
+
+A reference the ServiceAccount cannot read fails the stage rather than resolving
+— substitution reaches exactly the data the StageSet's own identity reaches, and
+nothing further. Mark a source `optional: true` to skip it when it is absent.
+
 > **A substituted number is a number.** Substitution is textual and runs after
 > kustomize, which drops the quotes around a plain `${var}` scalar — so a numeric
 > value such as `replicas: "${COUNT}"` with `COUNT: "3"` lands as the YAML

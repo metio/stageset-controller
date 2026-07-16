@@ -408,7 +408,7 @@ func (r *StageSetReconciler) versionFromObject(ctx context.Context, ss *stagesv1
 		return "", fmt.Errorf("fetch version artifact for stage %q: %w", stageName, err)
 	}
 	stage := &ss.Spec.Stages[idx]
-	vars, err := r.resolvePostBuildVars(ctx, ss.Namespace, stage.PostBuild)
+	vars, err := r.resolvePostBuildVars(ctx, ss, stage.PostBuild)
 	if err != nil {
 		return "", fmt.Errorf("resolve postBuild variables for version stage %q: %w", stageName, err)
 	}

@@ -43,7 +43,9 @@ type WebhookSource struct {
 	JSONPath string `json:"jsonPath"`
 
 	// SecretRef optionally names a Secret in the StageSet's namespace holding a
-	// bearer token under the "token" key, sent as Authorization: Bearer.
+	// bearer token under the "token" key, sent as Authorization: Bearer. The
+	// Secret is read as the StageSet's serviceAccountName, so it must be one
+	// that ServiceAccount can get.
 	// +optional
 	SecretRef *meta.LocalObjectReference `json:"secretRef,omitempty"`
 }
@@ -66,7 +68,8 @@ type PrometheusSource struct {
 
 	// SecretRef optionally names a Secret in the StageSet's namespace holding a
 	// bearer token under the "token" key, sent as Authorization: Bearer on the
-	// query. The Secret is read with the controller's client.
+	// query. The Secret is read as the StageSet's serviceAccountName, so it must
+	// be one that ServiceAccount can get.
 	// +optional
 	SecretRef *meta.LocalObjectReference `json:"secretRef,omitempty"`
 }
