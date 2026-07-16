@@ -10,8 +10,10 @@ import (
 
 	"github.com/fluxcd/pkg/apis/meta"
 	appsv1 "k8s.io/api/apps/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
@@ -21,13 +23,25 @@ func readyChecksStage(rc *stagesv1.ReadyChecks) *stagesv1.Stage {
 	return &stagesv1.Stage{Name: "s", SourceRef: stagesv1.SourceReference{Name: "x"}, ReadyChecks: rc}
 }
 
+// scopedMapper stands in for the target cluster's RESTMapper with just the
+// kinds these tests reference, half namespaced and half cluster-scoped.
+func scopedMapper() apimeta.RESTMapper {
+	m := apimeta.NewDefaultRESTMapper(nil)
+	m.Add(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, apimeta.RESTScopeNamespace)
+	m.Add(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Service"}, apimeta.RESTScopeNamespace)
+	m.Add(schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}, apimeta.RESTScopeRoot)
+	m.Add(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"}, apimeta.RESTScopeRoot)
+	m.Add(schema.GroupVersionKind{Group: "storage.k8s.io", Version: "v1", Kind: "StorageClass"}, apimeta.RESTScopeRoot)
+	return m
+}
+
 func TestReadyCheckObjects_ConvertsAndDefaultsNamespace(t *testing.T) {
 	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
 		{APIVersion: "apps/v1", Kind: "Deployment", Name: "web"},                // empty ns → ss namespace
 		{APIVersion: "v1", Kind: "Service", Name: "svc", Namespace: "explicit"}, // explicit ns kept
 	}})
-	set := readyCheckObjects(ss, stage)
+	set := readyCheckObjects(scopedMapper(), ss, stage)
 	if len(set) != 2 {
 		t.Fatalf("got %d objects, want 2", len(set))
 	}
@@ -36,6 +50,65 @@ func TestReadyCheckObjects_ConvertsAndDefaultsNamespace(t *testing.T) {
 	}
 	if set[1].Namespace != "explicit" || set[1].GroupKind.Group != "" {
 		t.Errorf("second object = %+v, want core/Service in explicit", set[1])
+	}
+}
+
+// A cluster-scoped check must produce a namespace-less key. kstatus matches on
+// the whole ObjMetadata, and a cluster-scoped object carries no namespace — so a
+// namespaced key matches nothing and the stage waits out its verify timeout on
+// an object that has been Established all along. This is the "operator installs
+// the CRDs, a later stage applies the CRs" ordering, which is most of the reason
+// to reach for readyChecks at all.
+func TestReadyCheckObjects_ClusterScopedKindsCarryNoNamespace(t *testing.T) {
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
+	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
+		{APIVersion: "apiextensions.k8s.io/v1", Kind: "CustomResourceDefinition", Name: "clusters.postgresql.cnpg.io"},
+		{APIVersion: "v1", Kind: "Namespace", Name: "team-a"},
+		{APIVersion: "storage.k8s.io/v1", Kind: "StorageClass", Name: "fast"},
+	}})
+
+	set := readyCheckObjects(scopedMapper(), ss, stage)
+	if len(set) != 3 {
+		t.Fatalf("got %d objects, want 3", len(set))
+	}
+	for _, o := range set {
+		if o.Namespace != "" {
+			t.Errorf("%s/%s got namespace %q, want empty (cluster-scoped)", o.GroupKind.Kind, o.Name, o.Namespace)
+		}
+	}
+}
+
+// A namespace on a cluster-scoped kind is meaningless rather than merely
+// redundant: honoring it would build a key nothing can occupy. Admission does
+// not reject it (scope belongs to the target cluster), so the resolve drops it.
+func TestReadyCheckObjects_ClusterScopedIgnoresAnExplicitNamespace(t *testing.T) {
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
+	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
+		{APIVersion: "apiextensions.k8s.io/v1", Kind: "CustomResourceDefinition", Name: "widgets.example.com", Namespace: "wrong"},
+	}})
+
+	set := readyCheckObjects(scopedMapper(), ss, stage)
+	if set[0].Namespace != "" {
+		t.Errorf("namespace = %q, want it dropped for a cluster-scoped kind", set[0].Namespace)
+	}
+}
+
+// A kind the target cluster does not serve cannot be scoped, so the namespaced
+// default stands. The check then reports Unknown — the honest answer — rather
+// than gating on a key that could never be occupied either way.
+func TestReadyCheckObjects_UnresolvableKindFallsBackToNamespaced(t *testing.T) {
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
+	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
+		{APIVersion: "nosuch.example.com/v1", Kind: "Mystery", Name: "m"},
+	}})
+
+	for name, mapper := range map[string]apimeta.RESTMapper{"unknown kind": scopedMapper(), "nil mapper": nil} {
+		t.Run(name, func(t *testing.T) {
+			set := readyCheckObjects(mapper, ss, stage)
+			if set[0].Namespace != "ssns" {
+				t.Errorf("namespace = %q, want the StageSet's as the fallback", set[0].Namespace)
+			}
+		})
 	}
 }
 

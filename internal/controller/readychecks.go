@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fluxcd/cli-utils/pkg/object"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -24,27 +25,79 @@ const readyCheckInterval = 2 * time.Second
 
 // readyCheckObjects converts a stage's explicit ReadyChecks.Checks references
 // into an ObjMetadataSet so the kstatus wait gates on those external objects in
-// addition to the ones the stage applied. An empty namespace defaults to the
-// StageSet's namespace (the NamespacedObjectKindReference local-reference
-// convention).
-func readyCheckObjects(ss *stagesv1.StageSet, stage *stagesv1.Stage) object.ObjMetadataSet {
+// addition to the ones the stage applied.
+//
+// The namespace an entry resolves to depends on its kind's scope, which only the
+// target cluster's RESTMapper knows. A namespaced kind with an empty namespace
+// defaults to the StageSet's (the NamespacedObjectKindReference local-reference
+// convention). A cluster-scoped kind — CustomResourceDefinition, ClusterRole,
+// Namespace, PersistentVolume, StorageClass — must carry an EMPTY namespace:
+// kstatus matches an object by its full ObjMetadata, and a cluster-scoped object
+// has no namespace, so a namespaced key can never match one and the wait reports
+// Unknown until the stage's verify timeout. That path is the whole "operator
+// installs CRDs, a later stage applies the CRs" ordering the checks exist for.
+//
+// mapper is the target cluster's, so a remote cluster's own scoping applies. A
+// kind it cannot resolve (a CRD not installed yet — which a check on a CRD's own
+// existence cannot have, but a check on a CR of it might) falls back to the
+// namespaced default: the wait then reports it Unknown, which is the honest
+// answer for a kind the cluster does not serve.
+func readyCheckObjects(mapper apimeta.RESTMapper, ss *stagesv1.StageSet, stage *stagesv1.Stage) object.ObjMetadataSet {
 	if stage.ReadyChecks == nil {
 		return nil
 	}
 	var set object.ObjMetadataSet
 	for _, ref := range stage.ReadyChecks.Checks {
 		gv, _ := schema.ParseGroupVersion(ref.APIVersion)
-		ns := ref.Namespace
-		if ns == "" {
-			ns = ss.Namespace
-		}
+		gk := schema.GroupKind{Group: gv.Group, Kind: ref.Kind}
 		set = append(set, object.ObjMetadata{
-			Namespace: ns,
+			Namespace: readyCheckNamespace(mapper, gk, gv.Version, ref.Namespace, ss.Namespace),
 			Name:      ref.Name,
-			GroupKind: schema.GroupKind{Group: gv.Group, Kind: ref.Kind},
+			GroupKind: gk,
 		})
 	}
 	return set
+}
+
+// readyCheckNamespace resolves the namespace an ObjMetadata for gk must carry.
+// Cluster-scoped kinds get "" — including when the reference names one, since a
+// namespace on a cluster-scoped object is meaningless rather than merely
+// redundant, and honoring it would produce a key that matches nothing.
+//
+// Admission deliberately does NOT reject that spec. Scope is a property of the
+// TARGET cluster, which for a spec.kubeConfig StageSet is not the one the
+// webhook can see, and ValidateSpec is shared with the reconciler's
+// bypass-admission fallback, which has no mapper at that point either. A rule
+// built on the webhook's own mapper would be right only for local targets and
+// quietly wrong for remote ones. The field's documentation states that the
+// namespace is ignored for cluster-scoped kinds.
+func readyCheckNamespace(mapper apimeta.RESTMapper, gk schema.GroupKind, version, refNamespace, ownerNamespace string) string {
+	if clusterScoped(mapper, gk, version) {
+		return ""
+	}
+	if refNamespace != "" {
+		return refNamespace
+	}
+	return ownerNamespace
+}
+
+// clusterScoped reports whether gk is a root-scoped kind on the target cluster.
+// An unresolvable kind reports false: the namespaced default is the safer guess
+// for a CR whose CRD is not installed yet, and the check then simply stays
+// Unknown rather than silently gating on a key nothing can occupy.
+func clusterScoped(mapper apimeta.RESTMapper, gk schema.GroupKind, version string) bool {
+	if mapper == nil {
+		return false
+	}
+	var versions []string
+	if version != "" {
+		versions = []string{version}
+	}
+	m, err := mapper.RESTMapping(gk, versions...)
+	if err != nil {
+		return false
+	}
+	return m.Scope.Name() == apimeta.RESTScopeNameRoot
 }
 
 // compiledHealthCheck pairs a CustomHealthCheck with its compiled CEL programs.

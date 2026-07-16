@@ -39,6 +39,19 @@ spec:
             namespace: platform-system
 ```
 
+Cluster-scoped kinds work here — the `CustomResourceDefinition` above is the
+common one, and `ClusterRole`, `Namespace`, `PersistentVolume`, and
+`StorageClass` behave the same. Leave `namespace` unset for them; a
+cluster-scoped object has none, and the field is ignored if you set one anyway.
+For a namespaced kind, `namespace` defaults to the StageSet's when omitted.
+
+This is the gate behind the usual ordering: an early stage installs an operator
+and its CRDs, a check on the CRD holds the rollout until the API is served, and a
+later stage applies the custom resources that need it.
+
+Scope is resolved against the cluster the stage targets, so a stage with
+`spec.kubeConfig` is judged by the remote cluster's own API surface.
+
 ## Custom health with CEL
 
 For custom resources kstatus doesn't understand, describe readiness with CEL

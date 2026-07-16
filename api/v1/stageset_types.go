@@ -1062,7 +1062,16 @@ type ReadyChecks struct {
 	// +optional
 	DisableWait bool `json:"disableWait,omitempty"`
 
-	// Checks lists explicit objects evaluated with kstatus.
+	// Checks lists explicit objects evaluated with kstatus, gating the stage on
+	// objects it did not itself apply.
+	//
+	// Cluster-scoped kinds are supported despite the reference type's name:
+	// gating a stage on a CustomResourceDefinition, ClusterRole, Namespace,
+	// PersistentVolume, or StorageClass is the ordering these checks exist for.
+	// The namespace field is ignored for such a kind — a cluster-scoped object
+	// has none — and defaults to the StageSet's namespace for a namespaced kind
+	// when left empty. Scope is resolved against the target cluster, so a
+	// spec.kubeConfig stage is judged by the remote cluster's own API surface.
 	// +optional
 	Checks []meta.NamespacedObjectKindReference `json:"checks,omitempty"`
 

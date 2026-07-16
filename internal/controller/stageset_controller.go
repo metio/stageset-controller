@@ -798,7 +798,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// CEL ReadyChecks.Exprs then gate on the live state of matching
 			// applied objects. All three share the stage's verify timeout.
 			verifyTimeout := stageTimeout(&ss, stage)
-			waitSet := readyCheckObjects(&ss, stage)
+			waitSet := readyCheckObjects(rt.mapper, &ss, stage)
 			if !disableWait(stage) {
 				waitSet = append(changeSet.ToObjMetadataSet(), waitSet...)
 			}
