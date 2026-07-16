@@ -241,13 +241,18 @@ type StageSetReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
-// The controller's own cache-backed client reads Secrets and ConfigMaps for
-// remote spec.kubeConfig (secretRef/configMapRef) — a cached read needs
-// list+watch to start the informer, not just get. Every Secret/ConfigMap a
-// StageSet names in its own spec — postBuild substituteFrom, the metric-source
-// bearer token, decryption keys, action secretRefs — is read via the
-// tenant-impersonated client instead, so tenant RBAC bounds it, not this rule.
-// +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;watch
+// There is deliberately NO secrets/configmaps rule here. Every Secret and
+// ConfigMap this controller reads is one a StageSet named in its own spec —
+// postBuild substituteFrom, the metric-source bearer token, decryption keys,
+// action secretRefs, spec.kubeConfig — and each resolves through the
+// tenant-impersonated client, so the tenant SA's RBAC bounds it. Granting the
+// controller a cluster-wide read would hand any StageSet author the contents of
+// any Secret in their namespace, since they choose the names. It would also back
+// those reads with cluster-wide Secret and ConfigMap informers, which is the
+// bulk of a controller's cache. Single-tenant installs (rbac.clusterAdmin: true)
+// reach these objects through cluster-admin instead; a multi-tenant StageSet
+// without a serviceAccountName cannot apply anything anyway, so failing its read
+// changes where it stops, not whether.
 
 // Reconcile drives one StageSet through the design's state machine: resolve +
 // pin artifacts, then BUILD -> APPLY -> PRUNE + RECORD -> VERIFY each stage in

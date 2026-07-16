@@ -90,7 +90,9 @@ ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
   mirrors it as `controller.watchNamespaces` and pivots RBAC to per-namespace
   RoleBindings (the cluster-scoped VWC grant stays a ClusterRoleBinding). Tenancy
   has two models: **multi-tenant** (default) leans on `spec.serviceAccountName`
-  impersonation, so the chart grants the controller only `impersonate` + reads;
+  impersonation, so the chart grants the controller only token-mint + reads —
+  and **no `secrets`/`configmaps` rule at all**, since every such object is
+  spec-named and read as the tenant (see below);
   **single-tenant** sets the chart's `rbac.clusterAdmin: true` to bind the
   controller SA to `cluster-admin` (the helm-controller default-install model), so
   StageSets without `serviceAccountName` apply under the controller's own identity.
