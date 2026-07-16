@@ -190,9 +190,10 @@ spec:
         name: payments-app
 ```
 
-The Secret is read with the controller's own identity — connecting to the target
-cluster is the controller's job — and the kubeconfig payload defaults to the
-`value` key.
+The Secret is read as the StageSet's `spec.serviceAccountName`, in the StageSet's
+own namespace, so grant that ServiceAccount `get` on it — a kubeconfig the
+ServiceAccount cannot read fails the stage rather than connecting. The kubeconfig
+payload defaults to the `value` key.
 
 ### Cloud-provider auth
 
@@ -228,8 +229,10 @@ data:
   serviceAccountName: deployer  # cloud identity to impersonate (optional)
 ```
 
-The ConfigMap is read with the controller's own identity. Which keys are required
-depends on the provider; the `provider` key is always required and must be one of
+The ConfigMap is read as the StageSet's `spec.serviceAccountName`, like the
+`secretRef` payload above, so that ServiceAccount needs `get` on it. Which keys
+are required depends on the provider; the `provider` key is always required and
+must be one of
 `aws`, `azure`, `gcp`, or `generic`. When `serviceAccountName` is set in the
 ConfigMap, that ServiceAccount (in the StageSet's namespace) is the cloud identity
 whose workload-identity binding the provider exchanges for a cluster token; when

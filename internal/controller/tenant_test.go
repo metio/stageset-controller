@@ -41,6 +41,34 @@ func builderWith(t *testing.T, objs ...client.Object) *StageSetReconciler {
 	return &StageSetReconciler{Client: c}
 }
 
+// spec.kubeConfig names an object in the StageSet's own spec, so it resolves
+// under the StageSet's serviceAccountName like every other spec-named read. The
+// Secret here exists and the controller's client can see it; the resolve must
+// not use that client. This harness has no rest.Config to mint a tenant token
+// from, so the attempt fails — which is the assertion. A read on the
+// controller's identity would return a usable rest.Config instead, letting a
+// StageSet author connect with a kubeconfig their own ServiceAccount cannot
+// read.
+func TestDefaultRemoteConfigBuilder_SecretRef_ReadsAsTheStageSetServiceAccount(t *testing.T) {
+	t.Parallel()
+	const ns = "team-a"
+	r := builderWith(t, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "not-mine"},
+		Data:       map[string][]byte{"value": []byte("apiVersion: v1\nkind: Config\n")},
+	})
+	b := defaultRemoteConfigBuilder{r: r}
+
+	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
+		SecretRef: &fluxmeta.SecretKeyReference{Name: "not-mine"},
+	}, ns, "tenant-sa")
+	if err == nil {
+		t.Fatal("kubeConfig secret resolved without the tenant identity")
+	}
+	if !strings.Contains(err.Error(), "tenant-sa") {
+		t.Errorf("err = %v, want it to name the ServiceAccount it could not act as", err)
+	}
+}
+
 // A self-contained secretRef kubeconfig parses and yields a rest.Config plus a
 // cache key that embeds the Secret name. No network, no cloud.
 func TestDefaultRemoteConfigBuilder_SecretRef_OK(t *testing.T) {
@@ -54,7 +82,7 @@ func TestDefaultRemoteConfigBuilder_SecretRef_OK(t *testing.T) {
 	b := defaultRemoteConfigBuilder{r: r}
 	cfg, key, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
 		SecretRef: &fluxmeta.SecretKeyReference{Name: "kc"},
-	}, ns)
+	}, ns, "")
 	if err != nil {
 		t.Fatalf("RESTConfig err = %v, want nil", err)
 	}
@@ -79,7 +107,7 @@ func TestDefaultRemoteConfigBuilder_SecretRef_BadKubeconfig(t *testing.T) {
 	b := defaultRemoteConfigBuilder{r: r}
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
 		SecretRef: &fluxmeta.SecretKeyReference{Name: "kc"},
-	}, ns)
+	}, ns, "")
 	if err == nil {
 		t.Fatal("RESTConfig err = nil, want a parse error")
 	}
@@ -101,7 +129,7 @@ func TestDefaultRemoteConfigBuilder_ConfigMapRef_UnknownProvider(t *testing.T) {
 	b := defaultRemoteConfigBuilder{r: r}
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
 		ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud"},
-	}, ns)
+	}, ns, "")
 	if !errors.Is(err, errInvalidKubeConfigSpec) {
 		t.Fatalf("err = %v, want errInvalidKubeConfigSpec", err)
 	}
@@ -121,7 +149,7 @@ func TestDefaultRemoteConfigBuilder_ConfigMapRef_EmptyProvider(t *testing.T) {
 	b := defaultRemoteConfigBuilder{r: r}
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
 		ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud"},
-	}, ns)
+	}, ns, "")
 	if !errors.Is(err, errInvalidKubeConfigSpec) {
 		t.Fatalf("err = %v, want errInvalidKubeConfigSpec", err)
 	}
@@ -135,7 +163,7 @@ func TestDefaultRemoteConfigBuilder_ConfigMapRef_Missing(t *testing.T) {
 	b := defaultRemoteConfigBuilder{r: r}
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
 		ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "absent"},
-	}, ns)
+	}, ns, "")
 	if !errors.Is(err, errInvalidKubeConfigSpec) {
 		t.Fatalf("err = %v, want errInvalidKubeConfigSpec", err)
 	}
@@ -147,7 +175,7 @@ func TestDefaultRemoteConfigBuilder_NoRef(t *testing.T) {
 	t.Parallel()
 	r := builderWith(t)
 	b := defaultRemoteConfigBuilder{r: r}
-	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{}, "team-a")
+	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{}, "team-a", "")
 	if !errors.Is(err, errInvalidKubeConfigSpec) {
 		t.Fatalf("err = %v, want errInvalidKubeConfigSpec", err)
 	}
@@ -167,7 +195,7 @@ func TestConfigMapResourceVersion_TracksEdits(t *testing.T) {
 	}
 	r := builderWith(t, cm)
 
-	v1, err := r.configMapResourceVersion(context.Background(), ns, "cloud")
+	v1, err := r.configMapResourceVersion(context.Background(), r.Client, ns, "cloud")
 	if err != nil {
 		t.Fatalf("configMapResourceVersion err = %v", err)
 	}
@@ -184,7 +212,7 @@ func TestConfigMapResourceVersion_TracksEdits(t *testing.T) {
 	if err := r.Update(context.Background(), &fresh); err != nil {
 		t.Fatalf("update configmap: %v", err)
 	}
-	v2, err := r.configMapResourceVersion(context.Background(), ns, "cloud")
+	v2, err := r.configMapResourceVersion(context.Background(), r.Client, ns, "cloud")
 	if err != nil {
 		t.Fatalf("configMapResourceVersion (post-edit) err = %v", err)
 	}
@@ -198,7 +226,7 @@ func TestConfigMapResourceVersion_TracksEdits(t *testing.T) {
 func TestConfigMapResourceVersion_Missing(t *testing.T) {
 	t.Parallel()
 	r := builderWith(t)
-	if _, err := r.configMapResourceVersion(context.Background(), "team-a", "absent"); err == nil {
+	if _, err := r.configMapResourceVersion(context.Background(), r.Client, "team-a", "absent"); err == nil {
 		t.Fatal("configMapResourceVersion err = nil, want a not-found error")
 	}
 }

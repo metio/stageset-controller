@@ -156,9 +156,13 @@ type fakeRemoteConfigBuilder struct {
 	// gotConfigMap records the configMapRef name the reconciler asked for, so a
 	// test can assert the cloud path (not the secretRef path) was taken.
 	gotConfigMap string
+	// gotServiceAccount records the identity the builder was handed, which is
+	// what bounds its reads of the spec-named kubeConfig object.
+	gotServiceAccount string
 }
 
-func (b *fakeRemoteConfigBuilder) RESTConfig(_ context.Context, kc *fluxmeta.KubeConfigReference, _ string) (*rest.Config, string, error) {
+func (b *fakeRemoteConfigBuilder) RESTConfig(_ context.Context, kc *fluxmeta.KubeConfigReference, _, serviceAccount string) (*rest.Config, string, error) {
+	b.gotServiceAccount = serviceAccount
 	if b.err != nil {
 		return nil, "", b.err
 	}

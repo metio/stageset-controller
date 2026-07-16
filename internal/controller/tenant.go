@@ -48,7 +48,7 @@ type clusterTarget struct {
 // an unchanged one reuses the discovered RESTMapper. Production wires
 // defaultRemoteConfigBuilder; tests inject a fake that points at envtest.
 type remoteConfigBuilder interface {
-	RESTConfig(ctx context.Context, kc *fluxmeta.KubeConfigReference, namespace string) (cfg *rest.Config, cacheKey string, err error)
+	RESTConfig(ctx context.Context, kc *fluxmeta.KubeConfigReference, namespace, serviceAccount string) (cfg *rest.Config, cacheKey string, err error)
 }
 
 // errInvalidKubeConfigSpec marks a kubeConfig failure that no retry can fix —
@@ -58,9 +58,10 @@ type remoteConfigBuilder interface {
 var errInvalidKubeConfigSpec = errors.New("invalid spec.kubeConfig")
 
 // defaultRemoteConfigBuilder is the production remoteConfigBuilder. Both paths
-// read in-cluster objects (the Secret / ConfigMap) with the controller's own
-// client — connecting to the target cluster is the controller's job, not the
-// tenant's.
+// read their in-cluster object (the Secret / ConfigMap) as the StageSet's
+// serviceAccountName: the reference is spec-supplied, so a read on the
+// controller's identity would let a StageSet author point at a kubeconfig their
+// own ServiceAccount cannot see and have the controller connect with it.
 type defaultRemoteConfigBuilder struct {
 	r *StageSetReconciler
 }
@@ -69,10 +70,21 @@ type defaultRemoteConfigBuilder struct {
 // a stored kubeconfig; configMapRef hands off to fluxcd/pkg/auth, which reads
 // the ConfigMap, validates its provider/keys, and returns a config whose bearer
 // token is re-minted from the cloud STS per request.
-func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta.KubeConfigReference, namespace string) (*rest.Config, string, error) {
+//
+// The tenant client for the LOCAL cluster is resolved here, and the recursion
+// terminates because that call passes kc=nil: targetCluster's remote branch (the
+// only caller of this method) is not re-entered. It must also stay outside
+// targetCluster's tenantMu — the nested call takes that lock itself, and a Go
+// mutex is not reentrant. targetCluster calls this before locking, which is what
+// makes the ordering safe.
+func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta.KubeConfigReference, namespace, serviceAccount string) (*rest.Config, string, error) {
+	tenant, _, err := b.r.targetCluster(ctx, namespace, serviceAccount, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("kubeConfig: %w", err)
+	}
 	switch {
 	case kc.SecretRef != nil:
-		raw, version, err := b.r.kubeconfigBytes(ctx, namespace, kc.SecretRef)
+		raw, version, err := b.r.kubeconfigBytes(ctx, tenant, namespace, kc.SecretRef)
 		if err != nil {
 			return nil, "", err
 		}
@@ -96,11 +108,14 @@ func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta
 		// instead of being masked until token rotation or a restart — mirroring
 		// the secretRef path. A missing ConfigMap is terminal: no retry brings it
 		// back without a spec/object change.
-		version, err := b.r.configMapResourceVersion(ctx, namespace, kc.ConfigMapRef.Name)
+		version, err := b.r.configMapResourceVersion(ctx, tenant, namespace, kc.ConfigMapRef.Name)
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: cloud-provider kubeConfig configMap %q: %w", errInvalidKubeConfigSpec, kc.ConfigMapRef.Name, err)
 		}
-		cfg, err := authutils.GetRESTConfig(ctx, *kc, namespace, b.r.Client)
+		// fluxcd/pkg/auth re-reads the ConfigMap through the client it is given,
+		// so it takes the tenant's too — otherwise the check above would be
+		// bounded by the tenant while the read that matters was not.
+		cfg, err := authutils.GetRESTConfig(ctx, *kc, namespace, tenant)
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: cloud-provider kubeConfig configMap %q: %w", errInvalidKubeConfigSpec, kc.ConfigMapRef.Name, err)
 		}
@@ -167,7 +182,7 @@ func (r *StageSetReconciler) targetCluster(ctx context.Context, ns, sa string, k
 			ckey string
 			err  error
 		)
-		cfg, ckey, err = builder.RESTConfig(ctx, kc, ns)
+		cfg, ckey, err = builder.RESTConfig(ctx, kc, ns, sa)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -265,13 +280,11 @@ func tenantRestConfig(base *rest.Config, token string) *rest.Config {
 }
 
 // kubeconfigBytes reads the kubeconfig payload (and its resourceVersion, for
-// cache invalidation) from a Secret in ns. The Secret is read with the
-// controller's own client — connecting to the target cluster is the
-// controller's job, not the tenant's — and the key defaults to "value" per the
-// Flux convention.
-func (r *StageSetReconciler) kubeconfigBytes(ctx context.Context, ns string, ref *fluxmeta.SecretKeyReference) ([]byte, string, error) {
+// cache invalidation) from a Secret in ns, through the supplied reader — the
+// StageSet's tenant client. The key defaults to "value" per the Flux convention.
+func (r *StageSetReconciler) kubeconfigBytes(ctx context.Context, reader client.Reader, ns string, ref *fluxmeta.SecretKeyReference) ([]byte, string, error) {
 	var sec corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: ref.Name}, &sec); err != nil {
+	if err := reader.Get(ctx, types.NamespacedName{Namespace: ns, Name: ref.Name}, &sec); err != nil {
 		return nil, "", fmt.Errorf("kubeConfig secret %q: %w", ref.Name, err)
 	}
 	key := ref.Key
@@ -286,12 +299,12 @@ func (r *StageSetReconciler) kubeconfigBytes(ctx context.Context, ns string, ref
 }
 
 // configMapResourceVersion reads the configMapRef ConfigMap's resourceVersion so
-// the target-cluster cache key tracks in-place edits. The ConfigMap is read with
-// the controller's own client — connecting to the target cluster is the
-// controller's job, not the tenant's.
-func (r *StageSetReconciler) configMapResourceVersion(ctx context.Context, ns, name string) (string, error) {
+// the target-cluster cache key tracks in-place edits. It reads through the
+// supplied reader — the StageSet's tenant client — matching the read
+// fluxcd/pkg/auth then performs on the same object.
+func (r *StageSetReconciler) configMapResourceVersion(ctx context.Context, reader client.Reader, ns, name string) (string, error) {
 	var cm corev1.ConfigMap
-	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &cm); err != nil {
+	if err := reader.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &cm); err != nil {
 		return "", fmt.Errorf("kubeConfig configMap %q: %w", name, err)
 	}
 	return cm.ResourceVersion, nil

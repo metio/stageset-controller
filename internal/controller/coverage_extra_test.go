@@ -441,7 +441,7 @@ func TestKubeconfigBytes_KeyHandling(t *testing.T) {
 		},
 	)
 
-	data, ver, err := r.kubeconfigBytes(context.Background(), ns, &fluxmeta.SecretKeyReference{Name: "default-key"})
+	data, ver, err := r.kubeconfigBytes(context.Background(), r.Client, ns, &fluxmeta.SecretKeyReference{Name: "default-key"})
 	if err != nil || string(data) != "kc-default" {
 		t.Fatalf("default key = (%q,%v), want kc-default", data, err)
 	}
@@ -449,18 +449,18 @@ func TestKubeconfigBytes_KeyHandling(t *testing.T) {
 		t.Error("resourceVersion empty; cache invalidation would not track edits")
 	}
 
-	data, _, err = r.kubeconfigBytes(context.Background(), ns, &fluxmeta.SecretKeyReference{Name: "custom-key", Key: "config"})
+	data, _, err = r.kubeconfigBytes(context.Background(), r.Client, ns, &fluxmeta.SecretKeyReference{Name: "custom-key", Key: "config"})
 	if err != nil || string(data) != "kc-custom" {
 		t.Fatalf("custom key = (%q,%v), want kc-custom", data, err)
 	}
 
-	if _, _, err := r.kubeconfigBytes(context.Background(), ns, &fluxmeta.SecretKeyReference{Name: "empty-key"}); err == nil {
+	if _, _, err := r.kubeconfigBytes(context.Background(), r.Client, ns, &fluxmeta.SecretKeyReference{Name: "empty-key"}); err == nil {
 		t.Error("empty key value = nil error, want a failure")
 	}
-	if _, _, err := r.kubeconfigBytes(context.Background(), ns, &fluxmeta.SecretKeyReference{Name: "absent"}); err == nil {
+	if _, _, err := r.kubeconfigBytes(context.Background(), r.Client, ns, &fluxmeta.SecretKeyReference{Name: "absent"}); err == nil {
 		t.Error("missing Secret = nil error, want a failure")
 	}
-	if _, _, err := r.kubeconfigBytes(context.Background(), ns, &fluxmeta.SecretKeyReference{Name: "default-key", Key: "nope"}); err == nil {
+	if _, _, err := r.kubeconfigBytes(context.Background(), r.Client, ns, &fluxmeta.SecretKeyReference{Name: "default-key", Key: "nope"}); err == nil {
 		t.Error("absent key = nil error, want a failure")
 	}
 }
