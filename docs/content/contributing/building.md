@@ -4,12 +4,18 @@ description: Build the controller, run the test suite, and pass the static-analy
 tags: [contributing, ci]
 ---
 
-The controller is a standard Go module. With a Go toolchain installed:
+The host needs no Go toolchain. Every command runs through the development shell
+that `flake.nix` defines, with `flake.lock` pinning each tool to an exact
+version:
 
 ```shell
-go build ./...
-go test -race -cover ./...
+nix develop --command go build ./...
+nix develop --command go test -race -cover ./...
 ```
+
+CI runs the same shell, so a gate that is green locally is green there by
+construction. Run `nix develop` on its own to drop into an interactive shell and
+call the tools bare.
 
 ## Test layers
 
@@ -17,13 +23,41 @@ go test -race -cover ./...
   are drift gates — e.g. `conditions_test.go` asserts every Ready `Reason` has a
   matching runbook page under `docs/content/runbooks/`.
 - **envtest-backed tests** (`envtest_*_test.go`) boot a real kube-apiserver + etcd
-  via controller-runtime's `envtest`. They `t.Skip` unless `KUBEBUILDER_ASSETS`
-  points at an asset bundle — install it with
-  [`setup-envtest`](https://book.kubebuilder.io/reference/envtest.html).
+  via controller-runtime's `envtest`. The shell exports `KUBEBUILDER_ASSETS`
+  pointing at an `etcd` + `kube-apiserver` + `kubectl` bundle assembled from
+  nixpkgs, so they run offline with nothing to install; they `t.Skip` when it is
+  unset.
 - **Fuzz tests** (`FuzzXxx`) harden the parsing-heavy paths; their seed corpus runs
-  as ordinary unit tests, and `-fuzz` fuzzes for real.
+  as ordinary unit tests, and `-fuzz` fuzzes for real:
+
+  ```shell
+  nix develop --command go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/
+  ```
+
 - **Kind smoke** scenarios under `hack/smoke/` run the controller end to end
   against a real kind cluster.
+
+## Regenerating generated code
+
+The CRDs under `config/crd/`, `config/rbac/role.yaml` (rendered from the
+`+kubebuilder:rbac` markers), `config/webhook/manifests.yaml`, and
+`api/v1/zz_generated.deepcopy.go` are produced by `controller-gen`. Regenerate
+them after touching `api/` or a marker, and commit the result:
+
+```shell
+nix develop --command generate
+```
+
+`verify.yml`'s `generated` job runs that same command and fails on any diff, so
+stale manifests cannot ship.
+
+## Building the site
+
+```shell
+nix develop --command website   # one-shot build into docs/public/
+nix develop --command serve     # live server on :1313
+nix develop --command htmltest  # lint the rendered HTML (needs a build first)
+```
 
 ## Static analysis
 
@@ -31,20 +65,11 @@ A pull request must be clean under each of these — run them locally before
 pushing:
 
 ```shell
-go vet ./...
-go run honnef.co/go/tools/cmd/staticcheck@latest ./...
-go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
-go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-go run mvdan.cc/gofumpt@latest -l .          # empty output == formatted
-go run github.com/fe3dback/arch-go@latest    # architecture rules (arch-go.yml)
-```
-
-## Containerized dev shell
-
-The toolchain — including the pinned `setup-envtest` assets — is also packaged in
-a container via [ilo](https://ilo.projects.metio.wtf/), so you can build and test
-without installing anything on the host:
-
-```shell
-ilo bash -c 'go test -race -cover ./...'
+nix develop --command go vet ./...
+nix develop --command staticcheck ./...      # config: staticcheck.conf, checks = ["all"]
+nix develop --command gosec ./...
+nix develop --command govulncheck ./...
+nix develop --command gofumpt -l .           # empty output == formatted
+nix develop --command arch-go                # architecture rules (arch-go.yml)
+nix develop --command modernize ./...        # newer-Go idiom check
 ```

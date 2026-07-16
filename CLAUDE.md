@@ -70,16 +70,15 @@ project-wide). The Go gate is `go vet` + `staticcheck` + `gosec` +
 `govulncheck` + `gofumpt` + `arch-go`. These configs are kept **identical to the
 jaas repo** so both projects lint the same way. Text linters mirror the same set: `yamllint`
 (`.yamllint.yaml`), `actionlint`, `markdownlint-cli2` (`.markdownlint.yaml`),
-`typos` (`.typos.toml`) — all installed in `dev/Containerfile` so the local
-shell reproduces every CI gate.
+`typos` (`.typos.toml`) — all in the flake's devShell so the local shell
+reproduces every CI gate.
 
-The dev shell pre-stages the envtest asset bundle (kube-apiserver + etcd) and
-exports `KUBEBUILDER_ASSETS`, so the envtest-backed packages run inside `ilo`
-without any network access. Run a single fuzz target's seed-plus-campaign
-locally with:
+The devShell exports `KUBEBUILDER_ASSETS` from a nixpkgs-assembled bundle
+(kube-apiserver + etcd), so the envtest-backed packages run offline with nothing
+to download. Run a single fuzz target's seed-plus-campaign locally with:
 
 ```shell
-ilo bash -c 'go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/'
+nix develop --command go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/
 ```
 
 ## Architecture
@@ -216,8 +215,8 @@ real apiserver.
 - **envtest integration tests** — packages whose `TestMain` boots a real
   kube-apiserver + etcd via `sigs.k8s.io/controller-runtime/pkg/envtest`
   (`internal/controller`, `internal/cli`, and the `internal/apply` diff suite).
-  These need `KUBEBUILDER_ASSETS` pointing at an asset bundle. The dev shell
-  pre-stages one in `dev/Containerfile`, so they run under `ilo`. When the
+  These need `KUBEBUILDER_ASSETS` pointing at an asset bundle. The devShell
+  exports one, so they run by default. When the
   variable is **absent**, the package skips cleanly rather than failing:
   `internal/apply`'s `TestMain` `os.Exit(0)`s and the controller/cli suites lazily
   `t.Skip` each test — so a bare `go test` on a host without assets still passes
@@ -265,8 +264,8 @@ real apiserver.
 - **actionlint is a failing gate** — the `github-actions` job runs
   `reviewdog/action-actionlint` with `fail_on_error: true` + `filter_mode: nofilter`,
   so findings block the merge across the whole tree, not just changed lines.
-  actionlint shells out to `shellcheck` to lint `run:` blocks, so the dev image
-  (`dev/Containerfile`) installs `shellcheck`; without it `actionlint` silently
+  actionlint shells out to `shellcheck` to lint `run:` blocks, so the devShell
+  carries `shellcheck`; without it `actionlint` silently
   skips shell linting and the local gate diverges from CI. shellcheck findings are
   fixed at the source (quote expansions, `find` over `ls`, grouped redirects), not
   suppressed. Kept identical across jaas / stageset-controller / helm-charts.
@@ -408,36 +407,27 @@ are **no** design/decision docs in the tree: that material was folded into the
 end-user docs (every StageSet YAML example is treated as a designed artifact —
 keep them beautiful).
 
-Build/preview locally with ilo argument files; `--no-rc` bypasses the Go-shell
-`.ilo.rc` that would otherwise clash:
+Build/preview locally with the flake's commands (declared in `flake.nix` from `scripts/<name>.sh`):
 
 ```shell
-ilo --no-rc @dev/website   # one-shot build into docs/public/
-ilo --no-rc @dev/serve     # live server on :1313
+nix develop --command website   # one-shot build into docs/public/
+nix develop --command serve     # live server on :1313
 ```
 
-`@dev/serve` is configured so the live server never shares state with the prod
-`@dev/website` build and so its pages work from any browser host:
+`serve` sets `HUGO_RESOURCEDIR=/tmp/hugo-resources-dev` and
+`HUGO_PUBLISHDIR=/tmp/hugo-public-dev` so the server's fingerprint/SRI asset cache
+and rendered output never touch `docs/resources/_gen` or `docs/public`, which the
+prod `website` build owns. Hugo keys an asset's SRI hash to the baseURL and caches
+it in `_gen`; the server's baseURL differs from production's, so a shared cache
+lets whichever ran second serve the other's prod-URL'd hashed CSS and the browser
+blocks it on an SRI mismatch. Isolated, a build and a serve session run
+concurrently without interfering.
 
-- `HUGO_RESOURCEDIR=/tmp/hugo-resources-dev` and `HUGO_PUBLISHDIR=/tmp/hugo-public-dev`
-  keep the server's fingerprint/SRI asset cache and its rendered output inside the
-  (ephemeral) container, so it never touches `docs/resources/_gen` or `docs/public`.
-  The prod build owns those. Sharing either across the two different base URLs
-  would let whichever ran second serve the other's prod-URL'd, hashed CSS —
-  breaking the page via cross-origin subresource-integrity blocks. Isolated, the
-  prod build and the live server can run at the same time without interfering.
-- `--baseURL / --appendPort=false` makes the server emit root-relative asset and
-  link URLs (`/css/…`, `/usage/…`). The container's `localhost` is usually not the
-  host the browser uses, so absolute `http://localhost:1313/…` asset URLs would be
-  cross-origin from the browser and the SRI `integrity` attributes would block the
-  CSS. Root-relative URLs resolve against whatever host loaded the page, so they
-  are always same-origin and SRI passes.
-
-Two website linters are pre-staged in the Go `dev/Containerfile` (alongside markdownlint), so they run in the default `ilo bash` shell — no `--no-rc`. Build the site first, then:
+Both website linters ride in the devShell. Build the site first, then:
 
 ```shell
-ilo bash -c 'htmltest'                          # rendered HTML: dead internal links, missing alt, broken anchors (.htmltest.yml)
-ilo bash -c 'cd docs/themes/metio && biome lint'   # theme CSS (run from theme dir, no path; biome v2 treats its biome.json as the project root and files.includes scopes the run)
+nix develop --command htmltest                          # rendered HTML: dead internal links, missing alt, broken anchors (.htmltest.yml)
+nix develop --command bash -c 'cd docs/themes/metio && biome lint'   # theme CSS (run from theme dir, no path; biome v2 treats its biome.json as the project root and files.includes scopes the run)
 ```
 
 `htmltest` reads `.htmltest.yml` (rooted at `docs/public`, external links off for a deterministic offline gate — flip `CheckExternal` to verify outbound URLs). The CSS lives in the theme submodule, so `biome` is configured by `biome.json` *in the theme repo* (it excludes the vendored `normalize.css` / `syntax.css`); fix CSS findings there, not in the submodule checkout.
@@ -465,8 +455,8 @@ so they can never drift from the runtime contract or the chart schema:
   `values.schema.json` (fetched from helm-charts' `main`).
 
 `hack/gen-docs-data.sh` regenerates both files (flaggen → `docs/data/flags.json`,
-schema fetch+flatten → `docs/data/helm-values.json`); run it in the ilo Go shell
-before building the site. Both outputs are **gitignored** — the published site is
+schema fetch+flatten → `docs/data/helm-values.json`); run it with
+`nix develop --command hack/gen-docs-data.sh` before building the site. Both outputs are **gitignored** — the published site is
 always generated from source. The shortcodes degrade to nothing when the data file
 is absent, so a bare `hugo` on a clean checkout never errors. `docs.yml` runs on a
 **daily** cron (so a chart change reaches the site with no cross-repo trigger) and
@@ -479,6 +469,6 @@ site.
 
 0BSD, REUSE-compliant. Every file carries an SPDX header (Go via `//`, YAML/shell
 via `#`, markdown via `<!-- -->`) or a `REUSE.toml` glob (which covers `docs/**`,
-`.gitmodules`, and the `dev/website` / `dev/serve` ilo argument files). The `reuse`
+`config/**`, `.gitmodules`). The `reuse`
 workflow enforces it. The `docs/themes/metio` submodule is a separate CC0 repo,
 outside this repo's REUSE scope.

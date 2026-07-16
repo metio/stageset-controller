@@ -13,11 +13,10 @@ docs/data/helm-values.json
 # Dev-shell caches written into the repo by the containerized toolchain.
 .cache/
 .config/
-.ilo.rc
 docs/.hugo_build.lock
 .vale/
 
-# htmltest writes a ref cache here when it runs (ilo bash -c "htmltest").
+# htmltest writes a ref cache here when it runs.
 tmp/.htmltest/
 .local/
 
