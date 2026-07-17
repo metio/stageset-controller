@@ -145,10 +145,21 @@ var (
 		Name: "stageset_stage_budget_frozen",
 		Help: "Whether a stage's own error-budget freeze is holding a new-revision entry (1) or not (0).",
 	}, []string{"namespace", "stageset", "stage"})
+
+	// LedgerAnchorErrorsTotal counts scope: Lifetime completions whose
+	// completionAnchor could not be read at gate time (RBAC gap, API error). Such
+	// a completion is retained (fail open) rather than invalidated — a runaway
+	// reading here would re-run a destructive bootstrap because of an outage — so
+	// a non-zero rate is a signal to grant the stage's SA read on the anchor kind,
+	// not an incident.
+	LedgerAnchorErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stageset_ledger_anchor_errors_total",
+		Help: "Total scope: Lifetime completions whose completionAnchor was unreadable at gate time (retained, fail open).",
+	}, []string{"namespace", "name"})
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, ActionRunsTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, ActionRunsTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen, LedgerAnchorErrorsTotal)
 }
 
 // SetStageBudgetFrozen publishes the per-stage error-budget freeze gauge.

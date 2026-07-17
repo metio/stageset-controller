@@ -665,24 +665,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if migPlan.baseline {
 				led.versioned = append(led.versioned, versionScopedActionNames(stage)...)
 			}
-			// Lifetime completions live in the StageLedger, not stage status: seed
-			// the gate set from there (never written back into led).
-			led.lifetimeDone = lifetimeDoneForStage(lifetimeLedger, stage.Name)
-			baseRecord := led.recordFn(scopeOf)
-			record := func(name string) error {
-				// Count executions by scope (pre/post only; onFailure names are
-				// absent from scopeOf and excluded). status carries the per-action
-				// view; the metric stays scope-labeled to bound cardinality.
-				if sc, ok := scopeOf[name]; ok {
-					metrics.ActionRunsTotal.WithLabelValues(ss.Namespace, ss.Name, string(sc)).Inc()
-				}
-				// A Lifetime completion is persisted to the StageLedger immediately
-				// (before the next action) rather than routed into stage status.
-				if scopeOf[name] == stagesv1.ScopeLifetime {
-					return r.recordLifetimeCompletion(ctx, lifetimeLedger, stage.Name, name)
-				}
-				return baseRecord(name)
-			}
+			// led.lifetimeDone and the record closure need the stage's effective-SA
+			// client (to read completionAnchor witnesses), so they are wired below,
+			// once rt is resolved.
 			// A Version-scoped action carried over at a NEW revision is being held
 			// off config churn — the feature working. Surface it once per revision
 			// (only when the revision actually changed), not every reconcile.
@@ -733,6 +718,46 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			rt, rerr := r.stageRuntime(ctx, &ss, effectiveServiceAccount(&ss, stage), fetcher, runtimes)
 			if rerr != nil {
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "connect to target cluster", rerr, stageStatuses, led)
+			}
+
+			// Gate scope: Lifetime actions on the StageLedger, honoring
+			// completionAnchor witnesses read under this stage's effective SA. An
+			// anchored completion whose witness is gone (absent or a fresh UID) is
+			// dropped so the action re-runs and re-records; an unreadable witness is
+			// retained (fail open) and surfaced. Lifetime completions live in the
+			// StageLedger, never in led (which stamps stage status).
+			gate := r.evaluateLifetimeGate(ctx, rt.target, lifetimeLedger, ss.Namespace, stage.Name)
+			led.lifetimeDone = gate.done
+			for _, name := range gate.unreadable {
+				metrics.LedgerAnchorErrorsTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
+				r.event(&ss, corev1.EventTypeWarning, eventReasonLedgerAnchorUnreadable,
+					fmt.Sprintf("stage %q action %q: completionAnchor unreadable; retaining the completion (grant the stage's ServiceAccount read on the anchor kind)", stage.Name, name))
+			}
+			if dropCompletions(lifetimeLedger, stage.Name, gate.invalidated) {
+				if uerr := r.Status().Update(ctx, lifetimeLedger); uerr != nil {
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "invalidate lifetime completion", uerr, stageStatuses, led)
+				}
+				for _, name := range gate.invalidated {
+					r.event(&ss, corev1.EventTypeNormal, eventReasonLedgerInvalidated,
+						fmt.Sprintf("stage %q action %q: completionAnchor witness is gone; the scope: Lifetime action will run again", stage.Name, name))
+				}
+			}
+
+			anchorOf := stageAnchors(stage)
+			baseRecord := led.recordFn(scopeOf)
+			record := func(name string) error {
+				// Count executions by scope (pre/post only; onFailure names are
+				// absent from scopeOf and excluded). status carries the per-action
+				// view; the metric stays scope-labeled to bound cardinality.
+				if sc, ok := scopeOf[name]; ok {
+					metrics.ActionRunsTotal.WithLabelValues(ss.Namespace, ss.Name, string(sc)).Inc()
+				}
+				// A Lifetime completion is persisted to the StageLedger immediately
+				// (before the next action), witnessing its completionAnchor if any.
+				if scopeOf[name] == stagesv1.ScopeLifetime {
+					return r.recordLifetimeCompletion(ctx, rt.target, lifetimeLedger, ss.Namespace, stage.Name, name, anchorOf[name])
+				}
+				return baseRecord(name)
 			}
 
 			// Migrations anchored to this stage run before its pre-actions, so

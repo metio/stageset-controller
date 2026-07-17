@@ -15,6 +15,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
@@ -74,22 +75,6 @@ func isLifetimeAction(ss *stagesv1.StageSet, stage, action string) bool {
 		}
 	}
 	return false
-}
-
-// lifetimeDoneForStage returns the Lifetime action names the ledger records
-// complete for one stage — the gate set for that stage.
-func lifetimeDoneForStage(ledger *stagesv1.StageLedger, stage string) []string {
-	if ledger == nil {
-		return nil
-	}
-	var out []string
-	for i := range ledger.Status.CompletedActions {
-		c := &ledger.Status.CompletedActions[i]
-		if c.Stage == stage {
-			out = append(out, c.Action)
-		}
-	}
-	return out
 }
 
 // loadLifetimeLedger returns the StageLedger for ss, creating an empty one when
@@ -199,7 +184,14 @@ func (r *StageSetReconciler) reconcileBaselineCondition(ss *stagesv1.StageSet, l
 // crash window between a destructive bootstrap's side effect and its record as
 // far as an anchor-less ledger allows. A persist failure is returned so the
 // action fails loudly rather than silently losing the record.
-func (r *StageSetReconciler) recordLifetimeCompletion(ctx context.Context, ledger *stagesv1.StageLedger, stage, action string) error {
+//
+// When the action declared a completionAnchor, the witness object is read
+// (through the stage's effective-SA client) and its UID recorded on the
+// completion. The anchor must exist at completion so its UID can be captured; an
+// absent or unreadable anchor fails the action — a UID-less anchored completion
+// could never be invalidated, so recording one would be worse than not recording
+// at all.
+func (r *StageSetReconciler) recordLifetimeCompletion(ctx context.Context, stageClient client.Client, ledger *stagesv1.StageLedger, ns, stage, action string, anchor *stagesv1.CompletionAnchor) error {
 	if ledger == nil {
 		// Unreachable: a Lifetime action implies specHasLifetimeActions, which
 		// materializes the ledger. Guard rather than nil-panic.
@@ -208,11 +200,24 @@ func (r *StageSetReconciler) recordLifetimeCompletion(ctx context.Context, ledge
 	if ledger.IsCompleted(stage, action) {
 		return nil
 	}
-	ledger.Status.CompletedActions = append(ledger.Status.CompletedActions, stagesv1.LedgerCompletion{
+	completion := stagesv1.LedgerCompletion{
 		Stage:       stage,
 		Action:      action,
 		Origin:      stagesv1.OriginExecuted,
 		CompletedAt: metav1.Time{Time: r.now()},
-	})
+	}
+	if anchor != nil {
+		obj, err := readAnchorObject(ctx, stageClient, ns, anchor.APIVersion, anchor.Kind, anchor.Name)
+		if err != nil {
+			return fmt.Errorf("completionAnchor %s %s/%s for action %q/%q could not be read at completion (it must exist so its UID can be recorded): %w", anchor.Kind, ns, anchor.Name, stage, action, err)
+		}
+		completion.Anchor = &stagesv1.AnchorWitness{
+			APIVersion: anchor.APIVersion,
+			Kind:       anchor.Kind,
+			Name:       anchor.Name,
+			UID:        string(obj.GetUID()),
+		}
+	}
+	ledger.Status.CompletedActions = append(ledger.Status.CompletedActions, completion)
 	return r.Status().Update(ctx, ledger)
 }
