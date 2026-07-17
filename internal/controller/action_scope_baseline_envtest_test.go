@@ -79,7 +79,7 @@ func TestActionScope_BaselineUnresolvable_HeldAndSurfaced(t *testing.T) {
 	// Baseline names an action that does not exist in the spec.
 	ledger := &stagesv1.StageLedger{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "typo"},
-		Spec:       stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "instal-databse"}}},
+		Spec:       stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "no-such-action"}}},
 	}
 	if err := c.Create(context.Background(), ledger); err != nil {
 		t.Fatalf("create ledger: %v", err)
@@ -90,7 +90,7 @@ func TestActionScope_BaselineUnresolvable_HeldAndSurfaced(t *testing.T) {
 	}
 
 	got := getLedger(t, c, ns, "typo")
-	if got.IsCompleted("app", "instal-databse") {
+	if got.IsCompleted("app", "no-such-action") {
 		t.Error("an unresolvable baseline entry must not be promoted into completedActions")
 	}
 	cond := baselineCondition(got)
