@@ -38,6 +38,10 @@ per-stage inventory.
   counts as done only when its objects are genuinely ready, not merely applied.
 - **[Typed actions](/defining-a-release/actions/)** — run a migration `Job`, an HTTP gate, a
   wait-for-condition, or a patch/delete before, after, or on failure of a stage.
+- **[Action scopes](/defining-a-release/actions/#scope-revision-version-or-lifetime)** —
+  run an action once per revision, once per application *version* (so config churn
+  stops re-running upgrade choreography), or once *ever* — a durable bootstrap,
+  recorded in a ledger that survives a delete-and-recreate.
 - **[Promotion gates](/gating/stage-promotion/)** — hold a stage behind a soak
   window, a manual approval, or a metric analysis before it advances.
 

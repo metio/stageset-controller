@@ -35,6 +35,14 @@ All counters and the readiness gauge are labelled by `namespace` and the StageSe
 | `stageset_drift_corrected_total` | Counter | `namespace`, `name`, `stage` | Objects whose out-of-band drift the apply corrected on a steady-state reconcile (same revision as last applied). |
 | `stageset_stage_ready` | Gauge | `namespace`, `stageset`, `stage` | Whether a stage is Ready (`1`) or not (`0`) at the current observed state. A metrics-gated progressive-delivery controller — Argo Rollouts' Prometheus metric provider, for example — can hold a rollout directly on this gauge. The series is deleted when a StageSet or one of its stages goes away, so a removed stage leaves no stale gauge. |
 
+### Stage actions
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `stageset_action_runs_total` | Counter | `namespace`, `name`, `scope` | Pre/post [actions](/defining-a-release/actions/) executed, by ledger [`scope`](/defining-a-release/actions/#scope-revision-version-or-lifetime) (`Revision`, `Version`, `Lifetime`). A `Version` rate well below the `Revision` rate is the signal that version scoping is holding upgrade choreography off config churn. |
+| `stageset_ledger_adoptions_total` | Counter | `namespace`, `name` | StageSets that adopted a non-empty `StageLedger` on their first reconcile — a delete+recreate, or a fresh StageSet over a retained ledger. A recorded completion may suppress an action that would otherwise run, so a surprise here is worth an alert. |
+| `stageset_ledger_anchor_errors_total` | Counter | `namespace`, `name` | `scope: Lifetime` completions whose [`completionAnchor`](/defining-a-release/actions/#tie-a-completion-to-a-witness-with-completionanchor) could not be read at gate time (missing RBAC, API error). The completion is retained (fail open); a non-zero rate means the stage's ServiceAccount needs read on the anchor kind. |
+
 ### Webhook
 
 | Metric | Type | Labels | Meaning |

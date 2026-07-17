@@ -30,7 +30,7 @@ than replace it; see [vs Argo Rollouts](/comparisons/argo-rollouts/).
 
 ## All comparisons
 
-- **[vs Helm](/comparisons/helm/)** — templating and release hooks vs ordered, gated delivery.
+- **[vs Helm](/comparisons/helm/)** — templating and install/upgrade hooks vs ordered, gated delivery with a durable action lifecycle: run an action once per revision, once per application version, or once ever.
 - **[vs Kustomize](/comparisons/kustomize/)** — overlay rendering vs continuous, staged apply.
 - **[vs Flux kustomize-controller](/comparisons/flux/)** — one-shot reconciliation vs sequenced stages with gates.
 - **[vs Tanka and kubecfg](/comparisons/tanka-kubecfg/)** — Jsonnet rendering vs delivery of the rendered result.
