@@ -1,0 +1,137 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: stageledgers.stages.metio.wtf
+spec:
+  group: stages.metio.wtf
+  names:
+    kind: StageLedger
+    listKind: StageLedgerList
+    plural: stageledgers
+    shortNames:
+    - sledger
+    singular: stageledger
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.completedActions[*].action
+      name: Completed
+      priority: 1
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          StageLedger is the durable, once-per-lifetime action ledger for the
+          same-named StageSet. It is deliberately NOT owner-referenced to the StageSet:
+          it survives the StageSet's deletion and is adopted by name on recreate, so a
+          bootstrap recorded here is not forgotten by a delete-and-reapply. It is the
+          durable kernel of a Helm release record without the rest of Helm's state.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              StageLedgerSpec is the user-authored half of a StageLedger: standing
+              assertions that an action already completed, committable to Git alongside the
+              StageSet. The controller promotes each resolvable entry into
+              status.completedActions with origin Baselined before evaluating any Lifetime
+              action.
+            properties:
+              baseline:
+                description: |-
+                  Baseline lists actions to treat as already completed without running them
+                  — adoption of a system whose bootstrap ran elsewhere. It is additive-only:
+                  removing an entry never revokes a recorded completion (spec understating
+                  status is the tolerable direction, and is visible in status). Forgetting a
+                  completion means editing status.completedActions directly.
+                items:
+                  description: LedgerRef names one stage's action.
+                  properties:
+                    action:
+                      description: Action is the action's name within that stage.
+                      type: string
+                    stage:
+                      description: Stage is the stage the action belongs to.
+                      type: string
+                  required:
+                  - action
+                  - stage
+                  type: object
+                type: array
+            type: object
+          status:
+            description: |-
+              StageLedgerStatus is the controller-owned record of once-per-lifetime action
+              completions. It is written under the controller's own identity and is never
+              rebuilt from cluster state — that is the whole reason it lives in a dedicated
+              object rather than in a StageSet's status or its StageInventory, which the
+              inventory self-heal reconstructs from live objects.
+            properties:
+              completedActions:
+                description: |-
+                  CompletedActions records every scope: Lifetime action that has completed
+                  (or been baselined) for this StageSet, so it never runs again.
+                items:
+                  description: |-
+                    LedgerCompletion records one lifetime-scoped action's completion. Identity is
+                    (stage, action); the digest is audit metadata only — republishing a job
+                    artifact must not resurrect a completed bootstrap.
+                  properties:
+                    action:
+                      description: Action name.
+                      type: string
+                    completedAt:
+                      description: CompletedAt is when the completion was recorded.
+                      format: date-time
+                      type: string
+                    digest:
+                      description: |-
+                        Digest is the action's resolved content at completion, recorded for audit.
+                        It is not part of identity.
+                      type: string
+                    origin:
+                      description: |-
+                        Origin is Executed (the controller ran it) or Baselined (asserted via
+                        spec.baseline without running).
+                      enum:
+                      - Executed
+                      - Baselined
+                      type: string
+                    stage:
+                      description: Stage the action belonged to.
+                      type: string
+                  required:
+                  - action
+                  - completedAt
+                  - origin
+                  - stage
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

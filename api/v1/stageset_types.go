@@ -621,6 +621,11 @@ const (
 	// re-crossing a version starts a new episode and does. Requires
 	// spec.version.
 	ScopeVersion ActionScope = "Version"
+	// ScopeLifetime runs the action at most once in the StageSet's lifetime,
+	// recorded durably in a StageLedger — install/bootstrap semantics. It
+	// survives revision and version changes and a force-reconcile; it is reset
+	// only by stagesetctl reset-ledger. Needs no spec.version.
+	ScopeLifetime ActionScope = "Lifetime"
 )
 
 // Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
@@ -644,7 +649,7 @@ type Action struct {
 	// rejected — making a defaulted value indistinguishable from an authored one
 	// there. EffectiveScope supplies the Revision default in code, at the pre/post
 	// sites where it is meaningful.
-	// +kubebuilder:validation:Enum=Revision;Version
+	// +kubebuilder:validation:Enum=Revision;Version;Lifetime
 	// +optional
 	Scope ActionScope `json:"scope,omitempty"`
 

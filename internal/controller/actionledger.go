@@ -22,17 +22,24 @@ type actionLedger struct {
 	executed  []string
 	version   string
 	versioned []string
+	// lifetimeDone holds this stage's scope: Lifetime action names already
+	// recorded complete in the StageLedger — gate-only, never written back here
+	// (Lifetime completions live in the StageLedger object, not stage status).
+	lifetimeDone []string
 }
 
 // doneSet is the union of both ledgers' action names — the set the executor
 // skips. A Version-scoped action in the version ledger and a Revision-scoped one
 // in the revision ledger are both already done for this stage.
 func (l actionLedger) doneSet() map[string]bool {
-	done := make(map[string]bool, len(l.executed)+len(l.versioned))
+	done := make(map[string]bool, len(l.executed)+len(l.versioned)+len(l.lifetimeDone))
 	for _, n := range l.executed {
 		done[n] = true
 	}
 	for _, n := range l.versioned {
+		done[n] = true
+	}
+	for _, n := range l.lifetimeDone {
 		done[n] = true
 	}
 	return done

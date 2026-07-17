@@ -33,6 +33,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		GroupVersion,
 		&StageSet{}, &StageSetList{},
 		&StageInventory{}, &StageInventoryList{},
+		&StageLedger{}, &StageLedgerList{},
 	)
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil

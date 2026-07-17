@@ -646,6 +646,7 @@ spec:
                             enum:
                             - Revision
                             - Version
+                            - Lifetime
                             type: string
                           timeout:
                             description: Timeout for the action.
@@ -1091,6 +1092,7 @@ spec:
                       enum:
                       - Revision
                       - Version
+                      - Lifetime
                       type: string
                     timeout:
                       description: Timeout for the action.
@@ -1484,6 +1486,7 @@ spec:
                                 enum:
                                 - Revision
                                 - Version
+                                - Lifetime
                                 type: string
                               timeout:
                                 description: Timeout for the action.
@@ -1855,6 +1858,7 @@ spec:
                                 enum:
                                 - Revision
                                 - Version
+                                - Lifetime
                                 type: string
                               timeout:
                                 description: Timeout for the action.
@@ -2226,6 +2230,7 @@ spec:
                                 enum:
                                 - Revision
                                 - Version
+                                - Lifetime
                                 type: string
                               timeout:
                                 description: Timeout for the action.

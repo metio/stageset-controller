@@ -565,6 +565,18 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return priorStages[name].LastHandledReconcileAt
 	}
 
+	// Load (or materialize) the once-per-lifetime ledger and reconcile its
+	// spec.baseline assertions into recorded completions, before the stage loop
+	// consults it to gate scope: Lifetime actions. nil when the spec has no
+	// Lifetime action and no ledger exists — the common case, no extra objects.
+	lifetimeLedger, llerr := r.loadLifetimeLedger(ctx, &ss)
+	if llerr != nil {
+		return ctrl.Result{}, llerr
+	}
+	if err := r.promoteBaseline(ctx, &ss, lifetimeLedger); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	previousMap, perr := recorder.StageRecords(ctx, ss.Name, ss.Namespace)
 	if perr != nil {
 		return ctrl.Result{}, perr
@@ -653,6 +665,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if migPlan.baseline {
 				led.versioned = append(led.versioned, versionScopedActionNames(stage)...)
 			}
+			// Lifetime completions live in the StageLedger, not stage status: seed
+			// the gate set from there (never written back into led).
+			led.lifetimeDone = lifetimeDoneForStage(lifetimeLedger, stage.Name)
 			baseRecord := led.recordFn(scopeOf)
 			record := func(name string) error {
 				// Count executions by scope (pre/post only; onFailure names are
@@ -660,6 +675,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				// view; the metric stays scope-labeled to bound cardinality.
 				if sc, ok := scopeOf[name]; ok {
 					metrics.ActionRunsTotal.WithLabelValues(ss.Namespace, ss.Name, string(sc)).Inc()
+				}
+				// A Lifetime completion is persisted to the StageLedger immediately
+				// (before the next action) rather than routed into stage status.
+				if scopeOf[name] == stagesv1.ScopeLifetime {
+					return r.recordLifetimeCompletion(ctx, lifetimeLedger, stage.Name, name)
 				}
 				return baseRecord(name)
 			}
@@ -2184,7 +2204,11 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			),
 		)).
 		Owns(&stagesv1.StageInventory{}).
-		Watches(&stagesv1.StageSet{}, handler.EnqueueRequestsFromMapFunc(r.mapStageSetDependents))
+		Watches(&stagesv1.StageSet{}, handler.EnqueueRequestsFromMapFunc(r.mapStageSetDependents)).
+		// A StageLedger is not owned (retain-always), so Owns won't wake its
+		// StageSet. Watch it by name so a spec.baseline applied after the
+		// StageSet last reconciled is promoted without waiting out the interval.
+		Watches(&stagesv1.StageLedger{}, handler.EnqueueRequestsFromMapFunc(mapSameName))
 
 	// Gate the ExternalArtifact watch on the kind being installed so the
 	// controller boots cleanly in clusters without source-controller.
@@ -2233,6 +2257,12 @@ func (r *StageSetReconciler) mapExternalArtifact(ctx context.Context, obj client
 
 // mapStageSetDependents maps a StageSet change to the StageSets that dependOn
 // it, so a dependency becoming Ready wakes its dependents immediately.
+// mapSameName enqueues the StageSet sharing an object's namespace and name — the
+// StageLedger↔StageSet identity is (namespace, name).
+func mapSameName(_ context.Context, obj client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}}}
+}
+
 func (r *StageSetReconciler) mapStageSetDependents(ctx context.Context, obj client.Object) []reconcile.Request {
 	dep, ok := obj.(*stagesv1.StageSet)
 	if !ok {

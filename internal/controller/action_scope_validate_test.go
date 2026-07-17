@@ -79,10 +79,39 @@ func TestValidateSpec_ActionScope(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "pre Lifetime needs no version",
+			ss: scopeSpec("", stagesv1.Stage{
+				Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"},
+				Actions: &stagesv1.StageActions{Pre: []stagesv1.Action{httpAction("bootstrap", stagesv1.ScopeLifetime)}},
+			}),
+		},
+		{
+			name: "post Lifetime on a versioned StageSet is accepted",
+			ss: scopeSpec("1.0.0", stagesv1.Stage{
+				Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"},
+				Actions: &stagesv1.StageActions{Post: []stagesv1.Action{httpAction("install-database", stagesv1.ScopeLifetime)}},
+			}),
+		},
+		{
+			name: "Lifetime on an onFailure action is rejected",
+			ss: scopeSpec("1.0.0", stagesv1.Stage{
+				Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"},
+				Actions: &stagesv1.StageActions{OnFailure: []stagesv1.Action{httpAction("cleanup", stagesv1.ScopeLifetime)}},
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Lifetime on an onRollback action is rejected",
+			ss: scopeSpec("1.0.0",
+				stagesv1.Stage{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"}},
+				httpAction("revert", stagesv1.ScopeLifetime)),
+			wantErr: true,
+		},
+		{
 			name: "unknown scope value is rejected",
 			ss: scopeSpec("1.0.0", stagesv1.Stage{
 				Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"},
-				Actions: &stagesv1.StageActions{Pre: []stagesv1.Action{httpAction("x", "Lifetime")}},
+				Actions: &stagesv1.StageActions{Pre: []stagesv1.Action{httpAction("x", "Bogus")}},
 			}),
 			wantErr: true,
 		},

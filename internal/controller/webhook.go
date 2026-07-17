@@ -514,14 +514,15 @@ func validateMigrations(ss *stagesv1.StageSet) error {
 // validateActionScope enforces where a per-action scope may appear and that a
 // Version scope has a version to key on. scope is meaningful only on a stage's
 // pre/post actions: onFailure is ledger-exempt (it runs on every failure), so a
-// scope there keys nothing. Unknown values are rejected for the
-// reconciler-fallback path — the CRD enum blocks them at admission, but a
-// bypassed webhook must still fail loudly rather than default them silently.
+// scope there keys nothing. Lifetime keys off a StageLedger rather than the
+// resolved version, so it is version-independent. Unknown values are rejected
+// for the reconciler-fallback path — the CRD enum blocks them at admission, but
+// a bypassed webhook must still fail loudly rather than default them silently.
 func validateActionScope(stage, phase string, a *stagesv1.Action, versioned bool) error {
 	switch a.Scope {
-	case "", stagesv1.ScopeRevision, stagesv1.ScopeVersion:
+	case "", stagesv1.ScopeRevision, stagesv1.ScopeVersion, stagesv1.ScopeLifetime:
 	default:
-		return fmt.Errorf("stage %q action %q (%s): unknown scope %q; must be Revision or Version", stage, a.Name, phase, a.Scope)
+		return fmt.Errorf("stage %q action %q (%s): unknown scope %q; must be Revision, Version, or Lifetime", stage, a.Name, phase, a.Scope)
 	}
 	if a.Scope != "" && phase == "onFailure" {
 		return fmt.Errorf("stage %q onFailure action %q sets scope; scope is valid only on pre/post actions, and onFailure is ledger-exempt", stage, a.Name)
