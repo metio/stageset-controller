@@ -241,7 +241,7 @@ actions:
 The action ledger gates each step per pinned revision, so a retry or controller
 restart never re-applies or re-deletes the resource for the same snapshot.
 
-## Scope: run per revision or per version
+## Scope: revision, version, or lifetime
 
 By default a pre/post action runs once per pinned **revision** — so any change
 that produces a new artifact revision, including a ConfigMap-only edit, re-runs
@@ -297,6 +297,106 @@ To run a `job` action only when the deployed version crosses a release boundary
 (with dependency ordering and once-per-transition semantics), see
 [versioned migrations](/gating/versioned-migrations/); `scope: Version` is the
 lighter tool for recurring per-release choreography that has no boundary to name.
+
+### Run once ever (`scope: Lifetime`)
+
+Some actions must run exactly once for a system and never again — install a
+database, create a schema, seed initial data. Neither `Revision` nor `Version`
+expresses that: both re-run when their key changes, and both live in the
+StageSet's own status, which a delete-and-recreate forgets. `scope: Lifetime`
+records its completion in a separate **`StageLedger`** that is *not* tied to the
+StageSet's lifetime, so the bootstrap is remembered across a delete and recreate.
+
+```yaml
+stages:
+  - name: app
+    sourceRef: { name: moodle-app }
+    actions:
+      post:
+        - name: install-database
+          scope: Lifetime
+          job: { sourceRef: { name: moodle-job-install } }
+```
+
+The controller creates one `StageLedger` per StageSet, named after it, the first
+time a `Lifetime` action completes. It carries no owner reference, so it survives
+the StageSet's deletion. Inspect it directly:
+
+```shell
+kubectl get stageledger moodle -o yaml
+```
+
+Because the ledger outlives the StageSet, recreating a StageSet over a retained
+ledger does *not* re-run the bootstrap — the controller emits a `LedgerAdopted`
+event to say so. If that retained completion is wrong (the underlying state was
+in fact wiped), forget it so the action runs again:
+
+```shell
+stagesetctl reset-ledger moodle --stage app --action install-database
+```
+
+If a `Lifetime` action keeps failing, the stage stops auto-retrying and reports
+`Ready=False` with reason `ActionDirty` — a destructive bootstrap must not be
+re-attempted against an uncertain state. Fix the cause, then clear the halt with
+a manual reconcile (see the [ActionDirty runbook](/runbooks/actiondirty/)).
+
+#### Tie a completion to a witness with `completionAnchor`
+
+By default a `Lifetime` completion is retained unconditionally — correct when the
+effect lives *outside* the cluster (an external database schema, an S3 bucket).
+When the effect lives in an object the StageSet manages, name it as a
+`completionAnchor` so the completion is valid only while that object exists with
+the same identity:
+
+```yaml
+post:
+  - name: install-database
+    scope: Lifetime
+    completionAnchor:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: moodle-db
+    job: { sourceRef: { name: moodle-job-install } }
+```
+
+The controller records the anchor object's `UID` at completion. A witness that is
+gone — deleted, or recreated under the same name (a fresh, empty object has a new
+`UID`) — invalidates the completion, and the bootstrap runs again against the
+empty state. So pruning the bundled database PVC re-runs `install-database` with
+no extra wiring. A witness that cannot be *read* (missing RBAC) is retained,
+never invalidated — an outage must not re-run a destructive bootstrap; grant the
+stage's ServiceAccount read on the anchor kind to clear the
+`LedgerAnchorUnreadable` warning.
+
+The anchor must exist when the action completes, so its `UID` can be recorded.
+An anchor the stage itself applies therefore belongs on a **`post`** action:
+`pre` actions run before the apply, when a stage-managed anchor does not yet
+exist.
+
+#### Adopt a system whose bootstrap already ran
+
+To migrate an already-running system into a StageSet without re-running its
+bootstrap, assert the action as already complete:
+
+```shell
+stagesetctl baseline moodle --stage app --action install-database
+```
+
+This adds the action to the ledger's `spec.baseline`, which the controller
+promotes to a recorded completion (marked `Baselined`, distinct from an action it
+`Executed` itself). `spec.baseline` is a committable, GitOps-friendly assertion —
+apply the ledger before or alongside the StageSet and adoption is race-free. It
+is additive only: removing an entry never revokes a completion; `reset-ledger`
+does that.
+
+Completions the controller `Executed` live only in the cluster, not in Git, so a
+cluster rebuilt from Git would re-run them. Export the current completions as a
+committable baseline as part of a disaster-recovery routine (the same command
+also serves to rename a ledger):
+
+```shell
+stagesetctl baseline moodle --export > moodle-ledger.yaml
+```
 
 ## Post-rollback cleanup (`onRollback`)
 

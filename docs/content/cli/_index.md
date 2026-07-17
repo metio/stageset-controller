@@ -43,6 +43,8 @@ After that, `kubectl stageset <command>` works.
 | [`apply`](/cli/apply/) | Server-side-apply a StageSet's rendered manifests directly. |
 | [`reconcile`](/cli/reconcile/) | Force an out-of-band reconcile. |
 | [`lint-migrations`](/cli/lint-migrations/) | Validate a migration ladder before publishing it to a source. |
+| [`baseline`](/cli/baseline/) | Assert a once-per-lifetime action already completed, or export a ledger's completions. |
+| [`reset-ledger`](/cli/reset-ledger/) | Forget a StageLedger completion so its once-per-lifetime action runs again. |
 
 ## Global flags
 

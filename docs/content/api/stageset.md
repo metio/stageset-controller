@@ -342,10 +342,11 @@ has a `name`, optional `timeout`/`retries`, an optional `scope` (pre/post only),
 and **exactly one** operation block.
 
 `scope` selects how often a pre/post action runs: `Revision` (default) once per
-pinned artifact revision, or `Version` once per resolved `spec.version` episode
-— so revision churn at a fixed version stops re-running upgrade choreography.
-`Version` requires `spec.version`. See
-[action scope](/defining-a-release/actions/#scope-run-per-revision-or-per-version).
+pinned artifact revision, `Version` once per resolved `spec.version` episode — so
+revision churn at a fixed version stops re-running upgrade choreography — or
+`Lifetime` once ever, for a durable bootstrap. `Version` requires `spec.version`;
+`Lifetime` records its completion in a `StageLedger`. See
+[action scope](/defining-a-release/actions/#scope-revision-version-or-lifetime).
 
 ```yaml
       actions:
