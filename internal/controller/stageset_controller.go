@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/actionplan"
 	"github.com/metio/stageset-controller/internal/actions"
 	"github.com/metio/stageset-controller/internal/apply"
 	"github.com/metio/stageset-controller/internal/artifact"
@@ -656,7 +657,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// resolved version changes — the per-stage episode rekey. Both carry
 			// forward from prior status when their key still matches. record routes
 			// each completed action into the ledger its scope selects.
-			scopeOf := stageActionScopes(stage)
+			scopeOf := actionplan.ActionScopes(stage)
 			led := actionLedger{revision: ra.Revision}
 			if migPlan.versionSet {
 				led.version = migPlan.desired
@@ -740,18 +741,18 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// dropped so the action re-runs and re-records; an unreadable witness is
 			// retained (fail open) and surfaced. Lifetime completions live in the
 			// StageLedger, never in led (which stamps stage status).
-			gate := r.evaluateLifetimeGate(ctx, rt.target, lifetimeLedger, ss.Namespace, stage.Name)
-			led.lifetimeDone = gate.done
-			for _, name := range gate.unreadable {
+			gate := actionplan.EvaluateLifetimeGate(ctx, rt.target, lifetimeLedger, ss.Namespace, stage.Name)
+			led.lifetimeDone = gate.Done
+			for _, name := range gate.Unreadable {
 				metrics.LedgerAnchorErrorsTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
 				r.event(&ss, corev1.EventTypeWarning, eventReasonLedgerAnchorUnreadable,
 					fmt.Sprintf("stage %q action %q: completionAnchor unreadable; retaining the completion (grant the stage's ServiceAccount read on the anchor kind)", stage.Name, name))
 			}
-			if dropCompletions(lifetimeLedger, stage.Name, gate.invalidated) {
+			if dropCompletions(lifetimeLedger, stage.Name, gate.Invalidated) {
 				if uerr := r.Status().Update(ctx, lifetimeLedger); uerr != nil {
 					return r.failStage(ctx, patchHelper, &ss, stage.Name, "invalidate lifetime completion", uerr, stageStatuses, led)
 				}
-				for _, name := range gate.invalidated {
+				for _, name := range gate.Invalidated {
 					r.event(&ss, corev1.EventTypeNormal, eventReasonLedgerInvalidated,
 						fmt.Sprintf("stage %q action %q: completionAnchor witness is gone; the scope: Lifetime action will run again", stage.Name, name))
 				}
@@ -1567,8 +1568,8 @@ func stageHasPendingLifetime(stage *stagesv1.Stage, done []string) bool {
 // auto-retrying against an uncertain state); every other action failure keeps
 // the ordinary retrying op. It increments the persisted failure counter as a
 // side effect, mirroring the migration-dirty path.
-func (r *StageSetReconciler) actionFailureOp(ss *stagesv1.StageSet, stage *stagesv1.Stage, gate lifetimeGate, phase string) string {
-	if !stageHasPendingLifetime(stage, gate.done) {
+func (r *StageSetReconciler) actionFailureOp(ss *stagesv1.StageSet, stage *stagesv1.Stage, gate actionplan.LifetimeGate, phase string) string {
+	if !stageHasPendingLifetime(stage, gate.Done) {
 		return phase
 	}
 	ss.Status.ActionFailureCount++

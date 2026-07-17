@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/actionplan"
 )
 
 // errNoLifetimeLedger guards the unreachable nil-ledger path in
@@ -207,7 +208,7 @@ func (r *StageSetReconciler) recordLifetimeCompletion(ctx context.Context, stage
 		CompletedAt: metav1.Time{Time: r.now()},
 	}
 	if anchor != nil {
-		obj, err := readAnchorObject(ctx, stageClient, ns, anchor.APIVersion, anchor.Kind, anchor.Name)
+		obj, err := actionplan.ReadAnchorObject(ctx, stageClient, ns, anchor.APIVersion, anchor.Kind, anchor.Name)
 		if err != nil {
 			return fmt.Errorf("completionAnchor %s %s/%s for action %q/%q could not be read at completion (it must exist so its UID can be recorded): %w", anchor.Kind, ns, anchor.Name, stage, action, err)
 		}

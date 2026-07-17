@@ -3,18 +3,11 @@
 
 package controller
 
-import (
-	"context"
-	"fmt"
+import stagesv1 "github.com/metio/stageset-controller/api/v1"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	stagesv1 "github.com/metio/stageset-controller/api/v1"
-)
+// The pure anchor/scope decision predicates live in internal/actionplan, shared
+// with the read-only CLI previews. This file keeps only the reconciler's
+// write-path helpers, which mutate ledger state and so are not part of a preview.
 
 const (
 	// eventReasonLedgerInvalidated marks a scope: Lifetime completion dropped
@@ -32,112 +25,6 @@ const (
 	// run.
 	eventReasonLedgerAdopted = "LedgerAdopted"
 )
-
-// anchorState classifies a completionAnchor witness read at gate time.
-type anchorState int
-
-const (
-	// anchorOK: the completion holds — no anchor, or the witness exists with the
-	// recorded UID, or (fail open) the witness could not be read.
-	anchorOK anchorState = iota
-	// anchorGone: the witness is confirmed absent or its UID changed — the
-	// recorded effect no longer exists, so the action runs again.
-	anchorGone
-	// anchorUnreadable: the witness read failed for a reason other than NotFound.
-	// Gated as retained, but surfaced so an operator can grant the missing read.
-	anchorUnreadable
-)
-
-// classifyAnchor is the pure verdict for one completion given the result of
-// reading its witness. It is side-effect free — a future `plan` preview reuses
-// it — and encodes the fail-open rule: only a confirmed-absent or UID-changed
-// witness re-runs the action; an unreadable one retains it.
-func classifyAnchor(c *stagesv1.LedgerCompletion, obj *unstructured.Unstructured, readErr error) anchorState {
-	if c.Anchor == nil {
-		return anchorOK // unanchored: external effect, retained unconditionally
-	}
-	if readErr != nil {
-		if apierrors.IsNotFound(readErr) {
-			return anchorGone // confirmed absent
-		}
-		return anchorUnreadable // fail open: an outage must not re-run a bootstrap
-	}
-	if string(obj.GetUID()) != c.Anchor.UID {
-		return anchorGone // same name, fresh object — the recorded effect is gone
-	}
-	return anchorOK
-}
-
-// anchorGVK parses a completionAnchor's apiVersion+kind.
-func anchorGVK(apiVersion, kind string) (schema.GroupVersionKind, error) {
-	gv, err := schema.ParseGroupVersion(apiVersion)
-	if err != nil {
-		return schema.GroupVersionKind{}, fmt.Errorf("parse anchor apiVersion %q: %w", apiVersion, err)
-	}
-	return gv.WithKind(kind), nil
-}
-
-// readAnchorObject reads a witness object by (apiVersion, kind, name) in ns
-// through the stage's effective-SA client.
-func readAnchorObject(ctx context.Context, stageClient client.Client, ns, apiVersion, kind, name string) (*unstructured.Unstructured, error) {
-	gvk, err := anchorGVK(apiVersion, kind)
-	if err != nil {
-		return nil, err
-	}
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(gvk)
-	if err := stageClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, obj); err != nil {
-		return nil, err
-	}
-	return obj, nil
-}
-
-// lifetimeGate is the outcome of evaluating a stage's recorded lifetime
-// completions against their witnesses.
-type lifetimeGate struct {
-	// done names the actions to treat as already complete (skip this reconcile).
-	done []string
-	// invalidated names the actions whose witness is gone; their completions must
-	// be dropped so the action re-runs and re-records.
-	invalidated []string
-	// unreadable names the actions whose witness read failed; retained (fail
-	// open) and surfaced.
-	unreadable []string
-}
-
-// evaluateLifetimeGate reads every recorded completion's witness for one stage
-// and classifies it. It performs cluster reads (through the stage's effective-SA
-// client) but mutates nothing: the caller applies the consequences (drop the
-// invalidated completions, emit events, bump the metric). Keeping the read
-// separate from the mutation is what lets the "would this run" decision be
-// reused by a preview that must not touch the cluster.
-func (r *StageSetReconciler) evaluateLifetimeGate(ctx context.Context, stageClient client.Client, ledger *stagesv1.StageLedger, ns, stage string) lifetimeGate {
-	var g lifetimeGate
-	if ledger == nil {
-		return g
-	}
-	for i := range ledger.Status.CompletedActions {
-		c := &ledger.Status.CompletedActions[i]
-		if c.Stage != stage {
-			continue
-		}
-		if c.Anchor == nil {
-			g.done = append(g.done, c.Action)
-			continue
-		}
-		obj, err := readAnchorObject(ctx, stageClient, ns, c.Anchor.APIVersion, c.Anchor.Kind, c.Anchor.Name)
-		switch classifyAnchor(c, obj, err) {
-		case anchorOK:
-			g.done = append(g.done, c.Action)
-		case anchorUnreadable:
-			g.done = append(g.done, c.Action) // fail open: retain
-			g.unreadable = append(g.unreadable, c.Action)
-		case anchorGone:
-			g.invalidated = append(g.invalidated, c.Action)
-		}
-	}
-	return g
-}
 
 // dropCompletions removes the named completions for a stage from the ledger's
 // status, so an invalidated anchored action records a fresh completion when it

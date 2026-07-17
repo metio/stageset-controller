@@ -70,23 +70,6 @@ func (l actionLedger) stamp(s stagesv1.StageStatus) stagesv1.StageStatus {
 	return s
 }
 
-// stageActionScopes maps each of a stage's pre+post action names to its
-// effective scope. onFailure actions are excluded — admission forbids scope
-// there, and they never enter the run ledger.
-func stageActionScopes(stage *stagesv1.Stage) map[string]stagesv1.ActionScope {
-	if stage.Actions == nil {
-		return nil
-	}
-	m := make(map[string]stagesv1.ActionScope, len(stage.Actions.Pre)+len(stage.Actions.Post))
-	for i := range stage.Actions.Pre {
-		m[stage.Actions.Pre[i].Name] = stage.Actions.Pre[i].EffectiveScope()
-	}
-	for i := range stage.Actions.Post {
-		m[stage.Actions.Post[i].Name] = stage.Actions.Post[i].EffectiveScope()
-	}
-	return m
-}
-
 // versionScopedActionNames lists a stage's pre+post action names scoped to
 // Version — the set the first-adoption baseline seeds as already-done.
 func versionScopedActionNames(stage *stagesv1.Stage) []string {

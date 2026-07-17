@@ -77,26 +77,6 @@ func TestActionLedger_StampWritesBothPairs(t *testing.T) {
 	}
 }
 
-func TestStageActionScopes_CoversPreAndPost(t *testing.T) {
-	stage := &stagesv1.Stage{Actions: &stagesv1.StageActions{
-		Pre:       []stagesv1.Action{{Name: "check"}, {Name: "upgrade", Scope: stagesv1.ScopeVersion}},
-		Post:      []stagesv1.Action{{Name: "notify", Scope: stagesv1.ScopeRevision}},
-		OnFailure: []stagesv1.Action{{Name: "cleanup"}}, // excluded — no scope there
-	}}
-	got := stageActionScopes(stage)
-	want := map[string]stagesv1.ActionScope{
-		"check":   stagesv1.ScopeRevision, // "" defaults to Revision
-		"upgrade": stagesv1.ScopeVersion,
-		"notify":  stagesv1.ScopeRevision,
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("scopes = %v, want %v", got, want)
-	}
-	if _, has := got["cleanup"]; has {
-		t.Error("onFailure action leaked into the scope map")
-	}
-}
-
 func TestVersionScopedActionNames(t *testing.T) {
 	stage := &stagesv1.Stage{Actions: &stagesv1.StageActions{
 		Pre:  []stagesv1.Action{{Name: "maint-on", Scope: stagesv1.ScopeVersion}, {Name: "check"}},
