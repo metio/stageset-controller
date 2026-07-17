@@ -98,6 +98,11 @@ pygmentsUseClasses = true
     name = "Generating migrations with Jsonnet"
     url = "/guides/jsonnet-migrations/"
     weight = 3
+  [[menu.main]]
+    parent = "guides"
+    name = "Best practices"
+    url = "/guides/best-practices/"
+    weight = 4
 
   # 3 ── Defining a release: the core StageSet spec.
   [[menu.main]]

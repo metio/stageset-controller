@@ -15,4 +15,6 @@ the feature pages under [Defining a release](/defining-a-release/) and
   behind Flagger or an Argo Rollouts metric gate.
 - **[Generating migrations with Jsonnet](/guides/jsonnet-migrations/)** — build a
   shared migration ladder.
+- **[Best practices](/guides/best-practices/)** — get the most out of StageSet, and
+  the anti-patterns that bite.
 </content>
