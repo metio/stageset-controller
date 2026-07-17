@@ -6,9 +6,13 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -18,6 +22,13 @@ import (
 // errNoLifetimeLedger guards the unreachable nil-ledger path in
 // recordLifetimeCompletion; a Lifetime action always materializes its ledger.
 var errNoLifetimeLedger = errors.New("scope: Lifetime action has no StageLedger to record into")
+
+// eventBaselineInvalid is the Warning event reason emitted when a spec.baseline
+// entry does not resolve to a scope: Lifetime action. It fires on the
+// transition into the invalid state (and on a change of which entries are
+// unresolved), not every reconcile, so a persistent typo is loud once, not a
+// storm.
+const eventBaselineInvalid = "BaselineInvalid"
 
 // specHasLifetimeActions reports whether any stage carries a scope: Lifetime
 // pre/post action — the trigger to materialize a StageLedger.
@@ -119,9 +130,15 @@ func (r *StageSetReconciler) promoteBaseline(ctx context.Context, ss *stagesv1.S
 		return nil
 	}
 	changed := false
+	var unresolved []string
 	for _, ref := range ledger.Spec.Baseline {
 		if !isLifetimeAction(ss, ref.Stage, ref.Action) {
-			continue // unresolvable (yet): held, re-evaluated next reconcile
+			// Held, not dropped: an entry that resolves to no scope: Lifetime action
+			// is surfaced (below) and promoted automatically once a later spec change
+			// makes it resolvable. A StageSet may be applied after its ledger, so
+			// resolution is a reconcile-time concern, not an admission one.
+			unresolved = append(unresolved, ref.Stage+"/"+ref.Action)
+			continue
 		}
 		if ledger.IsCompleted(ref.Stage, ref.Action) {
 			continue // Executed (or already Baselined) outranks a fresh baseline
@@ -134,10 +151,47 @@ func (r *StageSetReconciler) promoteBaseline(ctx context.Context, ss *stagesv1.S
 		})
 		changed = true
 	}
+	if r.reconcileBaselineCondition(ss, ledger, unresolved) {
+		changed = true
+	}
 	if changed {
 		return r.Status().Update(ctx, ledger)
 	}
 	return nil
+}
+
+// reconcileBaselineCondition reflects the set of unresolvable spec.baseline
+// entries as the ledger's BaselineValid condition, emitting a Warning event on
+// the transition into (or a change within) the invalid state. It returns
+// whether the condition changed. It manages the condition only when there is
+// something to say — baseline entries present, or a stale condition to clear —
+// so a ledger with no baseline carries no condition noise.
+func (r *StageSetReconciler) reconcileBaselineCondition(ss *stagesv1.StageSet, ledger *stagesv1.StageLedger, unresolved []string) bool {
+	if len(ledger.Spec.Baseline) == 0 && apimeta.FindStatusCondition(ledger.Status.Conditions, stagesv1.LedgerConditionBaselineValid) == nil {
+		return false
+	}
+	cond := metav1.Condition{
+		Type:               stagesv1.LedgerConditionBaselineValid,
+		ObservedGeneration: ledger.Generation,
+		LastTransitionTime: metav1.Time{Time: r.now()},
+	}
+	if len(unresolved) == 0 {
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = "AllResolved"
+		cond.Message = "every spec.baseline entry resolves to a scope: Lifetime action"
+	} else {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "Unresolved"
+		cond.Message = fmt.Sprintf("spec.baseline entries that resolve to no scope: Lifetime action in StageSet %q: %s", ss.Name, strings.Join(unresolved, ", "))
+	}
+
+	prior := apimeta.FindStatusCondition(ledger.Status.Conditions, stagesv1.LedgerConditionBaselineValid)
+	transitioned := prior == nil || prior.Status != cond.Status || prior.Message != cond.Message
+	changed := apimeta.SetStatusCondition(&ledger.Status.Conditions, cond)
+	if transitioned && cond.Status == metav1.ConditionFalse && r.Recorder != nil {
+		r.Recorder.Eventf(ledger, nil, corev1.EventTypeWarning, eventBaselineInvalid, eventBaselineInvalid, "%s", cond.Message)
+	}
+	return changed
 }
 
 // recordLifetimeCompletion appends an Executed completion for (stage, action)

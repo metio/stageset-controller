@@ -32,6 +32,13 @@ type LedgerRef struct {
 	Action string `json:"action"`
 }
 
+// LedgerConditionBaselineValid is the StageLedger condition reporting whether
+// every spec.baseline entry resolves to a real scope: Lifetime action in the
+// same-named StageSet. Status False (reason Unresolved) means one or more
+// entries are held — not promoted — until a spec change resolves them. It is a
+// wire-stable condition type; downstream tooling may match on it.
+const LedgerConditionBaselineValid = "BaselineValid"
+
 // LedgerOrigin distinguishes an action the controller ran from one an operator
 // asserted was already done.
 type LedgerOrigin string
@@ -54,6 +61,17 @@ type StageLedgerStatus struct {
 	// (or been baselined) for this StageSet, so it never runs again.
 	// +optional
 	CompletedActions []LedgerCompletion `json:"completedActions,omitempty"`
+	// Conditions carries the ledger's own conditions. The BaselineValid condition
+	// reports whether every spec.baseline entry resolves to a real scope: Lifetime
+	// action in the same-named StageSet; an unresolvable entry is held (never
+	// promoted) and surfaced here rather than silently dropped, so a typo does not
+	// masquerade as a recorded completion.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +patchStrategy=merge
+	// +patchMergeKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // LedgerCompletion records one lifetime-scoped action's completion. Identity is
