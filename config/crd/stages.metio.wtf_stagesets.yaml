@@ -3521,6 +3521,15 @@ spec:
           status:
             description: StageSetStatus records the observed state of a StageSet.
             properties:
+              actionFailureCount:
+                description: |-
+                  ActionFailureCount counts consecutive failures of a stage whose action
+                  ladder still has a scope: Lifetime action to complete. Once it reaches the
+                  controller's threshold the stage goes ActionDirty (auto-retry halts) so a
+                  destructive bootstrap is not re-attempted against an uncertain state. Reset
+                  to zero on a successful reconcile or a manual reconcile request.
+                format: int32
+                type: integer
               budgetFreeze:
                 description: |-
                   BudgetFreeze is set while an error-budget freeze holds new-revision

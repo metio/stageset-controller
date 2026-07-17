@@ -108,6 +108,13 @@ const (
 	// or by the transition completing. Mirrors golang-migrate dirty / Flyway repair.
 	ReasonMigrationDirty = "MigrationDirty"
 
+	// ReasonActionDirty: a stage whose action ladder still has a scope: Lifetime
+	// action to complete has failed repeatedly, so the controller halts auto-retry
+	// rather than re-attempting a destructive bootstrap against an uncertain state.
+	// Sticky/terminal: cleared by a manual reconcile once the cause is fixed. The
+	// action analogue of MigrationDirty.
+	ReasonActionDirty = "ActionDirty"
+
 	// ReasonPreviousRevisionUnavailable: rollbackOnFailure could not restore
 	// the last-good revisions because a producer has garbage-collected one.
 	// Rollback is best-effort: it works only while producers retain.
@@ -191,6 +198,7 @@ var AllReasons = []string{
 	ReasonMigrationCoverageMissing,
 	ReasonMigrationFailed,
 	ReasonMigrationDirty,
+	ReasonActionDirty,
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,

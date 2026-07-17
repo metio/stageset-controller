@@ -319,6 +319,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// MigrationDirty halt so a fixed migration is re-attempted once.
 	if req := ss.Annotations[fluxmeta.ReconcileRequestAnnotation]; req != "" && req != ss.Status.GetLastHandledReconcileRequest() {
 		ss.Status.MigrationFailureCount = 0
+		ss.Status.ActionFailureCount = 0
 	}
 	ss.Status.SetLastHandledReconcileRequest(ss.Annotations[fluxmeta.ReconcileRequestAnnotation])
 
@@ -778,7 +779,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// (nothing has been applied), so no onFailure runs.
 			if stage.Actions != nil {
 				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Pre, led.doneSet(), record); err != nil {
-					return r.failStage(ctx, patchHelper, &ss, stage.Name, "pre-action", err, stageStatuses, led)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, r.actionFailureOp(&ss, stage, gate, "pre-action"), err, stageStatuses, led)
 				}
 			}
 
@@ -910,7 +911,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if stage.Actions != nil {
 				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Post, led.doneSet(), record); err != nil {
 					r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
-					return r.failStage(ctx, patchHelper, &ss, stage.Name, "post-action", err, stageStatuses, led)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, r.actionFailureOp(&ss, stage, gate, "post-action"), err, stageStatuses, led)
 				}
 			}
 
@@ -1263,6 +1264,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if ss.Spec.RollbackOnFailure {
 		ss.Status.LastAppliedSnapshot = snapshotStages(&ss, resolved, subDigests)
 	}
+	// A reconcile that applied and verified every stage clears the action-failure
+	// counter: whatever was retrying (including a scope: Lifetime bootstrap) has
+	// succeeded, so a future failure starts its escalation from zero.
+	ss.Status.ActionFailureCount = 0
 	syncedMsg := fmt.Sprintf("Applied and verified %d stage(s)", len(ss.Spec.Stages))
 	prevReady := readyConditionSnapshot(&ss)
 	r.setReady(&ss, metav1.ConditionTrue, ReasonReady, syncedMsg)
@@ -1492,6 +1497,14 @@ const (
 	// migration-specific Ready reasons.
 	opMigration      = "migration"
 	opMigrationDirty = "migration halted (dirty)"
+	// maxActionFailures is the consecutive-failure count at which a stage carrying
+	// an incomplete scope: Lifetime action escalates from retrying to a halted
+	// ActionDirty state, so a destructive bootstrap stops auto-retrying against an
+	// uncertain state.
+	maxActionFailures = 5
+	// opActionDirty is the failStage op string that selects the ActionDirty Ready
+	// reason.
+	opActionDirty = "action halted (dirty)"
 )
 
 // failReason maps a stage operation and its error to a Ready-condition reason and
@@ -1508,9 +1521,48 @@ func failReason(op string, cause error) (reason string, terminal bool) {
 		return ReasonMigrationFailed, false
 	case op == opMigrationDirty:
 		return ReasonMigrationDirty, true
+	case op == opActionDirty:
+		return ReasonActionDirty, true
 	default:
 		return ReasonStageFailed, false
 	}
+}
+
+// stageHasPendingLifetime reports whether the stage declares a scope: Lifetime
+// action that is not in the already-complete set (done) — an incomplete
+// bootstrap. done is the gate's done list for this stage.
+func stageHasPendingLifetime(stage *stagesv1.Stage, done []string) bool {
+	names := stageLifetimeActionNames(stage)
+	if len(names) == 0 {
+		return false
+	}
+	doneSet := make(map[string]bool, len(done))
+	for _, d := range done {
+		doneSet[d] = true
+	}
+	for _, n := range names {
+		if !doneSet[n] {
+			return true
+		}
+	}
+	return false
+}
+
+// actionFailureOp selects the failStage op for a pre/post action failure. A
+// stage with an incomplete scope: Lifetime action escalates to a halted
+// ActionDirty state once failures recur (so a destructive bootstrap stops
+// auto-retrying against an uncertain state); every other action failure keeps
+// the ordinary retrying op. It increments the persisted failure counter as a
+// side effect, mirroring the migration-dirty path.
+func (r *StageSetReconciler) actionFailureOp(ss *stagesv1.StageSet, stage *stagesv1.Stage, gate lifetimeGate, phase string) string {
+	if !stageHasPendingLifetime(stage, gate.done) {
+		return phase
+	}
+	ss.Status.ActionFailureCount++
+	if ss.Status.ActionFailureCount >= maxActionFailures {
+		return opActionDirty
+	}
+	return phase
 }
 
 func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, led actionLedger) (ctrl.Result, error) {

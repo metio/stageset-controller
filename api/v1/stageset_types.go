@@ -1247,6 +1247,14 @@ type StageSetStatus struct {
 	// +optional
 	MigrationFailureCount int32 `json:"migrationFailureCount,omitempty"`
 
+	// ActionFailureCount counts consecutive failures of a stage whose action
+	// ladder still has a scope: Lifetime action to complete. Once it reaches the
+	// controller's threshold the stage goes ActionDirty (auto-retry halts) so a
+	// destructive bootstrap is not re-attempted against an uncertain state. Reset
+	// to zero on a successful reconcile or a manual reconcile request.
+	// +optional
+	ActionFailureCount int32 `json:"actionFailureCount,omitempty"`
+
 	// LastAppliedSnapshot records, per stage, the artifact coordinates of the
 	// last fully-successful run. rollbackOnFailure re-fetches these
 	// revisions and re-renders them under the current spec — a pointer to the
