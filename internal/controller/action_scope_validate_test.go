@@ -28,6 +28,14 @@ func httpAction(name string, scope stagesv1.ActionScope) stagesv1.Action {
 	return stagesv1.Action{Name: name, Scope: scope, HTTP: &stagesv1.HTTPAction{URL: "http://x/y"}}
 }
 
+var sampleAnchor = &stagesv1.CompletionAnchor{APIVersion: "v1", Kind: "PersistentVolumeClaim", Name: "db"}
+
+func anchoredAction(name string, scope stagesv1.ActionScope, anchor *stagesv1.CompletionAnchor) stagesv1.Action {
+	a := httpAction(name, scope)
+	a.CompletionAnchor = anchor
+	return a
+}
+
 func TestValidateSpec_ActionScope(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -115,6 +123,36 @@ func TestValidateSpec_ActionScope(t *testing.T) {
 			}),
 			wantErr: true,
 		},
+		{
+			name: "completionAnchor with scope: Lifetime is accepted",
+			ss: scopeSpec("1.0.0", stagesv1.Stage{
+				Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"},
+				Actions: &stagesv1.StageActions{Post: []stagesv1.Action{anchoredAction("boot", stagesv1.ScopeLifetime, sampleAnchor)}},
+			}),
+		},
+		{
+			name: "completionAnchor without scope: Lifetime is rejected",
+			ss: scopeSpec("1.0.0", stagesv1.Stage{
+				Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"},
+				Actions: &stagesv1.StageActions{Post: []stagesv1.Action{anchoredAction("boot", stagesv1.ScopeRevision, sampleAnchor)}},
+			}),
+			wantErr: true,
+		},
+		{
+			name: "completionAnchor missing name is rejected",
+			ss: scopeSpec("1.0.0", stagesv1.Stage{
+				Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"},
+				Actions: &stagesv1.StageActions{Post: []stagesv1.Action{anchoredAction("boot", stagesv1.ScopeLifetime, &stagesv1.CompletionAnchor{APIVersion: "v1", Kind: "PersistentVolumeClaim"})}},
+			}),
+			wantErr: true,
+		},
+		{
+			name: "completionAnchor on an onRollback action is rejected",
+			ss: scopeSpec("1.0.0",
+				stagesv1.Stage{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"}},
+				anchoredAction("revert", "", sampleAnchor)),
+			wantErr: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,5 +175,19 @@ func TestValidateSpec_ScopeOnMigrationActionRejected(t *testing.T) {
 	}}
 	if err := ValidateSpec(ss); err == nil {
 		t.Fatal("scope on a migration action must be rejected")
+	}
+}
+
+// completionAnchor is valid only on a scope: Lifetime pre/post action; a
+// migration action carries no lifetime ledger, so it is rejected there too.
+func TestValidateSpec_CompletionAnchorOnMigrationRejected(t *testing.T) {
+	ss := scopeSpec("2.0.0", stagesv1.Stage{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea"}})
+	ss.Spec.Migrations = []stagesv1.Migration{{
+		Name:    "m1",
+		To:      "2.0.0",
+		Actions: []stagesv1.Action{anchoredAction("anchored-in-migration", "", sampleAnchor)},
+	}}
+	if err := ValidateSpec(ss); err == nil {
+		t.Fatal("completionAnchor on a migration action must be rejected")
 	}
 }

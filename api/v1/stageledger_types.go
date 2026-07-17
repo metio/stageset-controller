@@ -93,9 +93,37 @@ type LedgerCompletion struct {
 	// It is not part of identity.
 	// +optional
 	Digest string `json:"digest,omitempty"`
+	// Anchor, present when the action declared a completionAnchor, records the
+	// witness object's identity — including its UID at completion time. The
+	// completion is valid only while that object still exists with this UID; a
+	// changed UID (a delete+recreate under the same name) invalidates it and the
+	// action runs again. Absent for an unanchored (external-effect) completion,
+	// which is retained unconditionally.
+	// +optional
+	Anchor *AnchorWitness `json:"anchor,omitempty"`
 	// CompletedAt is when the completion was recorded.
 	// +required
 	CompletedAt metav1.Time `json:"completedAt"`
+}
+
+// AnchorWitness records the identity of a completionAnchor object at the moment
+// an anchored scope: Lifetime action completed. The UID is the load-bearing
+// field: existence under the same name is insufficient, because a same-named
+// recreation is a fresh, empty object.
+type AnchorWitness struct {
+	// APIVersion of the witness object.
+	// +required
+	APIVersion string `json:"apiVersion"`
+	// Kind of the witness object.
+	// +required
+	Kind string `json:"kind"`
+	// Name of the witness object.
+	// +required
+	Name string `json:"name"`
+	// UID recorded at completion. A different UID under the same name invalidates
+	// the completion.
+	// +required
+	UID string `json:"uid"`
 }
 
 // +kubebuilder:object:root=true

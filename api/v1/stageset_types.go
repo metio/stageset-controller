@@ -690,11 +690,39 @@ type Action struct {
 	// (e.g. a maintenance-page pod), not as steady-state stage members.
 	// +optional
 	Apply *ApplyAction `json:"apply,omitempty"`
+
+	// CompletionAnchor, valid only on a scope: Lifetime action, names an
+	// in-cluster object whose existence witnesses the action's effect. With no
+	// anchor (the default) the effect is presumed external and the completion is
+	// retained across a StageSet delete+recreate. With an anchor, the completion
+	// is valid only while the named object exists with the UID recorded at
+	// completion — a delete+recreate under the same name is a fresh object (new
+	// UID) that re-runs the action against the empty state. The anchor must exist
+	// when the action completes so its UID can be recorded, so an anchor the stage
+	// itself applies belongs on a post action (pre runs before the apply).
+	// +optional
+	CompletionAnchor *CompletionAnchor `json:"completionAnchor,omitempty"`
+}
+
+// CompletionAnchor names an in-cluster object (in the StageSet's namespace) that
+// witnesses a scope: Lifetime action's effect. It is read under the stage's
+// effective ServiceAccount, never the controller's identity.
+type CompletionAnchor struct {
+	// APIVersion of the witness object, e.g. "v1" or "postgresql.cnpg.io/v1".
+	// +required
+	APIVersion string `json:"apiVersion"`
+	// Kind of the witness object, e.g. "PersistentVolumeClaim".
+	// +required
+	Kind string `json:"kind"`
+	// Name of the witness object in the StageSet's namespace.
+	// +required
+	Name string `json:"name"`
 }
 
 // EffectiveScope returns the action's scope, treating an empty value as
-// Revision. The CRD default populates Scope on any apiserver-persisted object,
-// but an object built in a test or an older stored spec may leave it empty.
+// Revision. Action is a shared type carrying no CRD default (a default would
+// stamp onFailure / onRollback / migration actions, where scope is rejected), so
+// a pre/post action authored without an explicit scope arrives here empty.
 func (a *Action) EffectiveScope() ActionScope {
 	if a.Scope == "" {
 		return ScopeRevision

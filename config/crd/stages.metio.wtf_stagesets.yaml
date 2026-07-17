@@ -379,6 +379,34 @@ spec:
                             required:
                             - sourceRef
                             type: object
+                          completionAnchor:
+                            description: |-
+                              CompletionAnchor, valid only on a scope: Lifetime action, names an
+                              in-cluster object whose existence witnesses the action's effect. With no
+                              anchor (the default) the effect is presumed external and the completion is
+                              retained across a StageSet delete+recreate. With an anchor, the completion
+                              is valid only while the named object exists with the UID recorded at
+                              completion — a delete+recreate under the same name is a fresh object (new
+                              UID) that re-runs the action against the empty state. The anchor must exist
+                              when the action completes so its UID can be recorded, so an anchor the stage
+                              itself applies belongs on a post action (pre runs before the apply).
+                            properties:
+                              apiVersion:
+                                description: APIVersion of the witness object, e.g.
+                                  "v1" or "postgresql.cnpg.io/v1".
+                                type: string
+                              kind:
+                                description: Kind of the witness object, e.g. "PersistentVolumeClaim".
+                                type: string
+                              name:
+                                description: Name of the witness object in the StageSet's
+                                  namespace.
+                                type: string
+                            required:
+                            - apiVersion
+                            - kind
+                            - name
+                            type: object
                           delete:
                             description: |-
                               Delete removes an existing in-cluster object — primarily for
@@ -832,6 +860,34 @@ spec:
                       required:
                       - sourceRef
                       type: object
+                    completionAnchor:
+                      description: |-
+                        CompletionAnchor, valid only on a scope: Lifetime action, names an
+                        in-cluster object whose existence witnesses the action's effect. With no
+                        anchor (the default) the effect is presumed external and the completion is
+                        retained across a StageSet delete+recreate. With an anchor, the completion
+                        is valid only while the named object exists with the UID recorded at
+                        completion — a delete+recreate under the same name is a fresh object (new
+                        UID) that re-runs the action against the empty state. The anchor must exist
+                        when the action completes so its UID can be recorded, so an anchor the stage
+                        itself applies belongs on a post action (pre runs before the apply).
+                      properties:
+                        apiVersion:
+                          description: APIVersion of the witness object, e.g. "v1"
+                            or "postgresql.cnpg.io/v1".
+                          type: string
+                        kind:
+                          description: Kind of the witness object, e.g. "PersistentVolumeClaim".
+                          type: string
+                        name:
+                          description: Name of the witness object in the StageSet's
+                            namespace.
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      - name
+                      type: object
                     delete:
                       description: |-
                         Delete removes an existing in-cluster object — primarily for
@@ -1216,6 +1272,35 @@ spec:
                                 required:
                                 - sourceRef
                                 type: object
+                              completionAnchor:
+                                description: |-
+                                  CompletionAnchor, valid only on a scope: Lifetime action, names an
+                                  in-cluster object whose existence witnesses the action's effect. With no
+                                  anchor (the default) the effect is presumed external and the completion is
+                                  retained across a StageSet delete+recreate. With an anchor, the completion
+                                  is valid only while the named object exists with the UID recorded at
+                                  completion — a delete+recreate under the same name is a fresh object (new
+                                  UID) that re-runs the action against the empty state. The anchor must exist
+                                  when the action completes so its UID can be recorded, so an anchor the stage
+                                  itself applies belongs on a post action (pre runs before the apply).
+                                properties:
+                                  apiVersion:
+                                    description: APIVersion of the witness object,
+                                      e.g. "v1" or "postgresql.cnpg.io/v1".
+                                    type: string
+                                  kind:
+                                    description: Kind of the witness object, e.g.
+                                      "PersistentVolumeClaim".
+                                    type: string
+                                  name:
+                                    description: Name of the witness object in the
+                                      StageSet's namespace.
+                                    type: string
+                                required:
+                                - apiVersion
+                                - kind
+                                - name
+                                type: object
                               delete:
                                 description: |-
                                   Delete removes an existing in-cluster object — primarily for
@@ -1588,6 +1673,35 @@ spec:
                                 required:
                                 - sourceRef
                                 type: object
+                              completionAnchor:
+                                description: |-
+                                  CompletionAnchor, valid only on a scope: Lifetime action, names an
+                                  in-cluster object whose existence witnesses the action's effect. With no
+                                  anchor (the default) the effect is presumed external and the completion is
+                                  retained across a StageSet delete+recreate. With an anchor, the completion
+                                  is valid only while the named object exists with the UID recorded at
+                                  completion — a delete+recreate under the same name is a fresh object (new
+                                  UID) that re-runs the action against the empty state. The anchor must exist
+                                  when the action completes so its UID can be recorded, so an anchor the stage
+                                  itself applies belongs on a post action (pre runs before the apply).
+                                properties:
+                                  apiVersion:
+                                    description: APIVersion of the witness object,
+                                      e.g. "v1" or "postgresql.cnpg.io/v1".
+                                    type: string
+                                  kind:
+                                    description: Kind of the witness object, e.g.
+                                      "PersistentVolumeClaim".
+                                    type: string
+                                  name:
+                                    description: Name of the witness object in the
+                                      StageSet's namespace.
+                                    type: string
+                                required:
+                                - apiVersion
+                                - kind
+                                - name
+                                type: object
                               delete:
                                 description: |-
                                   Delete removes an existing in-cluster object — primarily for
@@ -1959,6 +2073,35 @@ spec:
                                     type: boolean
                                 required:
                                 - sourceRef
+                                type: object
+                              completionAnchor:
+                                description: |-
+                                  CompletionAnchor, valid only on a scope: Lifetime action, names an
+                                  in-cluster object whose existence witnesses the action's effect. With no
+                                  anchor (the default) the effect is presumed external and the completion is
+                                  retained across a StageSet delete+recreate. With an anchor, the completion
+                                  is valid only while the named object exists with the UID recorded at
+                                  completion — a delete+recreate under the same name is a fresh object (new
+                                  UID) that re-runs the action against the empty state. The anchor must exist
+                                  when the action completes so its UID can be recorded, so an anchor the stage
+                                  itself applies belongs on a post action (pre runs before the apply).
+                                properties:
+                                  apiVersion:
+                                    description: APIVersion of the witness object,
+                                      e.g. "v1" or "postgresql.cnpg.io/v1".
+                                    type: string
+                                  kind:
+                                    description: Kind of the witness object, e.g.
+                                      "PersistentVolumeClaim".
+                                    type: string
+                                  name:
+                                    description: Name of the witness object in the
+                                      StageSet's namespace.
+                                    type: string
+                                required:
+                                - apiVersion
+                                - kind
+                                - name
                                 type: object
                               delete:
                                 description: |-

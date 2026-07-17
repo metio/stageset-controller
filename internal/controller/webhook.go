@@ -530,6 +530,14 @@ func validateActionScope(stage, phase string, a *stagesv1.Action, versioned bool
 	if a.Scope == stagesv1.ScopeVersion && !versioned {
 		return fmt.Errorf("stage %q action %q sets scope: Version but spec.version is unset; version-scoped actions require a version to key on", stage, a.Name)
 	}
+	if a.CompletionAnchor != nil {
+		if a.Scope != stagesv1.ScopeLifetime {
+			return fmt.Errorf("stage %q action %q (%s): completionAnchor is valid only on a scope: Lifetime action", stage, a.Name, phase)
+		}
+		if a.CompletionAnchor.APIVersion == "" || a.CompletionAnchor.Kind == "" || a.CompletionAnchor.Name == "" {
+			return fmt.Errorf("stage %q action %q (%s): completionAnchor requires apiVersion, kind, and name", stage, a.Name, phase)
+		}
+	}
 	return nil
 }
 
@@ -617,6 +625,9 @@ func ValidateStages(ss *stagesv1.StageSet) error {
 		rbSeen[a.Name] = true
 		if a.Scope != "" {
 			return fmt.Errorf("onRollback action %q sets scope; scope is valid only on a stage's pre/post actions, and onRollback is ledger-exempt", a.Name)
+		}
+		if a.CompletionAnchor != nil {
+			return fmt.Errorf("onRollback action %q sets completionAnchor; it is valid only on a scope: Lifetime pre/post action", a.Name)
 		}
 	}
 	return nil

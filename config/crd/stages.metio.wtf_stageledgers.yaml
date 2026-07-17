@@ -102,6 +102,35 @@ spec:
                     action:
                       description: Action name.
                       type: string
+                    anchor:
+                      description: |-
+                        Anchor, present when the action declared a completionAnchor, records the
+                        witness object's identity — including its UID at completion time. The
+                        completion is valid only while that object still exists with this UID; a
+                        changed UID (a delete+recreate under the same name) invalidates it and the
+                        action runs again. Absent for an unanchored (external-effect) completion,
+                        which is retained unconditionally.
+                      properties:
+                        apiVersion:
+                          description: APIVersion of the witness object.
+                          type: string
+                        kind:
+                          description: Kind of the witness object.
+                          type: string
+                        name:
+                          description: Name of the witness object.
+                          type: string
+                        uid:
+                          description: |-
+                            UID recorded at completion. A different UID under the same name invalidates
+                            the completion.
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      - name
+                      - uid
+                      type: object
                     completedAt:
                       description: CompletedAt is when the completion was recorded.
                       format: date-time
