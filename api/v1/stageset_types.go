@@ -606,6 +606,23 @@ type StageActions struct {
 	OnFailure []Action `json:"onFailure,omitempty"`
 }
 
+// ActionScope selects how often a pre/post action runs — which ledger keys its
+// completion. The ledger stores action *names*; no scope introduces a content
+// digest into action identity (digests key only the migration ledgers).
+type ActionScope string
+
+const (
+	// ScopeRevision runs the action once per pinned artifact revision — the
+	// default and the historical behavior. Any revision change re-runs it.
+	ScopeRevision ActionScope = "Revision"
+	// ScopeVersion runs the action once per resolved spec.version episode: a
+	// maximal run of reconciles over which the version value is unchanged.
+	// Same-version revision churn (a ConfigMap edit) does not re-run it;
+	// re-crossing a version starts a new episode and does. Requires
+	// spec.version.
+	ScopeVersion ActionScope = "Version"
+)
+
 // Action is one typed step. Exactly one of Patch, HTTP, Wait, Job, Delete, or
 // Apply must be set — enforced by the validating admission webhook (and a
 // reconciler fallback), not a CRD CEL rule, so spec.stages and the action lists
@@ -614,6 +631,22 @@ type Action struct {
 	// Name of the action, for status and Events.
 	// +required
 	Name string `json:"name"`
+
+	// Scope selects how often this action runs — which ledger gates it. Valid
+	// only on a stage's pre/post actions; rejected on onFailure, onRollback, and
+	// migration actions, which have their own (or no) ledger. Unset means
+	// Revision (once per pinned revision, unchanged). Version keys completion to
+	// the resolved spec.version value instead, so revision churn at a fixed
+	// version stops re-running upgrade choreography; it requires spec.version.
+	//
+	// No CRD default: Action is a shared type, and a default would stamp Scope
+	// onto onFailure, onRollback, and migration actions too — where scope is
+	// rejected — making a defaulted value indistinguishable from an authored one
+	// there. EffectiveScope supplies the Revision default in code, at the pre/post
+	// sites where it is meaningful.
+	// +kubebuilder:validation:Enum=Revision;Version
+	// +optional
+	Scope ActionScope `json:"scope,omitempty"`
 
 	// Timeout for the action.
 	// +optional
@@ -652,6 +685,16 @@ type Action struct {
 	// (e.g. a maintenance-page pod), not as steady-state stage members.
 	// +optional
 	Apply *ApplyAction `json:"apply,omitempty"`
+}
+
+// EffectiveScope returns the action's scope, treating an empty value as
+// Revision. The CRD default populates Scope on any apiserver-persisted object,
+// but an object built in a test or an older stored spec may leave it empty.
+func (a *Action) EffectiveScope() ActionScope {
+	if a.Scope == "" {
+		return ScopeRevision
+	}
+	return a.Scope
 }
 
 // Verb returns the action's operation type ("patch", "http", "wait", "job",
@@ -1318,6 +1361,20 @@ type StageStatus struct {
 	// applies to; a new revision resets the ledger.
 	// +optional
 	LedgerRevision string `json:"ledgerRevision,omitempty"`
+
+	// ExecutedVersionActions lists the scope: Version action names already run at
+	// LedgerVersion — the version ledger, parallel to ExecutedActions but keyed
+	// on the resolved spec.version episode rather than the revision. It survives
+	// a revision change and a force-reconcile; it resets only when the resolved
+	// version changes.
+	// +optional
+	ExecutedVersionActions []string `json:"executedVersionActions,omitempty"`
+
+	// LedgerVersion is the resolved spec.version value the ExecutedVersionActions
+	// ledger applies to; a different resolved version resets it. Empty on an
+	// unversioned StageSet (where scope: Version is not permitted).
+	// +optional
+	LedgerVersion string `json:"ledgerVersion,omitempty"`
 
 	// LastHandledReconcileAt is the value of the stages.metio.wtf/reconcile-stage
 	// token this stage most recently acted on. A single-stage force-reconcile

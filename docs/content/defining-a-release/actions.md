@@ -241,8 +241,51 @@ actions:
 The action ledger gates each step per pinned revision, so a retry or controller
 restart never re-applies or re-deletes the resource for the same snapshot.
 
-To run a `job` action only when the deployed version crosses a release boundary,
-see [versioned migrations](/gating/versioned-migrations/).
+## Scope: run per revision or per version
+
+By default a pre/post action runs once per pinned **revision** — so any change
+that produces a new artifact revision, including a ConfigMap-only edit, re-runs
+it. For upgrade choreography (`enable-maintenance-mode` → `db-upgrade` →
+`purge-caches`), that over-fires: the ladder is only meaningful when the deployed
+*version* changes, yet a config push re-runs the whole thing.
+
+Set `scope: Version` on the action to key it to the resolved `spec.version`
+instead of the revision:
+
+```yaml
+stages:
+  - name: app
+    sourceRef: { name: moodle-app }
+    actions:
+      pre:
+        - name: render-config-check
+          scope: Revision          # default; re-runs on any revision change
+          job: { sourceRef: { name: moodle-job-check } }
+        - name: db-upgrade
+          scope: Version           # runs once per version, not per revision
+          job: { sourceRef: { name: moodle-job-upgrade } }
+```
+
+- `scope: Revision` (the default) — once per pinned revision, as above.
+- `scope: Version` — once per **version episode**: a run of reconciles over which
+  the resolved `spec.version` is unchanged. A config-only revision bump at a
+  fixed version does not re-run it; crossing a version boundary does. It requires
+  `spec.version` and is rejected without one.
+
+`scope` is valid only on `pre` and `post` actions. `onFailure` and `onRollback`
+are ledger-exempt (they run on every failure or rollback), and migration actions
+are already keyed to their version transition — a `scope` on any of these is
+rejected at admission.
+
+Adoption is handled the same way versioning handles it: the first reconcile of a
+versioned StageSet records the version and treats every `scope: Version` action
+as already done, so migrating a running fleet in does not fire its maintenance
+choreography. A version-scoped action first runs when the version next changes.
+
+To run a `job` action only when the deployed version crosses a release boundary
+(with dependency ordering and once-per-transition semantics), see
+[versioned migrations](/gating/versioned-migrations/); `scope: Version` is the
+lighter tool for recurring per-release choreography that has no boundary to name.
 
 ## Post-rollback cleanup (`onRollback`)
 

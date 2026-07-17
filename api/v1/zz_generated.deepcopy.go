@@ -1242,6 +1242,11 @@ func (in *StageStatus) DeepCopyInto(out *StageStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.ExecutedVersionActions != nil {
+		in, out := &in.ExecutedVersionActions, &out.ExecutedVersionActions
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.PromotionState != nil {
 		in, out := &in.PromotionState, &out.PromotionState
 		*out = new(PromotionState)

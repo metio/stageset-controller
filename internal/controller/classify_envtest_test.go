@@ -140,7 +140,7 @@ func TestFailStage_TerminalFetch_NoRequeue(t *testing.T) {
 	r, get, ns := newClassifyReconciler(t)
 	ss := createStageSetFor(t, r, ns, "fetchterm")
 	_, rerr := r.failStage(context.Background(), newHelperFor(t, r, ss), ss, "stage-a", "fetch artifact",
-		fmt.Errorf("%w", artifact.ErrDigestMismatch), nil, "rev1", nil)
+		fmt.Errorf("%w", artifact.ErrDigestMismatch), nil, actionLedger{revision: "rev1"})
 	// failStage marks terminal failures with the sentinel; the reconcile loop
 	// unwraps it to a nil error (no requeue). Asserting the sentinel here pins
 	// that contract.
@@ -164,7 +164,7 @@ func TestFailStage_TransientFetch_BacksOff(t *testing.T) {
 	r, _, ns := newClassifyReconciler(t)
 	ss := createStageSetFor(t, r, ns, "fetchtrans")
 	cause := errors.New("dial tcp: connection refused")
-	_, rerr := r.failStage(context.Background(), newHelperFor(t, r, ss), ss, "stage-a", "fetch artifact", cause, nil, "rev1", nil)
+	_, rerr := r.failStage(context.Background(), newHelperFor(t, r, ss), ss, "stage-a", "fetch artifact", cause, nil, actionLedger{revision: "rev1"})
 	if !errors.Is(rerr, cause) {
 		t.Fatalf("transient fetch error should return the cause for backoff, got %v", rerr)
 	}
@@ -176,7 +176,7 @@ func TestFailStage_PermanentAPIError_TerminalRBACDenied(t *testing.T) {
 	r, get, ns := newClassifyReconciler(t)
 	ss := createStageSetFor(t, r, ns, "applyrbac")
 	_, rerr := r.failStage(context.Background(), newHelperFor(t, r, ss), ss, "stage-a", "apply",
-		fmt.Errorf("apply: %w", forbidden()), nil, "rev1", nil)
+		fmt.Errorf("apply: %w", forbidden()), nil, actionLedger{revision: "rev1"})
 	if !errors.Is(rerr, errTerminalStageFailure) {
 		t.Fatalf("RBACDenied apply must be marked terminal, got %v", rerr)
 	}

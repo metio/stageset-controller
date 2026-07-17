@@ -466,7 +466,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 		}
-		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "connect to target cluster", err, nil, "", nil)
+		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "connect to target cluster", err, nil, actionLedger{})
 	}
 	recorder := &stageinv.Recorder{Client: r.Client, ShardCap: r.ShardCap}
 	// Versioned migrations: resolve the desired version and the migrations the
@@ -521,7 +521,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		decSpan.RecordError(derr)
 		decSpan.SetStatus(codes.Error, "decryptor configuration failed")
 		decSpan.End()
-		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "configure decryption", derr, nil, "", nil)
+		return r.failStage(ctx, patchHelper, &ss, ss.Spec.Stages[0].Name, "configure decryption", derr, nil, actionLedger{})
 	}
 	decSpan.End()
 
@@ -611,15 +611,35 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// persisted by failStage / the final stage status. priorRevision is the
 			// revision this stage last applied, used to tell a content change apart
 			// from out-of-band drift after the apply.
-			var executed []string
+			// Two ledgers, keyed independently: the revision ledger resets on any
+			// new revision (or force-reconcile), the version ledger only when the
+			// resolved version changes — the per-stage episode rekey. Both carry
+			// forward from prior status when their key still matches. record routes
+			// each completed action into the ledger its scope selects.
+			scopeOf := stageActionScopes(stage)
+			led := actionLedger{revision: ra.Revision}
+			if migPlan.versionSet {
+				led.version = migPlan.desired
+			}
 			priorRevision := ""
 			if prior, ok := priorStages[stage.Name]; ok {
 				priorRevision = prior.AppliedRevision
 				if prior.LedgerRevision == ra.Revision {
-					executed = append(executed, prior.ExecutedActions...)
+					led.executed = append(led.executed, prior.ExecutedActions...)
+				}
+				if migPlan.versionSet && prior.LedgerVersion == migPlan.desired {
+					led.versioned = append(led.versioned, prior.ExecutedVersionActions...)
 				}
 			}
-			record := func(name string) error { executed = append(executed, name); return nil }
+			// First-adoption baseline: when versioning records the version without
+			// running migrations, Version-scoped actions baseline with it — an
+			// existing fleet migrating into StageSet must not fire N maintenance
+			// ladders. Harmless on a fresh install: episode one has nothing to
+			// upgrade (bootstrap is scope: Lifetime's job, a later phase).
+			if migPlan.baseline {
+				led.versioned = append(led.versioned, versionScopedActionNames(stage)...)
+			}
+			record := led.recordFn(scopeOf)
 
 			// Per-stage error-budget freeze: gate ENTRY of a new revision into this
 			// stage on the stage's own SLO budget, before anything is applied.
@@ -665,7 +685,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// caught terminally by the default-runtime resolve before the loop.
 			rt, rerr := r.stageRuntime(ctx, &ss, effectiveServiceAccount(&ss, stage), fetcher, runtimes)
 			if rerr != nil {
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "connect to target cluster", rerr, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "connect to target cluster", rerr, stageStatuses, led)
 			}
 
 			// Migrations anchored to this stage run before its pre-actions, so
@@ -679,14 +699,14 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					// an uncertain state. Cleared by a manual reconcile once fixed.
 					op = opMigrationDirty
 				}
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, op, merr, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, op, merr, stageStatuses, led)
 			}
 
 			// PRE actions: before BUILD; a failure aborts the stage untouched
 			// (nothing has been applied), so no onFailure runs.
 			if stage.Actions != nil {
-				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Pre, toStringSet(executed), record); err != nil {
-					return r.failStage(ctx, patchHelper, &ss, stage.Name, "pre-action", err, stageStatuses, ra.Revision, executed)
+				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Pre, led.doneSet(), record); err != nil {
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "pre-action", err, stageStatuses, led)
 				}
 			}
 
@@ -701,7 +721,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				fetchSpan.RecordError(err)
 				fetchSpan.SetStatus(codes.Error, "artifact fetch failed")
 				fetchSpan.End()
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "fetch artifact", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "fetch artifact", err, stageStatuses, led)
 			}
 			fetchSpan.End()
 
@@ -713,12 +733,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				decryptSpan.RecordError(err)
 				decryptSpan.SetStatus(codes.Error, "decrypt failed")
 				decryptSpan.End()
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "decrypt", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "decrypt", err, stageStatuses, led)
 			}
 			decryptSpan.End()
 			vars, err := r.resolvePostBuildVars(ctx, &ss, stage.PostBuild)
 			if err != nil {
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "resolve postBuild variables", err, stageStatuses, led)
 			}
 			subDigests[i] = substitutionDigest(vars)
 			// build.Build takes no ctx; the span still times the kustomize build.
@@ -729,7 +749,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				buildSpan.RecordError(err)
 				buildSpan.SetStatus(codes.Error, "build failed")
 				buildSpan.End()
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "build", err, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "build", err, stageStatuses, led)
 			}
 			buildSpan.End()
 			// Every applied object carries the per-stage discovery label, so
@@ -738,7 +758,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			apply.StampStageLabel(objects, stagesv1.StageLabel, stage.Name)
 			conflicts, cerr := apply.ResolveConflictHandling(objects, stage, apply.NewForceToken())
 			if cerr != nil {
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "conflict policy", cerr, stageStatuses, ra.Revision, executed)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "conflict policy", cerr, stageStatuses, led)
 			}
 			applyCtx, applySpan := observability.Tracer().Start(ctx, "stage.apply",
 				trace.WithAttributes(
@@ -750,8 +770,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				applySpan.RecordError(err)
 				applySpan.SetStatus(codes.Error, "apply failed")
 				applySpan.End()
-				r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "apply", err, stageStatuses, ra.Revision, executed)
+				r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "apply", err, stageStatuses, led)
 			}
 			applySpan.End()
 			r.reportDrift(&ss, stage, changeSet, priorRevision, ra.Revision)
@@ -789,8 +809,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				reconstructedStages = append(reconstructedStages, stage.Name)
 			}
 			if werr := recorder.Write(ctx, &ss, stage.Name, i, writeRefs); werr != nil {
-				r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "record inventory", werr, stageStatuses, ra.Revision, executed)
+				r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "record inventory", werr, stageStatuses, led)
 			}
 
 			// Verify readiness. The kstatus wait covers the stage's applied
@@ -804,21 +824,21 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			if len(waitSet) > 0 {
 				if err := rt.applier.Wait(ctx, waitSet, verifyTimeout); err != nil {
-					r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
-					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
+					r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, led)
 				}
 			}
 			if err := evalReadyExprs(ctx, rt.target, &ss, stage, objects, verifyTimeout); err != nil {
-				r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, ra.Revision, executed)
+				r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, led)
 			}
 
 			// POST actions: the stage (and any downstream gate) is Ready only once
 			// these succeed.
 			if stage.Actions != nil {
-				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Post, toStringSet(executed), record); err != nil {
-					r.runOnFailure(ctx, &ss, stage, rt.executor, toStringSet(executed), record)
-					return r.failStage(ctx, patchHelper, &ss, stage.Name, "post-action", err, stageStatuses, ra.Revision, executed)
+				if err := rt.executor.Run(ctx, ss.Namespace, stage.Actions.Post, led.doneSet(), record); err != nil {
+					r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "post-action", err, stageStatuses, led)
 				}
 			}
 
@@ -838,18 +858,16 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// remain pending and the soak clock untouched.
 			recordGateInterrupted := func() {
 				prior := priorStages[stage.Name]
-				stageStatuses = append(stageStatuses, stagesv1.StageStatus{
+				stageStatuses = append(stageStatuses, led.stamp(stagesv1.StageStatus{
 					Name:                   stage.Name,
 					Phase:                  stagesv1.StageReady,
 					AppliedRevision:        ra.Revision,
 					EntriesCount:           int64(len(newRefs)),
-					ExecutedActions:        executed,
-					LedgerRevision:         ra.Revision,
 					LastHandledReconcileAt: lastHandledFor(stage.Name),
 					PromotionState:         prior.PromotionState,
 					LastHandledPromotion:   prior.LastHandledPromotion,
 					BudgetFreeze:           stageBudgetFreeze[stage.Name],
-				})
+				}))
 			}
 			var verdict *analysisVerdict
 			if stage.Promotion != nil && stage.Promotion.Analysis != nil {
@@ -934,18 +952,16 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 			}
 			applied[ra.Key()] = ra.Revision
-			stageStatuses = append(stageStatuses, stagesv1.StageStatus{
+			stageStatuses = append(stageStatuses, led.stamp(stagesv1.StageStatus{
 				Name:                   stage.Name,
 				Phase:                  stagesv1.StageReady,
 				AppliedRevision:        appliedRevision,
 				EntriesCount:           int64(len(newRefs)),
-				ExecutedActions:        executed,
-				LedgerRevision:         ra.Revision,
 				LastHandledReconcileAt: lastHandledFor(stage.Name),
 				PromotionState:         promoState,
 				LastHandledPromotion:   handledPromotion,
 				BudgetFreeze:           stageBudgetFreeze[stage.Name],
-			})
+			}))
 			metrics.StageAppliedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Inc()
 			metrics.SetStagePromotionPending(ss.Namespace, ss.Name, stage.Name, !promoted)
 			metrics.SetStagePromotionBlocked(ss.Namespace, ss.Name, stage.Name, promoState != nil && promoState.Phase == stagesv1.PromotionBlocked)
@@ -1425,7 +1441,7 @@ func failReason(op string, cause error) (reason string, terminal bool) {
 	}
 }
 
-func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, revision string, executed []string) (ctrl.Result, error) {
+func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.Helper, ss *stagesv1.StageSet, stage, op string, cause error, prior []stagesv1.StageStatus, led actionLedger) (ctrl.Result, error) {
 	reason, terminal := failReason(op, cause)
 	stageMsg := fmt.Sprintf("%s: %v", op, cause)
 	readyMsg := fmt.Sprintf("stage %q %s: %v", stage, op, cause)
@@ -1446,14 +1462,12 @@ func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.He
 	// processed before the failure, and the stages after the failed one were
 	// never reached — their persisted records (ledgers, lastHandledPromotion)
 	// must survive this write.
-	ss.Status.Stages = mergeStageStatuses(ss, append(prior, stagesv1.StageStatus{
+	ss.Status.Stages = mergeStageStatuses(ss, append(prior, led.stamp(stagesv1.StageStatus{
 		Name:            stage,
 		Phase:           stagesv1.StageFailed,
-		AppliedRevision: revision,
+		AppliedRevision: led.revision,
 		Message:         stageMsg,
-		ExecutedActions: executed,
-		LedgerRevision:  revision,
-	}))
+	})))
 	publishStageReady(ss)
 	ss.Status.ObservedGeneration = ss.Generation
 	prevReady := readyConditionSnapshot(ss)

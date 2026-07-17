@@ -338,7 +338,14 @@ Health expressions use [CEL](https://github.com/google/cel-spec). See
 ## Actions
 
 `stages[].actions` (and `migrations[].actions`) carry typed steps. Each `Action`
-has a `name`, optional `timeout`/`retries`, and **exactly one** operation block.
+has a `name`, optional `timeout`/`retries`, an optional `scope` (pre/post only),
+and **exactly one** operation block.
+
+`scope` selects how often a pre/post action runs: `Revision` (default) once per
+pinned artifact revision, or `Version` once per resolved `spec.version` episode
+— so revision churn at a fixed version stops re-running upgrade choreography.
+`Version` requires `spec.version`. See
+[action scope](/defining-a-release/actions/#scope-run-per-revision-or-per-version).
 
 ```yaml
       actions:

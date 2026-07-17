@@ -629,6 +629,24 @@ spec:
                             maximum: 100
                             minimum: 0
                             type: integer
+                          scope:
+                            description: |-
+                              Scope selects how often this action runs — which ledger gates it. Valid
+                              only on a stage's pre/post actions; rejected on onFailure, onRollback, and
+                              migration actions, which have their own (or no) ledger. Unset means
+                              Revision (once per pinned revision, unchanged). Version keys completion to
+                              the resolved spec.version value instead, so revision churn at a fixed
+                              version stops re-running upgrade choreography; it requires spec.version.
+
+                              No CRD default: Action is a shared type, and a default would stamp Scope
+                              onto onFailure, onRollback, and migration actions too — where scope is
+                              rejected — making a defaulted value indistinguishable from an authored one
+                              there. EffectiveScope supplies the Revision default in code, at the pre/post
+                              sites where it is meaningful.
+                            enum:
+                            - Revision
+                            - Version
+                            type: string
                           timeout:
                             description: Timeout for the action.
                             type: string
@@ -1056,6 +1074,24 @@ spec:
                       maximum: 100
                       minimum: 0
                       type: integer
+                    scope:
+                      description: |-
+                        Scope selects how often this action runs — which ledger gates it. Valid
+                        only on a stage's pre/post actions; rejected on onFailure, onRollback, and
+                        migration actions, which have their own (or no) ledger. Unset means
+                        Revision (once per pinned revision, unchanged). Version keys completion to
+                        the resolved spec.version value instead, so revision churn at a fixed
+                        version stops re-running upgrade choreography; it requires spec.version.
+
+                        No CRD default: Action is a shared type, and a default would stamp Scope
+                        onto onFailure, onRollback, and migration actions too — where scope is
+                        rejected — making a defaulted value indistinguishable from an authored one
+                        there. EffectiveScope supplies the Revision default in code, at the pre/post
+                        sites where it is meaningful.
+                      enum:
+                      - Revision
+                      - Version
+                      type: string
                     timeout:
                       description: Timeout for the action.
                       type: string
@@ -1431,6 +1467,24 @@ spec:
                                 maximum: 100
                                 minimum: 0
                                 type: integer
+                              scope:
+                                description: |-
+                                  Scope selects how often this action runs — which ledger gates it. Valid
+                                  only on a stage's pre/post actions; rejected on onFailure, onRollback, and
+                                  migration actions, which have their own (or no) ledger. Unset means
+                                  Revision (once per pinned revision, unchanged). Version keys completion to
+                                  the resolved spec.version value instead, so revision churn at a fixed
+                                  version stops re-running upgrade choreography; it requires spec.version.
+
+                                  No CRD default: Action is a shared type, and a default would stamp Scope
+                                  onto onFailure, onRollback, and migration actions too — where scope is
+                                  rejected — making a defaulted value indistinguishable from an authored one
+                                  there. EffectiveScope supplies the Revision default in code, at the pre/post
+                                  sites where it is meaningful.
+                                enum:
+                                - Revision
+                                - Version
+                                type: string
                               timeout:
                                 description: Timeout for the action.
                                 type: string
@@ -1784,6 +1838,24 @@ spec:
                                 maximum: 100
                                 minimum: 0
                                 type: integer
+                              scope:
+                                description: |-
+                                  Scope selects how often this action runs — which ledger gates it. Valid
+                                  only on a stage's pre/post actions; rejected on onFailure, onRollback, and
+                                  migration actions, which have their own (or no) ledger. Unset means
+                                  Revision (once per pinned revision, unchanged). Version keys completion to
+                                  the resolved spec.version value instead, so revision churn at a fixed
+                                  version stops re-running upgrade choreography; it requires spec.version.
+
+                                  No CRD default: Action is a shared type, and a default would stamp Scope
+                                  onto onFailure, onRollback, and migration actions too — where scope is
+                                  rejected — making a defaulted value indistinguishable from an authored one
+                                  there. EffectiveScope supplies the Revision default in code, at the pre/post
+                                  sites where it is meaningful.
+                                enum:
+                                - Revision
+                                - Version
+                                type: string
                               timeout:
                                 description: Timeout for the action.
                                 type: string
@@ -2137,6 +2209,24 @@ spec:
                                 maximum: 100
                                 minimum: 0
                                 type: integer
+                              scope:
+                                description: |-
+                                  Scope selects how often this action runs — which ledger gates it. Valid
+                                  only on a stage's pre/post actions; rejected on onFailure, onRollback, and
+                                  migration actions, which have their own (or no) ledger. Unset means
+                                  Revision (once per pinned revision, unchanged). Version keys completion to
+                                  the resolved spec.version value instead, so revision churn at a fixed
+                                  version stops re-running upgrade choreography; it requires spec.version.
+
+                                  No CRD default: Action is a shared type, and a default would stamp Scope
+                                  onto onFailure, onRollback, and migration actions too — where scope is
+                                  rejected — making a defaulted value indistinguishable from an authored one
+                                  there. EffectiveScope supplies the Revision default in code, at the pre/post
+                                  sites where it is meaningful.
+                                enum:
+                                - Revision
+                                - Version
+                                type: string
                               timeout:
                                 description: Timeout for the action.
                                 type: string
@@ -3581,6 +3671,16 @@ spec:
                       items:
                         type: string
                       type: array
+                    executedVersionActions:
+                      description: |-
+                        ExecutedVersionActions lists the scope: Version action names already run at
+                        LedgerVersion — the version ledger, parallel to ExecutedActions but keyed
+                        on the resolved spec.version episode rather than the revision. It survives
+                        a revision change and a force-reconcile; it resets only when the resolved
+                        version changes.
+                      items:
+                        type: string
+                      type: array
                     lastHandledPromotion:
                       description: |-
                         LastHandledPromotion is the stages.metio.wtf/promote token this stage most
@@ -3597,6 +3697,12 @@ spec:
                       description: |-
                         LedgerRevision is the pinned artifact revision the ExecutedActions ledger
                         applies to; a new revision resets the ledger.
+                      type: string
+                    ledgerVersion:
+                      description: |-
+                        LedgerVersion is the resolved spec.version value the ExecutedVersionActions
+                        ledger applies to; a different resolved version resets it. Empty on an
+                        unversioned StageSet (where scope: Version is not permitted).
                       type: string
                     message:
                       description: Message carries a human-readable progress or failure

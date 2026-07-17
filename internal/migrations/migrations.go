@@ -133,6 +133,9 @@ func ValidateMigration(m *stagesv1.Migration) error {
 			return fmt.Errorf("migration %q has duplicate action name %q; action names are the idempotency-ledger key and must be unique", m.Name, a.Name)
 		}
 		seen[a.Name] = true
+		if a.Scope != "" {
+			return fmt.Errorf("migration %q action %q sets scope; scope is valid only on a stage's pre/post actions — a migration action is already keyed to its version transition by the migration ledger", m.Name, a.Name)
+		}
 		if a.Retries != nil && (*a.Retries < 0 || *a.Retries > MaxActionRetries) {
 			return fmt.Errorf("migration %q action %q has retries %d; it must be between 0 and %d", m.Name, a.Name, *a.Retries, MaxActionRetries)
 		}
