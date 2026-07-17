@@ -184,3 +184,48 @@ func TestActionScope_LifetimeSurvivesStageSetRecreate(t *testing.T) {
 		t.Errorf("bootstrap re-ran after delete+recreate (ran %d); the retained ledger must suppress it", n)
 	}
 }
+
+// Adopting a retained ledger on a recreated StageSet emits a LedgerAdopted event
+// — the loud signal that a completion from a prior life is suppressing an action
+// — exactly once.
+func TestActionScope_LedgerAdoptedEmitsOnRecreate(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	var hits int32
+	endpoint := countingServer(t, http.StatusOK, &hits)
+	hosts := []string{actionHost(t, endpoint)}
+
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj")})
+	ss := lifetimeStageSet(ns, "adopted", endpoint)
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	if err := reconcileWith(t, c, ss, hosts); err != nil {
+		t.Fatalf("reconcile 1: %v", err)
+	}
+
+	// Delete and recreate the same-named StageSet; its ledger is retained.
+	live := getStageSet(t, c, ns, "adopted")
+	live.Finalizers = nil
+	if err := c.Update(context.Background(), live); err != nil {
+		t.Fatalf("clear finalizers: %v", err)
+	}
+	if err := c.Delete(context.Background(), live); err != nil {
+		t.Fatalf("delete StageSet: %v", err)
+	}
+	ss2 := lifetimeStageSet(ns, "adopted", endpoint)
+	if err := c.Create(context.Background(), ss2); err != nil {
+		t.Fatalf("recreate StageSet: %v", err)
+	}
+	rec := &capturingRecorder{}
+	if err := reconcileWithRecorder(t, c, ss2, hosts, rec); err != nil {
+		t.Fatalf("reconcile after recreate: %v", err)
+	}
+
+	if !rec.has(eventReasonLedgerAdopted) {
+		t.Errorf("recreating over a retained ledger must emit a %q event", eventReasonLedgerAdopted)
+	}
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Errorf("bootstrap must stay suppressed after adoption (ran %d)", n)
+	}
+}

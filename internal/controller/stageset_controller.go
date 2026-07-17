@@ -574,6 +574,17 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if llerr != nil {
 		return ctrl.Result{}, llerr
 	}
+	// A StageSet on its first reconcile (no stage status yet) that adopts a ledger
+	// already carrying completions is the retain-always surprise — a delete+recreate,
+	// or a fresh StageSet over a retained ledger — where a recorded completion may
+	// suppress an action that would otherwise run. Signal it once (the first
+	// reconcile writes stage status, success or failure, so this cannot re-fire),
+	// before baseline promotion adds more completions.
+	if len(ss.Status.Stages) == 0 && lifetimeLedger != nil && len(lifetimeLedger.Status.CompletedActions) > 0 {
+		metrics.LedgerAdoptionsTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
+		r.event(&ss, corev1.EventTypeNormal, eventReasonLedgerAdopted,
+			fmt.Sprintf("adopted an existing StageLedger with %d recorded completion(s); a scope: Lifetime action recorded complete will not run again (stagesetctl reset-ledger forgets one)", len(lifetimeLedger.Status.CompletedActions)))
+	}
 	if err := r.promoteBaseline(ctx, &ss, lifetimeLedger); err != nil {
 		return ctrl.Result{}, err
 	}

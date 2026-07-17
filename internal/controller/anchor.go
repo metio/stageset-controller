@@ -25,6 +25,12 @@ const (
 	// read at gate time. The completion is retained (fail open); the event points
 	// at the missing read grant.
 	eventReasonLedgerAnchorUnreadable = "LedgerAnchorUnreadable"
+	// eventReasonLedgerAdopted marks a StageSet's first reconcile adopting a
+	// StageLedger that already carries completions — a delete+recreate, or a fresh
+	// StageSet over a retained ledger. The loud signal for the retain-always
+	// surprise: an adopted completion may suppress an action that would otherwise
+	// run.
+	eventReasonLedgerAdopted = "LedgerAdopted"
 )
 
 // anchorState classifies a completionAnchor witness read at gate time.

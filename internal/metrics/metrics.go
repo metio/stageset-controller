@@ -156,10 +156,19 @@ var (
 		Name: "stageset_ledger_anchor_errors_total",
 		Help: "Total scope: Lifetime completions whose completionAnchor was unreadable at gate time (retained, fail open).",
 	}, []string{"namespace", "name"})
+
+	// LedgerAdoptionsTotal counts StageSets that, on their first reconcile, adopted
+	// a StageLedger already carrying completions — a delete+recreate, or a fresh
+	// StageSet over a retained ledger. A completion may suppress an action that
+	// would otherwise run, so a surprise adoption is worth surfacing.
+	LedgerAdoptionsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stageset_ledger_adoptions_total",
+		Help: "Total StageSets that adopted a non-empty StageLedger on their first reconcile.",
+	}, []string{"namespace", "name"})
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, ActionRunsTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen, LedgerAnchorErrorsTotal)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, ActionRunsTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen, LedgerAnchorErrorsTotal, LedgerAdoptionsTotal)
 }
 
 // SetStageBudgetFrozen publishes the per-stage error-budget freeze gauge.
