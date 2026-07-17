@@ -40,6 +40,7 @@ const (
 	updateNowAnnotation      = "stages.metio.wtf/update-now"
 	reconcileStageAnnotation = "stages.metio.wtf/reconcile-stage"
 	budgetOverrideAnnotation = "stages.metio.wtf/budget-override"
+	resetScopeAnnotation     = "stages.metio.wtf/reset-scope"
 )
 
 type reconcileOptions struct {
@@ -49,6 +50,7 @@ type reconcileOptions struct {
 	strict         bool
 	updateNow      bool
 	budgetOverride bool
+	resetScope     string
 	force          bool
 	wait           bool
 	timeout        time.Duration
@@ -64,6 +66,9 @@ func newReconcileCommand(o *options) *cobra.Command {
 			"a window-held rollout immediately; --with-source first re-requests the stage sources.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.resetScope != "" && opts.resetScope != string(stagesv1.ScopeVersion) {
+				return fmt.Errorf("--reset-scope=%q is not resettable; only Version is (Revision resets on any new revision; Lifetime via reset-ledger)", opts.resetScope)
+			}
 			opts.name = args[0]
 			return runtimeErr(runReconcile(cmd.Context(), o, opts))
 		},
@@ -73,6 +78,7 @@ func newReconcileCommand(o *options) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.strict, "strict", false, "With --with-source, exit non-zero if any source could not be re-requested (instead of warning and continuing).")
 	cmd.Flags().BoolVar(&opts.updateNow, "update-now", false, "Apply a window-held rollout immediately, bypassing update windows.")
 	cmd.Flags().BoolVar(&opts.budgetOverride, "budget-override", false, "Ship a rollout held by an error-budget freeze once (break-glass for a reliability/security fix).")
+	cmd.Flags().StringVar(&opts.resetScope, "reset-scope", "", "Reset a ledger scope so its actions re-run once at the unchanged version. Only 'Version' is resettable this way.")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Proceed even when the StageSet is suspended.")
 	cmd.Flags().BoolVar(&opts.wait, "wait", false, "Wait until the controller reports the request handled.")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 5*time.Minute, "How long to wait with --wait.")
@@ -118,6 +124,9 @@ func runReconcile(ctx context.Context, o *options, opts reconcileOptions) error 
 	}
 	if opts.budgetOverride {
 		ann[budgetOverrideAnnotation] = token
+	}
+	if opts.resetScope != "" {
+		ann[resetScopeAnnotation] = token
 	}
 	if opts.stage != "" {
 		ann[reconcileStageAnnotation] = opts.stage + "@" + token

@@ -24,6 +24,16 @@ var (
 		Help: "Total stages applied and verified.",
 	}, []string{"namespace", "name", "stage"})
 
+	// ActionRunsTotal counts pre/post actions actually executed, by ledger scope
+	// (Revision or Version). A Version rate well below the Revision rate is the
+	// signal that version scoping is holding upgrade choreography off config
+	// churn. Deliberately not labeled by action name — that is unbounded at
+	// fleet scale; status.stages[].executed*Actions carries the per-action view.
+	ActionRunsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "stageset_action_runs_total",
+		Help: "Total pre/post actions executed, by ledger scope.",
+	}, []string{"namespace", "name", "scope"})
+
 	// DriftCorrectedTotal counts objects whose out-of-band drift the apply
 	// corrected on a steady-state reconcile (same revision as last applied).
 	DriftCorrectedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -138,7 +148,7 @@ var (
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen)
+	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, ActionRunsTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen)
 }
 
 // SetStageBudgetFrozen publishes the per-stage error-budget freeze gauge.

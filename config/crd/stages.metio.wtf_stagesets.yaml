@@ -3544,6 +3544,14 @@ spec:
                   reconcile request value, so a change of the annotation value
                   can be detected.
                 type: string
+              lastHandledResetScope:
+                description: |-
+                  LastHandledResetScope is the value of the most recently honored
+                  stages.metio.wtf/reset-scope annotation, so a Version-ledger reset fires
+                  once. A reset clears every stage's version ledger, re-running scope:
+                  Version actions at the unchanged version — the deliberate "re-run the
+                  upgrade" escape hatch (stagesetctl reconcile --reset-scope=Version).
+                type: string
               lastHandledUpdateOverride:
                 description: |-
                   LastHandledUpdateOverride is the value of the most recently honored

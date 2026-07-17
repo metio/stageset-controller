@@ -609,4 +609,8 @@ const (
 	// version without running migrations, so an operator can tell a baseline from
 	// a real no-op and sanity-check the deployment is actually at that version.
 	eventReasonBaselined = "MigrationsBaselined"
+	// eventReasonActionSkipped marks a Version-scoped action held off a new
+	// revision because its version episode already ran it — the config-churn
+	// case the scope exists for.
+	eventReasonActionSkipped = "ActionSkipped"
 )

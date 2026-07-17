@@ -282,6 +282,17 @@ versioned StageSet records the version and treats every `scope: Version` action
 as already done, so migrating a running fleet in does not fire its maintenance
 choreography. A version-scoped action first runs when the version next changes.
 
+To deliberately re-run the version ladder at the *unchanged* version — the "no,
+really, run the upgrade again" case — reset the version ledger once:
+
+```shell
+stagesetctl reconcile my-app --reset-scope=Version
+```
+
+A force-reconcile (`--stage`) resets only the revision ledger, so it never
+re-triggers version-scoped choreography; `--reset-scope=Version` is the explicit
+opt-in for that.
+
 To run a `job` action only when the deployed version crosses a release boundary
 (with dependency ordering and once-per-transition semantics), see
 [versioned migrations](/gating/versioned-migrations/); `scope: Version` is the

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
@@ -109,6 +111,80 @@ func TestActionScope_VersionFiresOnVersionChange(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&verHits); n != 1 {
 		t.Errorf("Version action fired %d times after a version change; want 1 (the new episode)", n)
+	}
+}
+
+// --reset-scope=Version clears the version ledger, re-running a Version-scoped
+// action once at the unchanged version — the deliberate "re-run the upgrade"
+// escape hatch. It is one-shot: the reset fires only for a fresh token.
+func TestActionScope_ResetScopeRerunsAtSameVersion(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	var revHits, verHits int32
+	revEndpoint := countingServer(t, http.StatusOK, &revHits)
+	verEndpoint := countingServer(t, http.StatusOK, &verHits)
+	hosts := []string{actionHost(t, revEndpoint), actionHost(t, verEndpoint)}
+
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj")})
+	ss := scopedLadderStageSet(ns, "reset", "1.0.0", revEndpoint, verEndpoint)
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	// Adoption baselines at 1.0.0; bump to 2.0.0 so the version ledger holds a
+	// genuinely-run entry to reset.
+	if err := reconcileWith(t, c, ss, hosts); err != nil {
+		t.Fatalf("reconcile 1: %v", err)
+	}
+	live := getStageSet(t, c, ns, "reset")
+	live.Spec.Version.Value = "2.0.0"
+	if err := c.Update(context.Background(), live); err != nil {
+		t.Fatalf("bump version: %v", err)
+	}
+	if err := reconcileWith(t, c, live, hosts); err != nil {
+		t.Fatalf("reconcile 2 (2.0.0 runs ver): %v", err)
+	}
+	if n := atomic.LoadInt32(&verHits); n != 1 {
+		t.Fatalf("ver action should have run once at 2.0.0, ran %d", n)
+	}
+
+	// Stamp a reset token: the version ledger clears and ver re-runs at 2.0.0.
+	stampAnnotation(t, c, ns, "reset", "stages.metio.wtf/reset-scope", "tok-1")
+	live = getStageSet(t, c, ns, "reset")
+	if err := reconcileWith(t, c, live, hosts); err != nil {
+		t.Fatalf("reconcile 3 (reset): %v", err)
+	}
+	if n := atomic.LoadInt32(&verHits); n != 2 {
+		t.Errorf("--reset-scope must re-run the Version action at the same version; ran %d, want 2", n)
+	}
+
+	// One-shot: reconciling again with no fresh token must not re-run it.
+	live = getStageSet(t, c, ns, "reset")
+	if live.Status.LastHandledResetScope != "tok-1" {
+		t.Errorf("status.lastHandledResetScope = %q, want tok-1", live.Status.LastHandledResetScope)
+	}
+	if err := reconcileWith(t, c, live, hosts); err != nil {
+		t.Fatalf("reconcile 4: %v", err)
+	}
+	if n := atomic.LoadInt32(&verHits); n != 2 {
+		t.Errorf("reset must be one-shot; ver ran %d after a second reconcile, want 2", n)
+	}
+}
+
+// stampAnnotation sets a single annotation on a StageSet and persists it.
+func stampAnnotation(t *testing.T, c client.Client, ns, name, key, value string) {
+	t.Helper()
+	var ss stagesv1.StageSet
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &ss); err != nil {
+		t.Fatalf("get %s/%s: %v", ns, name, err)
+	}
+	ann := ss.GetAnnotations()
+	if ann == nil {
+		ann = map[string]string{}
+	}
+	ann[key] = value
+	ss.SetAnnotations(ann)
+	if err := c.Update(context.Background(), &ss); err != nil {
+		t.Fatalf("stamp annotation: %v", err)
 	}
 }
 

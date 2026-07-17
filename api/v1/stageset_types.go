@@ -1232,6 +1232,14 @@ type StageSetStatus struct {
 	// +optional
 	LastHandledUpdateOverride string `json:"lastHandledUpdateOverride,omitempty"`
 
+	// LastHandledResetScope is the value of the most recently honored
+	// stages.metio.wtf/reset-scope annotation, so a Version-ledger reset fires
+	// once. A reset clears every stage's version ledger, re-running scope:
+	// Version actions at the unchanged version — the deliberate "re-run the
+	// upgrade" escape hatch (stagesetctl reconcile --reset-scope=Version).
+	// +optional
+	LastHandledResetScope string `json:"lastHandledResetScope,omitempty"`
+
 	// BudgetFreeze is set while an error-budget freeze holds new-revision
 	// rollouts (or, under dryRun, while a freeze would hold them). It surfaces the
 	// last observed remaining budget so a wrong query doesn't hide.

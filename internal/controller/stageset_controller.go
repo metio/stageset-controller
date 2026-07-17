@@ -544,6 +544,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		cleared.LedgerRevision = ""
 		priorStages[forceStage] = cleared
 	}
+
+	// Version-ledger reset (stagesetctl reconcile --reset-scope=Version): the
+	// deliberate "re-run the upgrade at the same version" escape hatch. Unlike a
+	// force-reconcile (which clears the revision ledger), this clears every
+	// stage's VERSION ledger, so scope: Version actions re-run once even though
+	// the version is unchanged. One-shot, tracked by LastHandledResetScope.
+	if token := ss.Annotations[resetScopeAnnotation]; token != "" && token != ss.Status.LastHandledResetScope {
+		for name, prior := range priorStages {
+			prior.ExecutedVersionActions = nil
+			prior.LedgerVersion = ""
+			priorStages[name] = prior
+		}
+		ss.Status.LastHandledResetScope = token
+	}
 	lastHandledFor := func(name string) string {
 		if name == forceStage {
 			return forceToken
@@ -639,7 +653,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if migPlan.baseline {
 				led.versioned = append(led.versioned, versionScopedActionNames(stage)...)
 			}
-			record := led.recordFn(scopeOf)
+			baseRecord := led.recordFn(scopeOf)
+			record := func(name string) error {
+				// Count executions by scope (pre/post only; onFailure names are
+				// absent from scopeOf and excluded). status carries the per-action
+				// view; the metric stays scope-labeled to bound cardinality.
+				if sc, ok := scopeOf[name]; ok {
+					metrics.ActionRunsTotal.WithLabelValues(ss.Namespace, ss.Name, string(sc)).Inc()
+				}
+				return baseRecord(name)
+			}
+			// A Version-scoped action carried over at a NEW revision is being held
+			// off config churn — the feature working. Surface it once per revision
+			// (only when the revision actually changed), not every reconcile.
+			r.emitVersionSkips(&ss, stage, led, priorRevision, ra.Revision)
 
 			// Per-stage error-budget freeze: gate ENTRY of a new revision into this
 			// stage on the stage's own SLO budget, before anything is applied.
@@ -1572,6 +1599,24 @@ func toStringSet(items []string) map[string]bool {
 
 // event emits an events.v1 Event; the reason fills both the reason and action
 // slots (we have no separate machine-readable action vocabulary).
+// emitVersionSkips fires one ActionSkipped event per Version-scoped action that
+// a new revision carried over (rather than re-ran) — the config-churn case the
+// scope exists for. It emits only when the revision actually changed, so steady
+// reconciles at a fixed revision stay quiet; adoption (no prior revision) does
+// not count as a churn skip.
+func (r *StageSetReconciler) emitVersionSkips(ss *stagesv1.StageSet, stage *stagesv1.Stage, led actionLedger, priorRevision, revision string) {
+	if priorRevision == "" || priorRevision == revision {
+		return
+	}
+	done := led.doneSet()
+	for _, name := range versionScopedActionNames(stage) {
+		if done[name] {
+			r.event(ss, corev1.EventTypeNormal, eventReasonActionSkipped,
+				fmt.Sprintf("stage %q action %q (scope: Version) held at version %q despite the new revision; it runs when the version changes", stage.Name, name, led.version))
+		}
+	}
+}
+
 func (r *StageSetReconciler) event(ss *stagesv1.StageSet, eventtype, reason, message string) {
 	if r.Recorder != nil {
 		r.Recorder.Eventf(ss, nil, eventtype, reason, reason, "%s", message)

@@ -18,6 +18,11 @@ import (
 // status.stages[].lastHandledReconcileAt so the request fires exactly once.
 const reconcileStageAnnotation = "stages.metio.wtf/reconcile-stage"
 
+// resetScopeAnnotation carries a one-shot token that clears every stage's
+// version ledger, re-running scope: Version actions once at the unchanged
+// version. Consumed in Reconcile; recorded in status.lastHandledResetScope.
+const resetScopeAnnotation = "stages.metio.wtf/reset-scope"
+
 // parseReconcileStage extracts the requested stage and token from the
 // reconcile-stage annotation. An empty stage means no (or malformed) request.
 func parseReconcileStage(ss *stagesv1.StageSet) (stage, token string) {
