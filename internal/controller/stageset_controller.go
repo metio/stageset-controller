@@ -223,6 +223,8 @@ type StageSetReconciler struct {
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets/finalizers,verbs=update
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageinventories,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageledgers,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageledgers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=externalartifacts,verbs=get;list;watch
 // Producer kinds whose failures the controller surfaces via dynamic watches:
 // the Flux artifact-publishing sources and the JaaS snippet producer. A custom

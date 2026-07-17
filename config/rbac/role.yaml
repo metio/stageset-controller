@@ -59,6 +59,24 @@ rules:
 - apiGroups:
   - stages.metio.wtf
   resources:
+  - stageledgers
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - stages.metio.wtf
+  resources:
+  - stageledgers/status
+  - stagesets/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - stages.metio.wtf
+  resources:
   - stagesets
   verbs:
   - get
@@ -71,12 +89,4 @@ rules:
   resources:
   - stagesets/finalizers
   verbs:
-  - update
-- apiGroups:
-  - stages.metio.wtf
-  resources:
-  - stagesets/status
-  verbs:
-  - get
-  - patch
   - update
