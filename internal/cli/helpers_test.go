@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"reflect"
 	"strings"
@@ -172,7 +173,7 @@ func TestDescribeAction_Table(t *testing.T) {
 
 func TestStageActionsToRun_NoActions(t *testing.T) {
 	stage := &stagesv1.Stage{Name: "first"}
-	if out := stageActionsToRun(stage, "rev1", stagesv1.StageStatus{}); out != nil {
+	if out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", stagesv1.StageStatus{}, nil); out != nil {
 		t.Errorf("stage without actions = %v, want nil", out)
 	}
 }
@@ -186,7 +187,7 @@ func TestStageActionsToRun_EnumeratesAllPhases(t *testing.T) {
 			OnFailure: []stagesv1.Action{{Name: "p3", Delete: &stagesv1.DeleteAction{Target: fluxmeta.NamespacedObjectKindReference{Kind: "Pod", Name: "x"}}}},
 		},
 	}
-	out := stageActionsToRun(stage, "rev1", stagesv1.StageStatus{})
+	out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", stagesv1.StageStatus{}, nil)
 	if len(out) != 3 {
 		t.Fatalf("want 3 previews, got %d: %+v", len(out), out)
 	}
@@ -218,7 +219,7 @@ func TestStageActionsToRun_LedgerOmitsExecuted(t *testing.T) {
 		LedgerRevision:  "rev1",
 		ExecutedActions: []string{"done"},
 	}
-	out := stageActionsToRun(stage, "rev1", prior)
+	out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", prior, nil)
 	if len(out) != 1 || out[0].Name != "todo" {
 		t.Fatalf("ledger should omit 'done', got %+v", out)
 	}
@@ -233,7 +234,7 @@ func TestStageActionsToRun_LedgerIgnoredWhenRevisionDiffers(t *testing.T) {
 	}
 	// Ledger pinned to a different revision: every action must be listed.
 	prior := stagesv1.StageStatus{LedgerRevision: "other", ExecutedActions: []string{"done"}}
-	if out := stageActionsToRun(stage, "rev1", prior); len(out) != 1 {
+	if out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", prior, nil); len(out) != 1 {
 		t.Fatalf("mismatched ledger revision should list all, got %+v", out)
 	}
 }
@@ -247,8 +248,29 @@ func TestStageActionsToRun_EmptyRevisionListsAll(t *testing.T) {
 		},
 	}
 	prior := stagesv1.StageStatus{LedgerRevision: "", ExecutedActions: []string{"done"}}
-	if out := stageActionsToRun(stage, "", prior); len(out) != 1 {
+	if out := stageActionsToRun(context.Background(), nil, "", stage, "", prior, nil); len(out) != 1 {
 		t.Fatalf("empty revision should list all, got %+v", out)
+	}
+}
+
+func TestStageActionsToRun_LifetimeCompletedOmitted(t *testing.T) {
+	stage := &stagesv1.Stage{
+		Name: "first",
+		Actions: &stagesv1.StageActions{
+			Post: []stagesv1.Action{
+				{Name: "bootstrap", Scope: stagesv1.ScopeLifetime, Wait: &stagesv1.WaitAction{Expr: "true"}},
+				{Name: "notify", Wait: &stagesv1.WaitAction{Expr: "true"}},
+			},
+		},
+	}
+	// An unanchored Lifetime completion the StageLedger records: a preview at a new
+	// revision must omit the once-ever bootstrap (it will not run) but keep notify.
+	ledger := &stagesv1.StageLedger{Status: stagesv1.StageLedgerStatus{
+		CompletedActions: []stagesv1.LedgerCompletion{{Stage: "first", Action: "bootstrap", Origin: stagesv1.OriginExecuted}},
+	}}
+	out := stageActionsToRun(context.Background(), nil, "ns", stage, "rev1", stagesv1.StageStatus{}, ledger)
+	if len(out) != 1 || out[0].Name != "notify" {
+		t.Fatalf("a completed Lifetime action must be omitted from the preview; got %+v", out)
 	}
 }
 

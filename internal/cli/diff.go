@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/actionplan"
 	"github.com/metio/stageset-controller/internal/apply"
 	"github.com/metio/stageset-controller/internal/diffrender"
 	"github.com/metio/stageset-controller/internal/inventory"
@@ -145,6 +146,18 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 		return runtimeErr(err)
 	}
 
+	// The StageLedger records scope: Lifetime completions. A once-ever action
+	// already recorded (with a valid anchor) will not run, so the action preview
+	// must not list it — the same gate the controller applies. Read under the
+	// caller's own credentials; absent means nothing recorded yet.
+	var lifetimeLedger *stagesv1.StageLedger
+	var ledger stagesv1.StageLedger
+	if lerr := c.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: ss.Name}, &ledger); lerr == nil {
+		lifetimeLedger = &ledger
+	} else if !apierrors.IsNotFound(lerr) {
+		return runtimeErr(lerr)
+	}
+
 	priorStages := indexStageStatuses(ss.Status.Stages)
 	diffByStage := map[string][]diffrender.Change{}
 	renderedRefs := map[string][]inventory.ObjectRef{}
@@ -179,7 +192,7 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 			return runtimeErr(cerr)
 		}
 		diffByStage[stage.Name] = changes
-		actions = append(actions, stageActionsToRun(stage, render.Revision, priorStages[stage.Name])...)
+		actions = append(actions, stageActionsToRun(ctx, c, ss.Namespace, stage, render.Revision, priorStages[stage.Name], lifetimeLedger)...)
 	}
 
 	pruneByStage := map[string][]diffrender.Change{}
@@ -226,9 +239,17 @@ func indexStageStatuses(stages []stagesv1.StageStatus) map[string]stagesv1.Stage
 }
 
 // stageActionsToRun lists the actions a stage would run on the next reconcile,
-// omitting those the ledger already satisfied at the rendered revision. A local
-// render (no revision) cannot consult the ledger, so every action is listed.
-func stageActionsToRun(stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus) []diffrender.ActionPreview {
+// omitting those a ledger already satisfies. A Revision-scoped action is omitted
+// when the revision ledger recorded it at the rendered revision; a scope:
+// Lifetime action is omitted when the StageLedger records it complete (with a
+// valid anchor) — the same gate the controller applies, so the preview does not
+// list a once-ever bootstrap that has already run. A local render (no revision)
+// cannot consult the revision ledger, so those actions are all listed.
+//
+// scope: Version actions are not yet gated here — that needs the resolved
+// version, which the diff does not compute; a held version action can still show
+// as pending until the version-aware preview lands.
+func stageActionsToRun(ctx context.Context, reader client.Client, ns string, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, lifetime *stagesv1.StageLedger) []diffrender.ActionPreview {
 	if stage.Actions == nil {
 		return nil
 	}
@@ -238,15 +259,24 @@ func stageActionsToRun(stage *stagesv1.Stage, revision string, prior stagesv1.St
 			executed[name] = true
 		}
 	}
+	scopes := actionplan.ActionScopes(stage)
+	lifetimeDone := map[string]bool{}
+	for _, name := range actionplan.EvaluateLifetimeGate(ctx, reader, lifetime, ns, stage.Name).Done {
+		lifetimeDone[name] = true
+	}
 	var out []diffrender.ActionPreview
 	add := func(phase string, list []stagesv1.Action) {
 		for i := range list {
-			if executed[list[i].Name] {
+			name := list[i].Name
+			if executed[name] {
 				continue
+			}
+			if scopes[name] == stagesv1.ScopeLifetime && lifetimeDone[name] {
+				continue // once-ever, already recorded complete
 			}
 			kind, detail := describeAction(&list[i])
 			out = append(out, diffrender.ActionPreview{
-				Stage: stage.Name, Phase: phase, Name: list[i].Name, Type: kind, Detail: detail,
+				Stage: stage.Name, Phase: phase, Name: name, Type: kind, Detail: detail,
 			})
 		}
 	}
