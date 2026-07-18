@@ -174,10 +174,9 @@ retry doesn't re-run a completed migration:
   ledgers (per migration, and per action within a migration) for the current
   transition, cleared once the version advances.
 
-Migrations emit `MigrationStarted` / `MigrationCompleted` events. A downgrade that
-would skip a required migration is refused with the `DowngradeRequiresMigration`
-reason — see its [runbook](/runbooks/downgraderequiresmigration/). For the
-failure path, see [When a migration fails](#when-a-migration-fails).
+Migrations emit `MigrationStarted` / `MigrationCompleted` events. For lowering the
+version below what is deployed, see [Rolling back](#rolling-back). For the failure
+path, see [When a migration fails](#when-a-migration-fails).
 
 **First adoption (baselining).** The first time a StageSet sets `spec.version` and
 has no `status.version` yet, the controller records the version and runs **no**
@@ -185,6 +184,55 @@ migrations — an existing deployment is assumed to already be at that version. 
 emits a `MigrationsBaselined` event so you can tell this apart from a real no-op
 and confirm the deployment really is at the recorded version. Migrations run only
 on a subsequent transition that crosses their boundary.
+
+## Rolling back
+
+Lowering the version below what is deployed is off by default: a mistaken revert of
+a version bump must not silently unwind a schema. Turn it on with
+`spec.version.allowDowngrade`, and give each reversible migration a `down` list —
+the inverse of its `actions`:
+
+```yaml
+  version:
+    fromArtifact:
+      stage: app
+      path: VERSION
+    allowDowngrade: true
+  migrations:
+    - name: backfill-ledger-2-0
+      to: "2.0.0"
+      stage: app
+      actions:
+        - name: backfill
+          job:
+            sourceRef:
+              name: ledger-backfill-job
+      down:                          # runs when the version crosses 2.0.0 downward
+        - name: restore-1-x
+          job:
+            sourceRef:
+              name: ledger-restore-job
+```
+
+When the deployed version drops below a boundary, the controller unwinds every
+crossed boundary in reverse — newest first — running each migration's `down`
+actions, then lowers `status.version`. Lowering the version is itself what makes a
+later re-upgrade re-run the up migrations, so a downgrade followed by an upgrade
+returns to the same state. Write `down` actions idempotently (delete-if-exists,
+restore-if-absent): the `from` constraint gates upward application only, so a
+downgrade reverses every crossed boundary regardless of `from`.
+
+A boundary that declares no `down` actions is **irreversible**. A downgrade that
+would cross it is refused with the
+[`DowngradeRequiresMigration`](/runbooks/downgraderequiresmigration/) reason,
+naming the migration — the version is not lowered while its schema change stands. A
+downgrade requested without `allowDowngrade` is refused with
+[`DowngradeNotAllowed`](/runbooks/downgradenotallowed/), and neither refusal moves
+the version.
+
+Preview a rollback before committing it with [`stagesetctl plan`](/cli/plan/),
+which lists what reverses and flags any irreversible boundary — so a downgrade that
+cannot be done safely is caught before merge rather than discovered as an incident.
 
 ## Sharing one ladder across StageSets
 

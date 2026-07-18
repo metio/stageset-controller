@@ -78,6 +78,29 @@ exporting that record for disaster recovery, and deliberately forgetting a
 completion so it re-runs are all first-class operations
 ([`stagesetctl baseline`](/cli/baseline/), [`reset-ledger`](/cli/reset-ledger/)).
 
+## Roll back — safely, or refuse
+
+`helm rollback` re-applies a previous release's manifests. For a stateless app that
+is exactly right, and it is simpler than anything here. For a **stateful** app it is
+a trap: rolling 2.0 back to 1.0 re-applies the old manifests but does nothing about
+the schema migration the 1.0 → 2.0 upgrade ran. The database stays at the 2.0 schema
+while the code is 1.0 — and Helm reports the rollback succeeded.
+
+`StageSet` models the downgrade instead of treating manifests as the whole story. A
+migration can declare [`down`](/gating/versioned-migrations/#rolling-back) actions —
+the inverse of its up actions — and a downgrade (opt-in via
+`spec.version.allowDowngrade`) unwinds every crossed boundary in reverse, running
+those `down` actions, before lowering the version. A boundary that declares no
+`down` actions is irreversible: the downgrade is **refused**, naming the migration,
+rather than lowering the version while its schema change stands.
+
+The honest limit: `StageSet` reverses only what a `down` action declares — a
+genuinely destructive change like a dropped column still needs a `down` that
+restores it from backup. But a refusal with a reason is strictly safer than a
+rollback that silently leaves the schema ahead of the code, and
+[`stagesetctl plan`](/cli/plan/) shows which boundaries reverse and which refuse
+*before* you merge the version change.
+
 ## Using them together
 
 Render a chart to manifests (e.g. via a producer that publishes an
