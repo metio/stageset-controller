@@ -15,7 +15,9 @@ import (
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/actionplan"
+	"github.com/metio/stageset-controller/internal/inventory"
 	"github.com/metio/stageset-controller/internal/preview"
+	"github.com/metio/stageset-controller/internal/stageinv"
 	"github.com/metio/stageset-controller/internal/window"
 )
 
@@ -83,12 +85,18 @@ func runPlan(ctx context.Context, o *options, opts planOptions) error {
 	engine.Decryptor = dec
 
 	renders := make(map[string]preview.StageRender, len(selected))
+	renderedRefs := map[string][]inventory.ObjectRef{}
 	for i := range selected {
 		render, rerr := engine.RenderStage(ctx, &ss, &selected[i])
 		if rerr != nil {
 			return runtimeErr(rerr)
 		}
 		renders[selected[i].Name] = render
+		refs := make([]inventory.ObjectRef, 0, len(render.Objects))
+		for _, obj := range render.Objects {
+			refs = append(refs, stageinv.RefOf(obj))
+		}
+		renderedRefs[selected[i].Name] = refs
 	}
 
 	desired, versionNote := resolvePlanVersion(&ss, renders)
@@ -148,6 +156,24 @@ func runPlan(ctx context.Context, o *options, opts planOptions) error {
 		fmt.Fprintln(out, "  gates:")
 		for _, g := range gates {
 			fmt.Fprintf(out, "    %s\n", g)
+		}
+	}
+
+	// Objects that would be pruned — in a stage's inventory but no longer in its
+	// render. Pruning a state-bearing object (a PVC, a StatefulSet) destroys data,
+	// so it is flagged: the "a prune deletes the database" hazard surfaced as a red
+	// line here, not discovered as an incident.
+	if prunes, perr := engine.PrunePlan(ctx, &ss, renderedRefs); perr != nil {
+		fmt.Fprintf(out, "  note: prune preview unavailable: %v\n", perr)
+	} else if len(prunes) > 0 {
+		willRun = true
+		fmt.Fprintln(out, "  prunes:")
+		for _, it := range prunes {
+			if isStateBearing(it.Ref) {
+				fmt.Fprintf(out, "    ⚠ %s/%s  (stage %s) — deleting this destroys its data\n", it.Ref.Kind, it.Ref.Name, it.Stage)
+			} else {
+				fmt.Fprintf(out, "    %s/%s  (stage %s)\n", it.Ref.Kind, it.Ref.Name, it.Stage)
+			}
 		}
 	}
 
@@ -227,6 +253,19 @@ func planGates(ss *stagesv1.StageSet, priorStages map[string]stagesv1.StageStatu
 		}
 	}
 	return gates
+}
+
+// isStateBearing reports whether pruning a ref would destroy persistent data —
+// the kinds where a prune is a data-loss event, not a routine cleanup.
+func isStateBearing(ref inventory.ObjectRef) bool {
+	switch {
+	case ref.Group == "" && (ref.Kind == "PersistentVolumeClaim" || ref.Kind == "PersistentVolume"):
+		return true
+	case ref.Group == "apps" && ref.Kind == "StatefulSet":
+		return true
+	default:
+		return false
+	}
 }
 
 func orNone(s string) string {

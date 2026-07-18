@@ -42,6 +42,8 @@ StageSet moodle-acme/moodle  (version 1.0.0 → 1.1.0)
     schema-1-1               1.0.x → 1.1.0  before app  [job]
   gates:
     update window  HOLD  (closed; opens 2026-06-16T02:00:00Z) [live: now]
+  prunes:
+    ⚠ PersistentVolumeClaim/moodle-cache  (stage app) — deleting this destroys its data
   note: scope: Lifetime results reflect the current cluster (completionAnchor witnesses are read live).
 ```
 
@@ -50,7 +52,11 @@ queued; the `gates` block lists what would hold the rollout — a closed update
 window (recomputed now, a pure function of the schedule and the clock), an
 [error-budget](/gating/error-budget/) freeze, or a stage
 [awaiting promotion](/gating/stage-promotion/) — each tagged `[live: now]` or
-`[live: status]` to say whether it was recomputed or read from status.
+`[live: status]` to say whether it was recomputed or read from status. The
+`prunes` block lists objects a stage would delete — in its
+[inventory](/api/stageinventory/) but no longer in its render — and flags a
+state-bearing one (a PVC, a StatefulSet) with `⚠`, so a prune that would destroy
+data is a red line in the plan rather than an incident after the fact.
 
 A version resolved off the rendered manifests (an inline `spec.version.value` or
 `spec.version.fromObject`) is reproducible from the source; a

@@ -13,6 +13,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/inventory"
+	"github.com/metio/stageset-controller/internal/stageinv"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // planStageSet builds a one-stage StageSet with a Revision pre action and a
@@ -166,4 +170,64 @@ func getStageSetCLI(t testing.TB, c client.Client, ns, name string) *stagesv1.St
 		t.Fatalf("get StageSet: %v", err)
 	}
 	return &ss
+}
+
+func TestIsStateBearing(t *testing.T) {
+	tests := []struct {
+		ref  inventory.ObjectRef
+		want bool
+	}{
+		{inventory.ObjectRef{Kind: "PersistentVolumeClaim"}, true},
+		{inventory.ObjectRef{Kind: "PersistentVolume"}, true},
+		{inventory.ObjectRef{Group: "apps", Kind: "StatefulSet"}, true},
+		{inventory.ObjectRef{Kind: "ConfigMap"}, false},
+		{inventory.ObjectRef{Group: "apps", Kind: "Deployment"}, false},
+	}
+	for _, tc := range tests {
+		if got := isStateBearing(tc.ref); got != tc.want {
+			t.Errorf("isStateBearing(%s/%s) = %v, want %v", tc.ref.Group, tc.ref.Kind, got, tc.want)
+		}
+	}
+}
+
+func TestPlan_FlagsStateBearingPrune(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "planprune")
+	planStageSet(t, c, ns, "app")
+	ss := getStageSetCLI(t, c, ns, "app")
+
+	// The stage previously applied a PVC (still live, carrying this StageSet's
+	// owner labels) and recorded it in its inventory; the current render no longer
+	// contains it, so the next reconcile would prune it.
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: ns, Name: "app-db",
+			Labels: map[string]string{"stages.metio.wtf/name": "app", "stages.metio.wtf/namespace": ns},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+		},
+	}
+	if err := c.Create(context.Background(), pvc); err != nil {
+		t.Fatalf("create PVC: %v", err)
+	}
+	rec := &stageinv.Recorder{Client: c}
+	if err := rec.Write(context.Background(), ss, "first", 0, []inventory.ObjectRef{
+		{Version: "v1", Kind: "PersistentVolumeClaim", Namespace: ns, Name: "app-db"},
+	}); err != nil {
+		t.Fatalf("record inventory: %v", err)
+	}
+	dir := writeSourceTree(t, map[string]string{"cm.yaml": configMapManifest(ns, "settings", nil)})
+
+	stdout, stderr, code := runCLI(t, cfg, "plan", "app", "-n", ns, "--source-dir", dir)
+	if code != exitDiff {
+		t.Fatalf("a pending prune makes the plan non-empty (exit 1); got %d (stderr=%s)\n%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"prunes:", "⚠", "PersistentVolumeClaim/app-db", "destroys its data"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("plan output missing %q:\n%s", want, stdout)
+		}
+	}
 }
