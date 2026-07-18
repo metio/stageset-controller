@@ -6,6 +6,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +16,7 @@ import (
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/actionplan"
 	"github.com/metio/stageset-controller/internal/preview"
+	"github.com/metio/stageset-controller/internal/window"
 )
 
 type planOptions struct {
@@ -124,6 +127,30 @@ func runPlan(ctx context.Context, o *options, opts planOptions) error {
 		}
 	}
 
+	// Migrations the controller has queued for the version transition (from its
+	// last-computed status). A pending migration is work the next reconcile runs.
+	if migs := pendingMigrations(&ss); len(migs) > 0 {
+		willRun = true
+		fmt.Fprintln(out, "  migrations:")
+		for _, m := range migs {
+			verbs := ""
+			if len(m.Actions) > 0 {
+				verbs = "  [" + strings.Join(m.Actions, ", ") + "]"
+			}
+			fmt.Fprintf(out, "    %-24s %s → %s  before %s%s\n", m.Name, orNone(m.From), m.To, m.Stage, verbs)
+		}
+	}
+
+	// Gates that would hold the rollout. The update window is recomputed now (a
+	// pure function of the schedule and the clock); the promotion and error-budget
+	// holds are read from status, so they reflect the last observed state.
+	if gates := planGates(&ss, priorStages, selected, time.Now()); len(gates) > 0 {
+		fmt.Fprintln(out, "  gates:")
+		for _, g := range gates {
+			fmt.Fprintf(out, "    %s\n", g)
+		}
+	}
+
 	if versionNote != "" {
 		fmt.Fprintf(out, "  note: %s\n", versionNote)
 	}
@@ -172,6 +199,34 @@ func resolvePlanVersion(ss *stagesv1.StageSet, renders map[string]preview.StageR
 	default: // FromArtifact
 		return "", "version.fromArtifact is not resolved in the preview; version-scoped actions shown as would-run"
 	}
+}
+
+// planGates returns the gate-hold lines currently blocking the rollout: a closed
+// update window (recomputed now — a pure function of the schedule and the clock),
+// an error-budget freeze, and any stage awaiting promotion (both read from
+// status). Each line is tagged to say whether it was recomputed or read live.
+func planGates(ss *stagesv1.StageSet, priorStages map[string]stagesv1.StageStatus, selected []stagesv1.Stage, now time.Time) []string {
+	var gates []string
+	if allowed, nextChange, err := window.Decision(ss.Spec.UpdateWindows, now); err == nil && !allowed {
+		opens := ""
+		if !nextChange.IsZero() {
+			opens = "; opens " + nextChange.Format(time.RFC3339)
+		}
+		gates = append(gates, fmt.Sprintf("update window  HOLD  (closed%s) [live: now]", opens))
+	}
+	if f := ss.Status.BudgetFreeze; f != nil {
+		gates = append(gates, fmt.Sprintf("error budget   HOLD  (frozen; remaining %s, resumes at %s) [live: status]", orNone(f.Remaining), orNone(f.ResumeThreshold)))
+	}
+	for i := range selected {
+		st := priorStages[selected[i].Name]
+		if st.PromotionState != nil && st.PromotionState.Phase != "" {
+			gates = append(gates, fmt.Sprintf("promotion (%s)  HOLD  (%s) [live: status]", selected[i].Name, st.PromotionState.Phase))
+		}
+		if st.BudgetFreeze != nil {
+			gates = append(gates, fmt.Sprintf("error budget (%s)  HOLD  (frozen) [live: status]", selected[i].Name))
+		}
+	}
+	return gates
 }
 
 func orNone(s string) string {

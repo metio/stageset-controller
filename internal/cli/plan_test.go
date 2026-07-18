@@ -87,3 +87,83 @@ func TestPlan_ExitZeroWhenNothingRuns(t *testing.T) {
 		t.Fatalf("plan with nothing to run should exit 0, got %d (stderr=%s)", code, stderr)
 	}
 }
+
+func containsSubstr(lines []string, sub string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPlanGates(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	// A Deny update window covering `now`: delivery is held.
+	deny := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{
+		UpdateWindows: []stagesv1.UpdateWindow{{
+			Type: "Deny",
+			From: &metav1.Time{Time: now.Add(-time.Hour)},
+			To:   &metav1.Time{Time: now.Add(time.Hour)},
+		}},
+	}}
+	if g := planGates(deny, nil, deny.Spec.Stages, now); !containsSubstr(g, "update window") {
+		t.Errorf("a covering Deny window should HOLD: %v", g)
+	}
+
+	// A status error-budget freeze.
+	budget := &stagesv1.StageSet{Status: stagesv1.StageSetStatus{
+		BudgetFreeze: &stagesv1.BudgetFreeze{Remaining: "0", ResumeThreshold: "0.05"},
+	}}
+	if g := planGates(budget, nil, nil, now); !containsSubstr(g, "error budget") {
+		t.Errorf("a status budget freeze should HOLD: %v", g)
+	}
+
+	// A stage awaiting a manual promotion.
+	promo := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{{Name: "app"}}}}
+	prior := map[string]stagesv1.StageStatus{"app": {PromotionState: &stagesv1.PromotionState{Phase: stagesv1.PromotionAwaitingManual}}}
+	if g := planGates(promo, prior, promo.Spec.Stages, now); !containsSubstr(g, "promotion (app)") {
+		t.Errorf("a stage awaiting promotion should HOLD: %v", g)
+	}
+
+	// Nothing holding: no gate lines.
+	if g := planGates(&stagesv1.StageSet{}, nil, nil, now); len(g) != 0 {
+		t.Errorf("no gates expected, got %v", g)
+	}
+}
+
+func TestPlan_ShowsPendingMigrations(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "planmig")
+	planStageSet(t, c, ns, "app")
+	// The controller's last reconcile queued a migration.
+	ss := getStageSetCLI(t, c, ns, "app")
+	ss.Status.PendingMigrations = []stagesv1.PendingMigration{{
+		Name: "schema-1-1", To: "1.1.0", From: "1.0.x", Stage: "first", Actions: []string{"job"},
+	}}
+	if err := c.Status().Update(context.Background(), ss); err != nil {
+		t.Fatalf("set pending migrations: %v", err)
+	}
+	dir := writeSourceTree(t, map[string]string{"cm.yaml": configMapManifest(ns, "settings", nil)})
+
+	stdout, stderr, code := runCLI(t, cfg, "plan", "app", "-n", ns, "--source-dir", dir)
+	if code != exitDiff {
+		t.Fatalf("a pending migration makes the plan non-empty (exit 1); got %d (stderr=%s)\n%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"migrations:", "schema-1-1", "before first"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("plan output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func getStageSetCLI(t testing.TB, c client.Client, ns, name string) *stagesv1.StageSet {
+	t.Helper()
+	var ss stagesv1.StageSet
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &ss); err != nil {
+		t.Fatalf("get StageSet: %v", err)
+	}
+	return &ss
+}

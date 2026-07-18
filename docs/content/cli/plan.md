@@ -38,11 +38,21 @@ StageSet moodle-acme/moodle  (version 1.0.0 → 1.1.0)
     pre  maintenance-on     WILL RUN (scope: Version — new version episode 1.0.0 → 1.1.0)
     pre  db-upgrade         WILL RUN (scope: Version — new version episode 1.0.0 → 1.1.0)
     post install-database   SKIP     (scope: Lifetime — completed once, ever)
+  migrations:
+    schema-1-1               1.0.x → 1.1.0  before app  [job]
+  gates:
+    update window  HOLD  (closed; opens 2026-06-16T02:00:00Z) [live: now]
   note: scope: Lifetime results reflect the current cluster (completionAnchor witnesses are read live).
 ```
 
+The `migrations` block lists the version-boundary migrations the controller has
+queued; the `gates` block lists what would hold the rollout — a closed update
+window (recomputed now, a pure function of the schedule and the clock), an
+[error-budget](/gating/error-budget/) freeze, or a stage
+[awaiting promotion](/gating/stage-promotion/) — each tagged `[live: now]` or
+`[live: status]` to say whether it was recomputed or read from status.
+
 A version resolved off the rendered manifests (an inline `spec.version.value` or
-`spec.version.fromObject`) is reproducible from the source. A
-`spec.version.fromArtifact` version, and update-window / promotion / error-budget
-holds, are noted in the output but not yet computed into the verdicts — those
-actions are shown as would-run.
+`spec.version.fromObject`) is reproducible from the source; a
+`spec.version.fromArtifact` version is not yet resolved in the preview, so
+version-scoped actions are shown as would-run.
