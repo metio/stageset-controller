@@ -192,6 +192,89 @@ func TestIsStateBearing(t *testing.T) {
 	}
 }
 
+// downgradeStageSet creates a StageSet at deployed 2.0.0 with a spec version of
+// 1.0.0 and allowDowngrade set, carrying one inline migration (to 2.0.0). When
+// reversible it declares down actions; otherwise the boundary is irreversible.
+func downgradeStageSet(t testing.TB, c client.Client, ns, name string, reversible, allow bool) {
+	t.Helper()
+	mig := stagesv1.Migration{
+		Name: "schema-2", To: "2.0.0", Stage: "first",
+		Actions: []stagesv1.Action{{Name: "up", Wait: &stagesv1.WaitAction{Expr: "true"}}},
+	}
+	if reversible {
+		mig.Down = []stagesv1.Action{{Name: "undo", Wait: &stagesv1.WaitAction{Expr: "true"}}}
+	}
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Spec: stagesv1.StageSetSpec{
+			Interval:   metav1.Duration{Duration: 5 * time.Minute},
+			Version:    &stagesv1.VersionSource{Value: "1.0.0", AllowDowngrade: allow},
+			Migrations: []stagesv1.Migration{mig},
+			Stages:     []stagesv1.Stage{{Name: "first", SourceRef: stagesv1.SourceReference{Name: name + "-ea"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	created := getStageSetCLI(t, c, ns, name)
+	created.Status.Version = "2.0.0" // deployed above the desired 1.0.0
+	if err := c.Status().Update(context.Background(), created); err != nil {
+		t.Fatalf("set status.version: %v", err)
+	}
+}
+
+func TestPlan_ShowsReversibleRollback(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "planrollback")
+	downgradeStageSet(t, c, ns, "app", true, true)
+	dir := writeSourceTree(t, map[string]string{"cm.yaml": configMapManifest(ns, "settings", nil)})
+
+	stdout, stderr, code := runCLI(t, cfg, "plan", "app", "-n", ns, "--source-dir", dir)
+	if code != exitDiff {
+		t.Fatalf("a downgrade makes the plan non-empty (exit 1); got %d (stderr=%s)\n%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"downgrade", "rollback:", "reverse", "schema-2"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("plan output missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "irreversible") {
+		t.Errorf("a reversible rollback must not be flagged irreversible:\n%s", stdout)
+	}
+}
+
+func TestPlan_FlagsIrreversibleRollback(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "planirrev")
+	downgradeStageSet(t, c, ns, "app", false, true) // no down actions
+	dir := writeSourceTree(t, map[string]string{"cm.yaml": configMapManifest(ns, "settings", nil)})
+
+	stdout, _, code := runCLI(t, cfg, "plan", "app", "-n", ns, "--source-dir", dir)
+	if code != exitDiff {
+		t.Fatalf("a downgrade makes the plan non-empty (exit 1); got %d\n%s", code, stdout)
+	}
+	for _, want := range []string{"⚠ irreversible", "schema-2", "downgrade refused"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("plan output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestPlan_NotesDowngradeNotEnabled(t *testing.T) {
+	cfg := envtestConfig(t)
+	c := testClient(t, cfg)
+	ns := makeNamespace(t, c, "plannoallow")
+	downgradeStageSet(t, c, ns, "app", true, false) // reversible, but allowDowngrade unset
+	dir := writeSourceTree(t, map[string]string{"cm.yaml": configMapManifest(ns, "settings", nil)})
+
+	stdout, _, _ := runCLI(t, cfg, "plan", "app", "-n", ns, "--source-dir", dir)
+	if !strings.Contains(stdout, "allowDowngrade") {
+		t.Errorf("plan should note the downgrade is not enabled:\n%s", stdout)
+	}
+}
+
 func TestPlan_ResolvesVersionFromArtifact(t *testing.T) {
 	cfg := envtestConfig(t)
 	c := testClient(t, cfg)

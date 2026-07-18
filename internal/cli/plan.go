@@ -17,9 +17,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
+	"github.com/Masterminds/semver/v3"
+
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/actionplan"
 	"github.com/metio/stageset-controller/internal/inventory"
+	"github.com/metio/stageset-controller/internal/migrations"
 	"github.com/metio/stageset-controller/internal/preview"
 	"github.com/metio/stageset-controller/internal/stageinv"
 	"github.com/metio/stageset-controller/internal/window"
@@ -43,9 +46,12 @@ type stageSetPlan struct {
 	Version    *versionPlan    `json:"version,omitempty"`
 	Stages     []stagePlan     `json:"stages,omitempty"`
 	Migrations []migrationPlan `json:"migrations,omitempty"`
-	Gates      []string        `json:"gates,omitempty"`
-	Prunes     []prunePlan     `json:"prunes,omitempty"`
-	Notes      []string        `json:"notes,omitempty"`
+	// Rollback holds the reverse steps when Version.Desired is below the deployed
+	// version (a downgrade); it replaces Migrations for that reconcile.
+	Rollback []rollbackStep `json:"rollback,omitempty"`
+	Gates    []string       `json:"gates,omitempty"`
+	Prunes   []prunePlan    `json:"prunes,omitempty"`
+	Notes    []string       `json:"notes,omitempty"`
 	// Error is set when this StageSet could not be planned (render failed, a
 	// decryption key was unreadable). During a fan-out a broken StageSet reports
 	// its error here and the rest are still planned, rather than aborting the run.
@@ -58,6 +64,19 @@ type stageSetPlan struct {
 type versionPlan struct {
 	Current string `json:"current,omitempty"`
 	Desired string `json:"desired,omitempty"`
+	// Downgrade is true when Desired is below Current: the reconcile unwinds
+	// rather than advances.
+	Downgrade bool `json:"downgrade,omitempty"`
+}
+
+// rollbackStep is one migration boundary a downgrade crosses. Irreversible marks
+// a boundary that declares no down actions, so the downgrade is refused rather
+// than run.
+type rollbackStep struct {
+	Name         string   `json:"name"`
+	To           string   `json:"to"`
+	Verbs        []string `json:"verbs,omitempty"`
+	Irreversible bool     `json:"irreversible,omitempty"`
 }
 
 type stagePlan struct {
@@ -285,9 +304,20 @@ func computeStageSetPlan(ctx context.Context, o *options, c client.Client, ss *s
 		p.Stages = append(p.Stages, sp)
 	}
 
-	for _, m := range pendingMigrations(ss) {
-		p.WouldRun = true
-		p.Migrations = append(p.Migrations, migrationPlan{Name: m.Name, From: m.From, To: m.To, Stage: m.Stage, Actions: m.Actions})
+	// A downgrade (desired below the deployed version) replaces the up-migrations
+	// block with a rollback preview; otherwise the queued migrations are shown.
+	if steps, downgrade, rbNotes := planRollback(ss, desired); downgrade {
+		p.WouldRun = true // any proposed downgrade is something a reviewer must see
+		p.Rollback = steps
+		p.Notes = append(p.Notes, rbNotes...)
+		if p.Version != nil {
+			p.Version.Downgrade = true
+		}
+	} else {
+		for _, m := range pendingMigrations(ss) {
+			p.WouldRun = true
+			p.Migrations = append(p.Migrations, migrationPlan{Name: m.Name, From: m.From, To: m.To, Stage: m.Stage, Actions: m.Actions})
+		}
 	}
 
 	p.Gates = planGates(ss, priorStages, selected, time.Now())
@@ -337,7 +367,11 @@ func renderPlans(out io.Writer, plans []stageSetPlan, format string) error {
 func renderPlanText(out io.Writer, p *stageSetPlan) {
 	header := fmt.Sprintf("StageSet %s/%s", p.Namespace, p.Name)
 	if p.Version != nil {
-		header += fmt.Sprintf("  (version %s → %s)", orNone(p.Version.Current), orNone(p.Version.Desired))
+		header += fmt.Sprintf("  (version %s → %s", orNone(p.Version.Current), orNone(p.Version.Desired))
+		if p.Version.Downgrade {
+			header += ", downgrade"
+		}
+		header += ")"
 	}
 	fmt.Fprintln(out, header)
 	if p.Error != "" {
@@ -360,6 +394,20 @@ func renderPlanText(out io.Writer, p *stageSetPlan) {
 			fmt.Fprintf(out, "    %-24s %s → %s  before %s%s\n", m.Name, orNone(m.From), m.To, m.Stage, verbs)
 		}
 	}
+	if len(p.Rollback) > 0 {
+		fmt.Fprintln(out, "  rollback:")
+		for _, s := range p.Rollback {
+			if s.Irreversible {
+				fmt.Fprintf(out, "    ⚠ irreversible  %-20s (to %s) — no down actions; downgrade refused\n", s.Name, s.To)
+				continue
+			}
+			verbs := ""
+			if len(s.Verbs) > 0 {
+				verbs = "  [" + strings.Join(s.Verbs, ", ") + "]"
+			}
+			fmt.Fprintf(out, "    reverse  %-20s (to %s)%s\n", s.Name, s.To, verbs)
+		}
+	}
 	if len(p.Gates) > 0 {
 		fmt.Fprintln(out, "  gates:")
 		for _, g := range p.Gates {
@@ -379,6 +427,53 @@ func renderPlanText(out io.Writer, p *stageSetPlan) {
 	for _, n := range p.Notes {
 		fmt.Fprintf(out, "  note: %s\n", n)
 	}
+}
+
+// planRollback previews an intentional downgrade: when the resolved desired
+// version is below the deployed version, it returns the migration boundaries the
+// downgrade would unwind, in reverse order, flagging any that declare no down
+// actions as irreversible. For an inline ladder it computes the steps fresh via
+// migrations.SelectDown — reproducible from the spec, the same selection the
+// reconciler runs; for a sourced ladder it falls back to the controller's queued
+// status. It returns downgrade=false (and no steps) when the transition is not a
+// downgrade or the versions do not parse.
+func planRollback(ss *stagesv1.StageSet, desired string) (steps []rollbackStep, downgrade bool, notes []string) {
+	if ss.Spec.Version == nil || desired == "" || ss.Status.Version == "" {
+		return nil, false, nil
+	}
+	curV, err1 := semver.NewVersion(ss.Status.Version)
+	desV, err2 := semver.NewVersion(desired)
+	if err1 != nil || err2 != nil || !desV.LessThan(curV) {
+		return nil, false, nil
+	}
+	downgrade = true
+	if !ss.Spec.Version.AllowDowngrade {
+		notes = append(notes, "downgrade not enabled: set spec.version.allowDowngrade to roll back")
+	}
+	switch {
+	case len(ss.Spec.Migrations) > 0:
+		down, derr := migrations.SelectDown(ss.Spec.Migrations, curV, desV)
+		if derr != nil {
+			return steps, downgrade, append(notes, "rollback preview unavailable: "+derr.Error())
+		}
+		for _, m := range down {
+			st := rollbackStep{Name: m.Name, To: m.To}
+			if len(m.Down) == 0 {
+				st.Irreversible = true
+			} else {
+				for i := range m.Down {
+					st.Verbs = append(st.Verbs, m.Down[i].Verb())
+				}
+			}
+			steps = append(steps, st)
+		}
+	case ss.Spec.MigrationsSourceRef != nil:
+		notes = append(notes, "rollback steps for a sourced ladder are resolved by the controller [live: status]")
+		for _, m := range pendingMigrations(ss) {
+			steps = append(steps, rollbackStep{Name: m.Name, To: m.To, Verbs: m.Actions})
+		}
+	}
+	return steps, downgrade, notes
 }
 
 // resolvePlanVersion resolves spec.version for the preview from an inline value or

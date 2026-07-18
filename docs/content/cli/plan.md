@@ -69,6 +69,28 @@ window (recomputed now, a pure function of the schedule and the clock), an
 state-bearing one (a PVC, a StatefulSet) with `⚠`, so a prune that would destroy
 data is a red line in the plan rather than an incident after the fact.
 
+## Previewing a rollback
+
+When the desired version is below the deployed version, the plan is a rollback
+safety check: a `rollback` block replaces `migrations`, listing which
+[migration](/gating/versioned-migrations/#rolling-back) boundaries the downgrade
+would reverse and flagging any that cannot be reversed.
+
+```text
+$ stagesetctl plan moodle -n moodle-acme
+StageSet moodle-acme/moodle  (version 1.2.0 → 1.0.0, downgrade)
+  stage app  (revision sha256:abc123…)
+  rollback:
+    reverse  schema-1-1           (to 1.1.0)  [job]
+    ⚠ irreversible  schema-1-2    (to 1.2.0) — no down actions; downgrade refused
+```
+
+For an inline ladder the steps are computed the same way the controller selects
+them, so the preview is reproducible from the spec. An irreversible boundary — one
+that declares no `down` actions — is the red line: a downgrade that cannot be done
+safely is caught before merge, not after. A downgrade with `spec.version.allowDowngrade`
+unset is noted as not enabled.
+
 The version is resolved from the source the same way the controller resolves it:
 an inline `spec.version.value`, a field of a rendered object
 (`spec.version.fromObject`), or a version file in a stage's artifact
