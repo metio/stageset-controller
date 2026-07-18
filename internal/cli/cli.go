@@ -168,6 +168,7 @@ func newRootCommand(o *options) *cobra.Command {
 	root.AddCommand(newBaselineCommand(o))
 	root.AddCommand(newResetLedgerCommand(o))
 	root.AddCommand(newPlanCommand(o))
+	root.AddCommand(newFleetCommand(o))
 
 	return root
 }
