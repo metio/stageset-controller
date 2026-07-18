@@ -144,6 +144,12 @@ func (r *StageSetReconciler) planVersionMigrations(ctx context.Context, ss *stag
 		}
 		return nil, "", "", err // transient (fetch)
 	}
+	// A rollback-to directive (from a FleetRollout on regression, or an operator by
+	// hand) overrides the source-resolved version with a lower one, engaging the
+	// downgrade path to unwind the StageSet back to it.
+	if rb := rollbackDirective(ss); rb != "" {
+		desired = rb
+	}
 	desiredV, err := semver.NewVersion(desired)
 	if err != nil {
 		return nil, ReasonInvalidVersion, fmt.Sprintf("desired version %q is not a semver: %v", desired, err), nil

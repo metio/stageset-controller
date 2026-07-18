@@ -324,6 +324,67 @@ func TestFleetRollout_MemberRegressionHalts(t *testing.T) {
 	}
 }
 
+// TestFleetRollout_OnRegressionRollbackStampsMembers proves that with
+// onRegression: Rollback a regression stamps the rollback-to annotation
+// (previousVersion) on the halted wave's members — the directive that unwinds them.
+func TestFleetRollout_OnRegressionRollbackStampsMembers(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	const app = "rollback"
+	fleetMember(t, c, ns, "w0", app, "0")
+	fleetMember(t, c, ns, "w1", app, "1")
+
+	soak := metav1.Duration{Duration: 30 * time.Minute}
+	fr := &stagesv1.FleetRollout{
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-rollback"},
+		Spec: stagesv1.FleetRolloutSpec{
+			TargetVersion:   "2.0.0",
+			PreviousVersion: "1.0.0",
+			OnRegression:    "Rollback",
+			Selector:        appSelector(app),
+			Waves: []stagesv1.FleetWave{
+				{Name: "canary", Selector: ringSelector("0"), Soak: &soak},
+				{Name: "broad", Selector: ringSelector("1")},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), fr); err != nil {
+		t.Fatalf("create FleetRollout: %v", err)
+	}
+	t0 := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+
+	reconcileFleetAt(t, c, "fleet-rollback", t0, nil)
+	settleMember(t, c, ns, "w0", "2.0.0")
+	reconcileFleetAt(t, c, "fleet-rollback", t0, nil) // wave 0 settled + soaking
+	unsettleMember(t, c, ns, "w0")
+	reconcileFleetAt(t, c, "fleet-rollback", t0.Add(time.Minute), nil) // regression → halt + rollback
+
+	if got := getFleet(t, c, "fleet-rollback"); got.Status.Phase != stagesv1.FleetHalted {
+		t.Fatalf("phase = %q, want Halted", got.Status.Phase)
+	}
+	if got := getStageSet(t, c, ns, "w0").Annotations[rollbackToAnnotation]; got != "1.0.0" {
+		t.Fatalf("regressed member should carry rollback-to=1.0.0, got %q", got)
+	}
+}
+
+// TestFleetRollout_RollbackRequiresPreviousVersion proves the CEL rule rejects a
+// Rollback rollout with no previousVersion.
+func TestFleetRollout_RollbackRequiresPreviousVersion(t *testing.T) {
+	c := testClient(t)
+	fr := &stagesv1.FleetRollout{
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-badrollback"},
+		Spec: stagesv1.FleetRolloutSpec{
+			TargetVersion: "2.0.0",
+			OnRegression:  "Rollback", // no previousVersion
+			Selector:      appSelector("bad"),
+			Waves:         []stagesv1.FleetWave{{Name: "canary", Selector: ringSelector("0")}},
+		},
+	}
+	if err := c.Create(context.Background(), fr); err == nil {
+		t.Fatal("a Rollback rollout without previousVersion must be rejected")
+	}
+}
+
 // TestFleetRollout_NamespaceSelectorBounds proves the namespaceSelector excludes a
 // matching StageSet in an out-of-scope namespace — it is not a member and is never
 // approved.

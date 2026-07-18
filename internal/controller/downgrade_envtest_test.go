@@ -238,6 +238,69 @@ func TestReconcile_Downgrade_UnwindsEveryCrossedBoundary(t *testing.T) {
 	}
 }
 
+// TestReconcile_RollbackToAnnotation_TriggersDowngrade proves the rollback-to
+// annotation overrides the source-resolved version with a lower one, driving a
+// downgrade — the mechanism a FleetRollout uses to revert a regressed member.
+func TestReconcile_RollbackToAnnotation_TriggersDowngrade(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	for _, n := range []string{"up-victim", "down-victim"} {
+		if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: n}}); err != nil {
+			t.Fatalf("create %s: %v", n, err)
+		}
+	}
+	servedArtifact(t, c, ns, "stage-ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
+	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": reversibleLadder(ns, "up-victim", "down-victim")})
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:            metav1.Duration{Duration: time.Minute},
+			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
+			MigrationsSourceRef: &stagesv1.MigrationsSource{SourceRef: stagesv1.SourceReference{Name: "ladder-ea"}},
+			Stages:              []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "stage-ea"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+	// Baseline at 1.0.0, then upgrade to 2.0.0 with downgrades allowed.
+	if err := reconcileWith(t, c, ss, nil); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	ss = getStageSet(t, c, ns, "app")
+	ss.Spec.Version = &stagesv1.VersionSource{Value: "2.0.0", AllowDowngrade: true}
+	if err := c.Update(context.Background(), ss); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if err := reconcileWith(t, c, ss, nil); err != nil {
+		t.Fatalf("upgrade reconcile: %v", err)
+	}
+	if v := getStageSet(t, c, ns, "app").Status.Version; v != "2.0.0" {
+		t.Fatalf("upgrade version = %q, want 2.0.0", v)
+	}
+
+	// Stamp rollback-to below the deployed version. The source still says 2.0.0,
+	// but the directive overrides it → downgrade to 1.0.0 runs the down action.
+	ss = getStageSet(t, c, ns, "app")
+	if ss.Annotations == nil {
+		ss.Annotations = map[string]string{}
+	}
+	ss.Annotations[rollbackToAnnotation] = "1.0.0"
+	if err := c.Update(context.Background(), ss); err != nil {
+		t.Fatalf("stamp rollback-to: %v", err)
+	}
+	if err := reconcileWith(t, c, ss, nil); err != nil {
+		t.Fatalf("rollback reconcile: %v", err)
+	}
+	final := getStageSet(t, c, ns, "app")
+	if final.Status.Version != "1.0.0" {
+		t.Fatalf("rollback-to did not downgrade: version = %q, want 1.0.0", final.Status.Version)
+	}
+	if cmExists(t, c, ns, "down-victim") {
+		t.Fatal("the down action did not run under the rollback directive")
+	}
+}
+
 // TestReconcile_Downgrade_RefusedWithoutAllowDowngrade proves a downgrade is
 // refused with ReasonDowngradeNotAllowed when allowDowngrade is unset, and the
 // version does not move.

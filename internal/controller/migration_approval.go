@@ -4,6 +4,7 @@
 package controller
 
 import (
+	"github.com/Masterminds/semver/v3"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -15,6 +16,38 @@ import (
 // spec.version.approvalMode holds a transition, the controller proceeds only once
 // this annotation equals the desired version (reason AwaitingApproval until then).
 const approvedVersionAnnotation = "stages.metio.wtf/approved-version"
+
+// rollbackToAnnotation directs a downgrade: when its value is a version below the
+// deployed status.version, it overrides the source-resolved desired version, so
+// the controller rolls the StageSet back to it via the downgrade path (subject to
+// spec.version.allowDowngrade and the crossed migrations' down actions). A
+// FleetRollout stamps it on regression when onRegression is Rollback; an operator
+// can stamp it by hand for a manual rollback. It self-clears in effect: once the
+// version reaches the target it is no longer below current, so it stops applying.
+const rollbackToAnnotation = "stages.metio.wtf/rollback-to"
+
+// rollbackDirective returns the version a rollback-to annotation directs the
+// StageSet down to, or "" when there is none in effect — the annotation is unset,
+// unparseable, or not below the deployed version. Overriding the source-resolved
+// desired version with a lower one is what engages the downgrade path.
+func rollbackDirective(ss *stagesv1.StageSet) string {
+	rb := ss.Annotations[rollbackToAnnotation]
+	if rb == "" || ss.Status.Version == "" {
+		return ""
+	}
+	rbV, err := semver.NewVersion(rb)
+	if err != nil {
+		return ""
+	}
+	curV, err := semver.NewVersion(ss.Status.Version)
+	if err != nil {
+		return ""
+	}
+	if rbV.LessThan(curV) {
+		return rb
+	}
+	return ""
+}
 
 // versionApprovalNeeded reports whether a version transition must be approved
 // before it proceeds, per spec.version.approvalMode. Baselining (first adoption)
@@ -48,6 +81,7 @@ func (migrationApprovalPredicate) Update(e event.UpdateEvent) bool {
 	if e.ObjectOld == nil || e.ObjectNew == nil {
 		return false
 	}
-	return e.ObjectOld.GetAnnotations()[approvedVersionAnnotation] !=
-		e.ObjectNew.GetAnnotations()[approvedVersionAnnotation]
+	old, cur := e.ObjectOld.GetAnnotations(), e.ObjectNew.GetAnnotations()
+	return old[approvedVersionAnnotation] != cur[approvedVersionAnnotation] ||
+		old[rollbackToAnnotation] != cur[rollbackToAnnotation]
 }

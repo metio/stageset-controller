@@ -114,11 +114,19 @@ spec:
                 description: |-
                   OnRegression is what to do when a wave's health gate fails or a member
                   regresses: Halt (default) stops approving further waves; Rollback also
-                  stamps the pre-rollout version back onto the affected wave, unwinding it via
-                  each member's down migrations where they exist.
+                  directs the affected wave's members back to PreviousVersion, unwinding them
+                  via each member's down migrations where they exist.
                 enum:
                 - Halt
                 - Rollback
+                type: string
+              previousVersion:
+                description: |-
+                  PreviousVersion is the version a Rollback directs regressed members back to —
+                  the version the fleet is rolling away from. Required when onRegression is
+                  Rollback. A member only actually reverts if it permits downgrades
+                  (spec.version.allowDowngrade) and the crossed migrations declare down actions;
+                  otherwise it refuses, and the fleet stays halted.
                 type: string
               selector:
                 description: |-
@@ -353,6 +361,10 @@ spec:
             - targetVersion
             - waves
             type: object
+            x-kubernetes-validations:
+            - message: previousVersion is required when onRegression is Rollback
+              rule: self.onRegression != 'Rollback' || (has(self.previousVersion)
+                && size(self.previousVersion) > 0)
           status:
             description: FleetRolloutStatus reports rollout progress.
             properties:

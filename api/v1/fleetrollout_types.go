@@ -9,6 +9,7 @@ import (
 
 // FleetRolloutSpec declares a progressive rollout of one target version across a
 // selected set of StageSets, in ordered waves.
+// +kubebuilder:validation:XValidation:rule="self.onRegression != 'Rollback' || (has(self.previousVersion) && size(self.previousVersion) > 0)",message="previousVersion is required when onRegression is Rollback"
 type FleetRolloutSpec struct {
 	// TargetVersion is the version this rollout approves across the fleet. The
 	// controller stamps it as each wave opens; a member advances to it only when
@@ -37,12 +38,20 @@ type FleetRolloutSpec struct {
 
 	// OnRegression is what to do when a wave's health gate fails or a member
 	// regresses: Halt (default) stops approving further waves; Rollback also
-	// stamps the pre-rollout version back onto the affected wave, unwinding it via
-	// each member's down migrations where they exist.
+	// directs the affected wave's members back to PreviousVersion, unwinding them
+	// via each member's down migrations where they exist.
 	// +kubebuilder:validation:Enum=Halt;Rollback
 	// +kubebuilder:default=Halt
 	// +optional
 	OnRegression string `json:"onRegression,omitempty"`
+
+	// PreviousVersion is the version a Rollback directs regressed members back to —
+	// the version the fleet is rolling away from. Required when onRegression is
+	// Rollback. A member only actually reverts if it permits downgrades
+	// (spec.version.allowDowngrade) and the crossed migrations declare down actions;
+	// otherwise it refuses, and the fleet stays halted.
+	// +optional
+	PreviousVersion string `json:"previousVersion,omitempty"`
 }
 
 // FleetWave is one ordered group of the rollout.

@@ -201,7 +201,7 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 	for w := range fr.Spec.Waves {
 		ws := &fr.Status.Waves[w]
 		if prior[ws.Name].SoakUntil != nil && !ws.Settled {
-			return r.halt(ctx, fr, ws.Name,
+			return r.halt(ctx, fr, ws.Name, waveMembers[w],
 				fmt.Sprintf("wave %q regressed: a member is no longer at version %s and Ready", ws.Name, target))
 		}
 		passed := false
@@ -218,7 +218,7 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 				case verdict == healthPassing:
 					passed = true
 				default: // healthFailing
-					return r.halt(ctx, fr, ws.Name,
+					return r.halt(ctx, fr, ws.Name, waveMembers[w],
 						fmt.Sprintf("wave %q failed its health gate: metric %.4g is outside the threshold", ws.Name, value))
 				}
 			}
@@ -295,9 +295,19 @@ func (r *FleetRolloutReconciler) evalGate(ctx context.Context, gate *stagesv1.Fl
 }
 
 // halt stops the rollout: no further waves open, phase becomes Halted, and a
-// Warning event records the cause. The halt is re-derived each reconcile, so it
-// clears on its own if the cause does (a member recovers, the gate passes again).
-func (r *FleetRolloutReconciler) halt(_ context.Context, fr *stagesv1.FleetRollout, wave, msg string) (ctrl.Result, error) {
+// Warning event records the cause. When onRegression is Rollback it first directs
+// the halted wave's members back to previousVersion (they revert via their own
+// down migrations, or refuse if not reversible). The halt is re-derived each
+// reconcile, so it clears on its own if the cause does.
+func (r *FleetRolloutReconciler) halt(ctx context.Context, fr *stagesv1.FleetRollout, wave string, waveMembers []stagesv1.StageSet, msg string) (ctrl.Result, error) {
+	if fr.Spec.OnRegression == "Rollback" && fr.Spec.PreviousVersion != "" {
+		for i := range waveMembers {
+			if err := r.rollbackMember(ctx, &waveMembers[i], fr.Spec.PreviousVersion); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		msg += fmt.Sprintf("; rolling wave %q back to %s", wave, fr.Spec.PreviousVersion)
+	}
 	fr.Status.Phase = stagesv1.FleetHalted
 	fr.Status.CurrentWave = wave
 	r.setFleetReady(fr, metav1.ConditionFalse, ReasonFleetHalted, msg)
@@ -305,6 +315,20 @@ func (r *FleetRolloutReconciler) halt(_ context.Context, fr *stagesv1.FleetRollo
 		r.Recorder.Eventf(fr, nil, corev1.EventTypeWarning, ReasonFleetHalted, ReasonFleetHalted, "%s", msg)
 	}
 	return ctrl.Result{RequeueAfter: fleetRequeueInterval}, nil
+}
+
+// rollbackMember stamps the rollback-to annotation, directing a member to revert
+// to version. Idempotent.
+func (r *FleetRolloutReconciler) rollbackMember(ctx context.Context, ss *stagesv1.StageSet, version string) error {
+	if ss.Annotations[rollbackToAnnotation] == version {
+		return nil
+	}
+	patch := client.MergeFrom(ss.DeepCopy())
+	if ss.Annotations == nil {
+		ss.Annotations = map[string]string{}
+	}
+	ss.Annotations[rollbackToAnnotation] = version
+	return r.Patch(ctx, ss, patch)
 }
 
 // members resolves the StageSets this rollout targets: those matching spec.selector,
