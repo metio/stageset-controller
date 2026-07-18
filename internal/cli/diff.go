@@ -161,6 +161,7 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 	priorStages := indexStageStatuses(ss.Status.Stages)
 	diffByStage := map[string][]diffrender.Change{}
 	renderedRefs := map[string][]inventory.ObjectRef{}
+	renders := map[string]preview.StageRender{}
 	var actions []diffrender.ActionPreview
 	for i := range selected {
 		stage := &selected[i]
@@ -186,13 +187,32 @@ func runDiff(ctx context.Context, o *options, opts diffOptions) error {
 			refs = append(refs, stageinv.RefOf(obj))
 		}
 		renderedRefs[stage.Name] = refs
+		renders[stage.Name] = render
 
 		changes, cerr := stageChanges(ctx, applier, applyClient, &ss, stage.Name, render.Objects, opts.serverSide)
 		if cerr != nil {
 			return runtimeErr(cerr)
 		}
 		diffByStage[stage.Name] = changes
-		actions = append(actions, stageActionsToRun(ctx, c, ss.Namespace, stage, render.Revision, priorStages[stage.Name], lifetimeLedger)...)
+	}
+
+	// Predict each stage's action verdicts with the shared predicate the
+	// controller and plan run, so the "actions that would run" list honors all
+	// three scopes. The version is resolved once from the rendered stages (an
+	// inline value or a fromObject field); an unresolved version leaves
+	// version-scoped actions conservatively listed as would-run.
+	desired, _ := resolvePlanVersion(&ss, renders)
+	for i := range selected {
+		stage := &selected[i]
+		actions = append(actions, stageActionsToRun(ctx, c, stage, actionplan.VerdictInputs{
+			Namespace:      ss.Namespace,
+			Revision:       renders[stage.Name].Revision,
+			Versioned:      ss.Spec.Version != nil,
+			DesiredVersion: desired,
+			CurrentVersion: ss.Status.Version,
+			Prior:          priorStages[stage.Name],
+			Lifetime:       lifetimeLedger,
+		})...)
 	}
 
 	pruneByStage := map[string][]diffrender.Change{}
@@ -238,51 +258,41 @@ func indexStageStatuses(stages []stagesv1.StageStatus) map[string]stagesv1.Stage
 	return out
 }
 
-// stageActionsToRun lists the actions a stage would run on the next reconcile,
-// omitting those a ledger already satisfies. A Revision-scoped action is omitted
-// when the revision ledger recorded it at the rendered revision; a scope:
-// Lifetime action is omitted when the StageLedger records it complete (with a
-// valid anchor) — the same gate the controller applies, so the preview does not
-// list a once-ever bootstrap that has already run. A local render (no revision)
-// cannot consult the revision ledger, so those actions are all listed.
-//
-// scope: Version actions are not yet gated here — that needs the resolved
-// version, which the diff does not compute; a held version action can still show
-// as pending until the version-aware preview lands.
-func stageActionsToRun(ctx context.Context, reader client.Client, ns string, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, lifetime *stagesv1.StageLedger) []diffrender.ActionPreview {
+// stageActionsToRun lists the pre/post actions a stage would run on the next
+// reconcile, plus its onFailure actions. The pre/post list is predicted by the
+// shared ActionVerdicts — the same scope/ledger/anchor gate the controller and
+// plan run — so a Revision action already recorded at the rendered revision, a
+// scope: Version action held at a fixed version, and a completed scope: Lifetime
+// action are all omitted; a Lifetime action whose witness is gone is listed
+// (it re-runs). onFailure actions carry no scope or ledger — they run only on a
+// failure — but are listed for completeness.
+func stageActionsToRun(ctx context.Context, reader client.Client, stage *stagesv1.Stage, in actionplan.VerdictInputs) []diffrender.ActionPreview {
 	if stage.Actions == nil {
 		return nil
 	}
-	executed := map[string]bool{}
-	if revision != "" && prior.LedgerRevision == revision {
-		for _, name := range prior.ExecutedActions {
-			executed[name] = true
-		}
+	byName := make(map[string]*stagesv1.Action, len(stage.Actions.Pre)+len(stage.Actions.Post))
+	for i := range stage.Actions.Pre {
+		byName[stage.Actions.Pre[i].Name] = &stage.Actions.Pre[i]
 	}
-	scopes := actionplan.ActionScopes(stage)
-	lifetimeDone := map[string]bool{}
-	for _, name := range actionplan.EvaluateLifetimeGate(ctx, reader, lifetime, ns, stage.Name).Done {
-		lifetimeDone[name] = true
+	for i := range stage.Actions.Post {
+		byName[stage.Actions.Post[i].Name] = &stage.Actions.Post[i]
 	}
 	var out []diffrender.ActionPreview
-	add := func(phase string, list []stagesv1.Action) {
-		for i := range list {
-			name := list[i].Name
-			if executed[name] {
-				continue
-			}
-			if scopes[name] == stagesv1.ScopeLifetime && lifetimeDone[name] {
-				continue // once-ever, already recorded complete
-			}
-			kind, detail := describeAction(&list[i])
-			out = append(out, diffrender.ActionPreview{
-				Stage: stage.Name, Phase: phase, Name: name, Type: kind, Detail: detail,
-			})
+	for _, v := range actionplan.ActionVerdicts(ctx, reader, stage, in) {
+		if v.State == actionplan.Skip {
+			continue
 		}
+		kind, detail := describeAction(byName[v.Name])
+		out = append(out, diffrender.ActionPreview{
+			Stage: stage.Name, Phase: v.Phase, Name: v.Name, Type: kind, Detail: detail,
+		})
 	}
-	add("pre", stage.Actions.Pre)
-	add("post", stage.Actions.Post)
-	add("onFailure", stage.Actions.OnFailure)
+	for i := range stage.Actions.OnFailure {
+		kind, detail := describeAction(&stage.Actions.OnFailure[i])
+		out = append(out, diffrender.ActionPreview{
+			Stage: stage.Name, Phase: "onFailure", Name: stage.Actions.OnFailure[i].Name, Type: kind, Detail: detail,
+		})
+	}
 	return out
 }
 

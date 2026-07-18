@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/actionplan"
 	"github.com/metio/stageset-controller/internal/apply"
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/diffrender"
@@ -173,7 +174,7 @@ func TestDescribeAction_Table(t *testing.T) {
 
 func TestStageActionsToRun_NoActions(t *testing.T) {
 	stage := &stagesv1.Stage{Name: "first"}
-	if out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", stagesv1.StageStatus{}, nil); out != nil {
+	if out := stageActionsToRun(context.Background(), nil, stage, actionplan.VerdictInputs{Revision: "rev1"}); out != nil {
 		t.Errorf("stage without actions = %v, want nil", out)
 	}
 }
@@ -187,7 +188,7 @@ func TestStageActionsToRun_EnumeratesAllPhases(t *testing.T) {
 			OnFailure: []stagesv1.Action{{Name: "p3", Delete: &stagesv1.DeleteAction{Target: fluxmeta.NamespacedObjectKindReference{Kind: "Pod", Name: "x"}}}},
 		},
 	}
-	out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", stagesv1.StageStatus{}, nil)
+	out := stageActionsToRun(context.Background(), nil, stage, actionplan.VerdictInputs{Revision: "rev1"})
 	if len(out) != 3 {
 		t.Fatalf("want 3 previews, got %d: %+v", len(out), out)
 	}
@@ -219,7 +220,7 @@ func TestStageActionsToRun_LedgerOmitsExecuted(t *testing.T) {
 		LedgerRevision:  "rev1",
 		ExecutedActions: []string{"done"},
 	}
-	out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", prior, nil)
+	out := stageActionsToRun(context.Background(), nil, stage, actionplan.VerdictInputs{Revision: "rev1", Prior: prior})
 	if len(out) != 1 || out[0].Name != "todo" {
 		t.Fatalf("ledger should omit 'done', got %+v", out)
 	}
@@ -234,7 +235,7 @@ func TestStageActionsToRun_LedgerIgnoredWhenRevisionDiffers(t *testing.T) {
 	}
 	// Ledger pinned to a different revision: every action must be listed.
 	prior := stagesv1.StageStatus{LedgerRevision: "other", ExecutedActions: []string{"done"}}
-	if out := stageActionsToRun(context.Background(), nil, "", stage, "rev1", prior, nil); len(out) != 1 {
+	if out := stageActionsToRun(context.Background(), nil, stage, actionplan.VerdictInputs{Revision: "rev1", Prior: prior}); len(out) != 1 {
 		t.Fatalf("mismatched ledger revision should list all, got %+v", out)
 	}
 }
@@ -248,7 +249,7 @@ func TestStageActionsToRun_EmptyRevisionListsAll(t *testing.T) {
 		},
 	}
 	prior := stagesv1.StageStatus{LedgerRevision: "", ExecutedActions: []string{"done"}}
-	if out := stageActionsToRun(context.Background(), nil, "", stage, "", prior, nil); len(out) != 1 {
+	if out := stageActionsToRun(context.Background(), nil, stage, actionplan.VerdictInputs{Prior: prior}); len(out) != 1 {
 		t.Fatalf("empty revision should list all, got %+v", out)
 	}
 }
@@ -268,9 +269,36 @@ func TestStageActionsToRun_LifetimeCompletedOmitted(t *testing.T) {
 	ledger := &stagesv1.StageLedger{Status: stagesv1.StageLedgerStatus{
 		CompletedActions: []stagesv1.LedgerCompletion{{Stage: "first", Action: "bootstrap", Origin: stagesv1.OriginExecuted}},
 	}}
-	out := stageActionsToRun(context.Background(), nil, "ns", stage, "rev1", stagesv1.StageStatus{}, ledger)
+	out := stageActionsToRun(context.Background(), nil, stage, actionplan.VerdictInputs{Namespace: "ns", Revision: "rev1", Lifetime: ledger})
 	if len(out) != 1 || out[0].Name != "notify" {
 		t.Fatalf("a completed Lifetime action must be omitted from the preview; got %+v", out)
+	}
+}
+
+func TestStageActionsToRun_VersionHeldOmitted(t *testing.T) {
+	stage := &stagesv1.Stage{Name: "app", Actions: &stagesv1.StageActions{
+		Pre: []stagesv1.Action{
+			{Name: "db-upgrade", Scope: stagesv1.ScopeVersion, Wait: &stagesv1.WaitAction{Expr: "true"}},
+			{Name: "check", Wait: &stagesv1.WaitAction{Expr: "true"}}, // Revision (default)
+		},
+	}}
+	// A new revision at an unchanged version: the Version action is held (recorded
+	// at 2.0.0), the Revision action runs.
+	prior := stagesv1.StageStatus{
+		LedgerRevision:         "old",
+		LedgerVersion:          "2.0.0",
+		ExecutedVersionActions: []string{"db-upgrade"},
+	}
+	in := actionplan.VerdictInputs{Revision: "rev2", Versioned: true, DesiredVersion: "2.0.0", CurrentVersion: "2.0.0", Prior: prior}
+	names := map[string]bool{}
+	for _, a := range stageActionsToRun(context.Background(), nil, stage, in) {
+		names[a.Name] = true
+	}
+	if names["db-upgrade"] {
+		t.Error("a held scope: Version action must be omitted from the diff preview")
+	}
+	if !names["check"] {
+		t.Error("a Revision action at a new revision should be listed")
 	}
 }
 

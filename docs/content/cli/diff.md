@@ -52,8 +52,14 @@ Actions to run:
 
 Objects that left the stage's [inventory](/api/stageinventory/) show as deletions
 (`pruned: …`); pass `--prune=false` to hide them. The trailing `Actions to run`
-block lists the [pre/post/onFailure actions](/defining-a-release/actions/) a real reconcile
-would execute — `diff` never runs them, it only reports them.
+block lists the [pre/post actions](/defining-a-release/actions/) a real reconcile
+would run, honoring the
+[action scopes](/defining-a-release/actions/#scope-revision-version-or-lifetime):
+an action already satisfied for its scope — a `Revision` action recorded at this
+revision, a `Version` action held at a fixed version, a completed once-ever
+`Lifetime` action — is omitted, plus the stage's `onFailure` actions. `diff` never
+runs them, it only reports them. For the full behavioral preview — _why_ each
+action runs, skips, or re-runs — see [`plan`](/cli/plan/).
 
 A clean run prints nothing and exits `0`; pending changes exit `1`. To inspect
 without failing the shell:
