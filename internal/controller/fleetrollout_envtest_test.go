@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/metricsource"
 )
 
 // labeledNamespace creates a namespace carrying the given labels, so a
@@ -30,14 +31,17 @@ func labeledNamespace(t *testing.T, c client.Client, labels map[string]string) s
 	return ns.Name
 }
 
-// fleetMember creates a minimal fleet-managed StageSet (approvalMode: Always) with
-// the given labels, deployed at 1.0.0. The FleetRollout reconciler only reads its
-// labels and status and stamps its approval annotation; the StageSet reconciler is
-// not run here.
-func fleetMember(t *testing.T, c client.Client, ns, name string, labels map[string]string) {
+// fleetMember creates a minimal fleet-managed StageSet (approvalMode: Always)
+// carrying the given app + ring labels, deployed at 1.0.0. The FleetRollout
+// reconciler only reads its labels and status and stamps its approval annotation;
+// the StageSet reconciler is not run here. Each test uses a UNIQUE app value: the
+// cluster-scoped fleet selects across all namespaces, and envtest does not finalize
+// namespace deletion, so a shared label would let one test's fleet pick up another's
+// leftover members.
+func fleetMember(t *testing.T, c client.Client, ns, name, app, ring string) {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: map[string]string{"app": app, "ring": ring}},
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  &stagesv1.VersionSource{Value: "1.0.0", ApprovalMode: stagesv1.ApprovalAlways},
@@ -66,6 +70,20 @@ func settleMember(t *testing.T, c client.Client, ns, name, version string) {
 	}
 }
 
+// unsettleMember makes a member unhealthy (Ready=False) — a regression after it
+// had reached the target version.
+func unsettleMember(t *testing.T, c client.Client, ns, name string) {
+	t.Helper()
+	ss := getStageSet(t, c, ns, name)
+	apimeta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
+		Type: ConditionReady, Status: metav1.ConditionFalse, Reason: ReasonStageFailed,
+		Message: "broke", ObservedGeneration: ss.Generation,
+	})
+	if err := c.Status().Update(context.Background(), ss); err != nil {
+		t.Fatalf("unsettle member %s: %v", name, err)
+	}
+}
+
 func reconcileFleet(t *testing.T, c client.Client, name string) ctrl.Result {
 	t.Helper()
 	r := &FleetRolloutReconciler{Client: c}
@@ -74,6 +92,16 @@ func reconcileFleet(t *testing.T, c client.Client, name string) ctrl.Result {
 		t.Fatalf("fleet reconcile: %v", err)
 	}
 	return res
+}
+
+// reconcileFleetAt drives one fleet reconcile with an injected clock and metric
+// querier, so soak timing and health gates are deterministic.
+func reconcileFleetAt(t *testing.T, c client.Client, name string, now time.Time, q metricsource.Querier) {
+	t.Helper()
+	r := &FleetRolloutReconciler{Client: c, Now: func() time.Time { return now }, MetricQuerier: q}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
+		t.Fatalf("fleet reconcile: %v", err)
+	}
 }
 
 func getFleet(t *testing.T, c client.Client, name string) *stagesv1.FleetRollout {
@@ -94,22 +122,28 @@ func ringSelector(ring string) metav1.LabelSelector {
 	return metav1.LabelSelector{MatchLabels: map[string]string{"ring": ring}}
 }
 
+func appSelector(app string) metav1.LabelSelector {
+	return metav1.LabelSelector{MatchLabels: map[string]string{"app": app}}
+}
+
+func maxThreshold(v string) stagesv1.Threshold { return stagesv1.Threshold{Max: &v} }
+
 // TestFleetRollout_OpensWavesInOrder drives the whole Phase-1 loop: wave 0 is
 // approved first and wave 1 is held; only once wave 0 settles at the target does
 // wave 1 open; once it settles the rollout completes.
 func TestFleetRollout_OpensWavesInOrder(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
-
-	fleetMember(t, c, ns, "app0a", map[string]string{"app": "moodle", "ring": "0"})
-	fleetMember(t, c, ns, "app0b", map[string]string{"app": "moodle", "ring": "0"})
-	fleetMember(t, c, ns, "app1a", map[string]string{"app": "moodle", "ring": "1"})
+	const app = "order"
+	fleetMember(t, c, ns, "app0a", app, "0")
+	fleetMember(t, c, ns, "app0b", app, "0")
+	fleetMember(t, c, ns, "app1a", app, "1")
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "moodle-2"},
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-order"},
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
-			Selector:      metav1.LabelSelector{MatchLabels: map[string]string{"app": "moodle"}},
+			Selector:      appSelector(app),
 			Waves: []stagesv1.FleetWave{
 				{Name: "canary", Selector: ringSelector("0")},
 				{Name: "broad", Selector: ringSelector("1")},
@@ -121,7 +155,7 @@ func TestFleetRollout_OpensWavesInOrder(t *testing.T) {
 	}
 
 	// First reconcile: wave 0 is approved, wave 1 held.
-	reconcileFleet(t, c, "moodle-2")
+	reconcileFleet(t, c, "fleet-order")
 	if got := memberApproved(t, c, ns, "app0a"); got != "2.0.0" {
 		t.Fatalf("wave-0 member app0a should be approved to 2.0.0, got %q", got)
 	}
@@ -131,25 +165,25 @@ func TestFleetRollout_OpensWavesInOrder(t *testing.T) {
 	if got := memberApproved(t, c, ns, "app1a"); got != "" {
 		t.Fatalf("wave-1 member app1a must be held until wave 0 settles, got %q", got)
 	}
-	if fr := getFleet(t, c, "moodle-2"); fr.Status.Phase != stagesv1.FleetInProgress || fr.Status.CurrentWave != "canary" {
+	if fr := getFleet(t, c, "fleet-order"); fr.Status.Phase != stagesv1.FleetInProgress || fr.Status.CurrentWave != "canary" {
 		t.Fatalf("phase/wave = %q/%q, want InProgress/canary", fr.Status.Phase, fr.Status.CurrentWave)
 	}
 
 	// Wave 0 reaches the target → wave 1 opens.
 	settleMember(t, c, ns, "app0a", "2.0.0")
 	settleMember(t, c, ns, "app0b", "2.0.0")
-	reconcileFleet(t, c, "moodle-2")
+	reconcileFleet(t, c, "fleet-order")
 	if got := memberApproved(t, c, ns, "app1a"); got != "2.0.0" {
 		t.Fatalf("wave-1 member app1a should be approved once wave 0 settled, got %q", got)
 	}
-	if fr := getFleet(t, c, "moodle-2"); fr.Status.CurrentWave != "broad" {
+	if fr := getFleet(t, c, "fleet-order"); fr.Status.CurrentWave != "broad" {
 		t.Fatalf("current wave = %q, want broad", fr.Status.CurrentWave)
 	}
 
 	// Wave 1 reaches the target → the rollout completes.
 	settleMember(t, c, ns, "app1a", "2.0.0")
-	reconcileFleet(t, c, "moodle-2")
-	final := getFleet(t, c, "moodle-2")
+	reconcileFleet(t, c, "fleet-order")
+	final := getFleet(t, c, "fleet-order")
 	if final.Status.Phase != stagesv1.FleetCompleted {
 		t.Fatalf("phase = %q, want Completed", final.Status.Phase)
 	}
@@ -158,21 +192,154 @@ func TestFleetRollout_OpensWavesInOrder(t *testing.T) {
 	}
 }
 
+// TestFleetRollout_SoakHoldsThenAdvances proves a settled wave holds for its soak
+// before the next wave opens, and advances once the soak elapses.
+func TestFleetRollout_SoakHoldsThenAdvances(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	const app = "soak"
+	fleetMember(t, c, ns, "w0", app, "0")
+	fleetMember(t, c, ns, "w1", app, "1")
+
+	soak := metav1.Duration{Duration: 30 * time.Minute}
+	fr := &stagesv1.FleetRollout{
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-soak"},
+		Spec: stagesv1.FleetRolloutSpec{
+			TargetVersion: "2.0.0",
+			Selector:      appSelector(app),
+			Waves: []stagesv1.FleetWave{
+				{Name: "canary", Selector: ringSelector("0"), Soak: &soak},
+				{Name: "broad", Selector: ringSelector("1")},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), fr); err != nil {
+		t.Fatalf("create FleetRollout: %v", err)
+	}
+	t0 := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+
+	reconcileFleetAt(t, c, "fleet-soak", t0, nil) // opens wave 0
+	settleMember(t, c, ns, "w0", "2.0.0")
+
+	reconcileFleetAt(t, c, "fleet-soak", t0, nil) // wave 0 settled, now soaking
+	if got := memberApproved(t, c, ns, "w1"); got != "" {
+		t.Fatalf("wave 1 must stay held during wave 0 soak, got %q", got)
+	}
+	if fr := getFleet(t, c, "fleet-soak"); fr.Status.Waves[0].SoakUntil == nil {
+		t.Fatal("a settled wave should have a soak deadline")
+	}
+
+	// Past the soak: wave 0 passes and wave 1 opens.
+	reconcileFleetAt(t, c, "fleet-soak", t0.Add(31*time.Minute), nil)
+	if got := memberApproved(t, c, ns, "w1"); got != "2.0.0" {
+		t.Fatalf("wave 1 should open after wave 0 soaks, got %q", got)
+	}
+}
+
+// TestFleetRollout_GateFailureHalts proves a wave whose health gate is violated
+// halts the whole fleet.
+func TestFleetRollout_GateFailureHalts(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	const app = "gate"
+	fleetMember(t, c, ns, "w0", app, "0")
+	fleetMember(t, c, ns, "w1", app, "1")
+
+	fr := &stagesv1.FleetRollout{
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-gate"},
+		Spec: stagesv1.FleetRolloutSpec{
+			TargetVersion: "2.0.0",
+			Selector:      appSelector(app),
+			Waves: []stagesv1.FleetWave{
+				{Name: "canary", Selector: ringSelector("0"), Gate: &stagesv1.FleetWaveGate{Threshold: maxThreshold("0.01")}},
+				{Name: "broad", Selector: ringSelector("1")},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), fr); err != nil {
+		t.Fatalf("create FleetRollout: %v", err)
+	}
+	t0 := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+
+	reconcileFleetAt(t, c, "fleet-gate", t0, &fakeQuerier{value: 0.5})
+	settleMember(t, c, ns, "w0", "2.0.0")
+
+	// Wave 0 settled, soak is 0, gate metric 0.5 > 0.01 → Failing → halt.
+	reconcileFleetAt(t, c, "fleet-gate", t0, &fakeQuerier{value: 0.5})
+	got := getFleet(t, c, "fleet-gate")
+	if got.Status.Phase != stagesv1.FleetHalted {
+		t.Fatalf("phase = %q, want Halted", got.Status.Phase)
+	}
+	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != ReasonFleetHalted {
+		t.Fatalf("Ready condition = %+v, want False/Halted", cond)
+	}
+	if got := memberApproved(t, c, ns, "w1"); got != "" {
+		t.Fatalf("a halted fleet must not open wave 1, got %q", got)
+	}
+	if got.Status.Waves[0].Health != "Failing" {
+		t.Fatalf("wave 0 health = %q, want Failing", got.Status.Waves[0].Health)
+	}
+}
+
+// TestFleetRollout_MemberRegressionHalts proves a member that reaches the target
+// then goes not-Ready halts the fleet.
+func TestFleetRollout_MemberRegressionHalts(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	const app = "regress"
+	fleetMember(t, c, ns, "w0", app, "0")
+	fleetMember(t, c, ns, "w1", app, "1")
+
+	soak := metav1.Duration{Duration: 30 * time.Minute}
+	fr := &stagesv1.FleetRollout{
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-regress"},
+		Spec: stagesv1.FleetRolloutSpec{
+			TargetVersion: "2.0.0",
+			Selector:      appSelector(app),
+			Waves: []stagesv1.FleetWave{
+				{Name: "canary", Selector: ringSelector("0"), Soak: &soak},
+				{Name: "broad", Selector: ringSelector("1")},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), fr); err != nil {
+		t.Fatalf("create FleetRollout: %v", err)
+	}
+	t0 := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+
+	reconcileFleetAt(t, c, "fleet-regress", t0, nil)
+	settleMember(t, c, ns, "w0", "2.0.0")
+	reconcileFleetAt(t, c, "fleet-regress", t0, nil) // wave 0 settled + soaking
+
+	// A member of the soaking wave breaks → the fleet halts.
+	unsettleMember(t, c, ns, "w0")
+	reconcileFleetAt(t, c, "fleet-regress", t0.Add(time.Minute), nil)
+	got := getFleet(t, c, "fleet-regress")
+	if got.Status.Phase != stagesv1.FleetHalted {
+		t.Fatalf("phase = %q, want Halted", got.Status.Phase)
+	}
+	if cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionReady); cond == nil || cond.Reason != ReasonFleetHalted {
+		t.Fatalf("Ready reason = %v, want Halted", cond)
+	}
+}
+
 // TestFleetRollout_NamespaceSelectorBounds proves the namespaceSelector excludes a
 // matching StageSet in an out-of-scope namespace — it is not a member and is never
 // approved.
 func TestFleetRollout_NamespaceSelectorBounds(t *testing.T) {
 	c := testClient(t)
+	const app = "nssel"
 	inScope := labeledNamespace(t, c, map[string]string{"tenant": "true"})
 	outScope := labeledNamespace(t, c, map[string]string{"tenant": "false"})
-	fleetMember(t, c, inScope, "app", map[string]string{"app": "moodle", "ring": "0"})
-	fleetMember(t, c, outScope, "app", map[string]string{"app": "moodle", "ring": "0"})
+	fleetMember(t, c, inScope, "app", app, "0")
+	fleetMember(t, c, outScope, "app", app, "0")
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "moodle-ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-nssel"},
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion:     "2.0.0",
-			Selector:          metav1.LabelSelector{MatchLabels: map[string]string{"app": "moodle"}},
+			Selector:          appSelector(app),
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tenant": "true"}},
 			Waves:             []stagesv1.FleetWave{{Name: "canary", Selector: ringSelector("0")}},
 		},
@@ -180,7 +347,7 @@ func TestFleetRollout_NamespaceSelectorBounds(t *testing.T) {
 	if err := c.Create(context.Background(), fr); err != nil {
 		t.Fatalf("create FleetRollout: %v", err)
 	}
-	reconcileFleet(t, c, "moodle-ns")
+	reconcileFleet(t, c, "fleet-nssel")
 
 	if got := memberApproved(t, c, inScope, "app"); got != "2.0.0" {
 		t.Fatalf("in-scope member should be approved, got %q", got)
@@ -188,8 +355,7 @@ func TestFleetRollout_NamespaceSelectorBounds(t *testing.T) {
 	if got := memberApproved(t, c, outScope, "app"); got != "" {
 		t.Fatalf("out-of-scope member must not be approved, got %q", got)
 	}
-	// Only the in-scope member counts toward the wave.
-	if fr := getFleet(t, c, "moodle-ns"); len(fr.Status.Waves) != 1 || fr.Status.Waves[0].Total != 1 {
+	if fr := getFleet(t, c, "fleet-nssel"); len(fr.Status.Waves) != 1 || fr.Status.Waves[0].Total != 1 {
 		t.Fatalf("wave should have exactly 1 member, got %+v", fr.Status.Waves)
 	}
 }
@@ -199,28 +365,28 @@ func TestFleetRollout_NamespaceSelectorBounds(t *testing.T) {
 func TestFleetRollout_UnassignedMemberIsFlagged(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
-	fleetMember(t, c, ns, "assigned", map[string]string{"app": "moodle", "ring": "0"})
-	fleetMember(t, c, ns, "orphan", map[string]string{"app": "moodle"}) // no ring label
+	const app = "orphan"
+	fleetMember(t, c, ns, "assigned", app, "0")
+	fleetMember(t, c, ns, "orphan", app, "") // no ring label
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "moodle-orphan"},
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-orphan"},
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
-			Selector:      metav1.LabelSelector{MatchLabels: map[string]string{"app": "moodle"}},
+			Selector:      appSelector(app),
 			Waves:         []stagesv1.FleetWave{{Name: "canary", Selector: ringSelector("0")}},
 		},
 	}
 	if err := c.Create(context.Background(), fr); err != nil {
 		t.Fatalf("create FleetRollout: %v", err)
 	}
-	reconcileFleet(t, c, "moodle-orphan")
+	reconcileFleet(t, c, "fleet-orphan")
 
-	got := getFleet(t, c, "moodle-orphan")
+	got := getFleet(t, c, "fleet-orphan")
 	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != ReasonFleetMembersUnassigned {
 		t.Fatalf("Ready condition = %+v, want False/MembersUnassigned", cond)
 	}
-	// The orphan must not have been approved.
 	if got := memberApproved(t, c, ns, "orphan"); got != "" {
 		t.Fatalf("an unassigned member must not be approved, got %q", got)
 	}

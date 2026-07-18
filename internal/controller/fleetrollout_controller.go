@@ -16,12 +16,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
+	"github.com/metio/stageset-controller/internal/metricsource"
 )
 
 // Fleet-rollout Ready-condition reasons. These are FleetRollout's own condition
@@ -37,6 +39,16 @@ const (
 	ReasonFleetMembersUnassigned = "MembersUnassigned"
 	// ReasonFleetInvalid: the selector or a wave selector is malformed.
 	ReasonFleetInvalid = "InvalidSelector"
+	// ReasonFleetHalted: a wave failed its health gate or a settled member
+	// regressed; no further waves open until the cause clears.
+	ReasonFleetHalted = "Halted"
+)
+
+// Wave health-gate verdicts recorded in FleetWaveStatus.Health.
+const (
+	healthPassing = "Passing"
+	healthFailing = "Failing"
+	healthUnknown = "Unknown"
 )
 
 // fleetRequeueInterval bounds how long a progressing rollout waits before
@@ -53,6 +65,20 @@ type FleetRolloutReconciler struct {
 	// namespaces. Defaults to mgr.GetAPIReader(); tests may leave it nil to fall
 	// back to the (fake) client.
 	APIReader client.Reader
+	// MetricQuerier resolves a wave gate's MetricSource to a scalar. Defaulted in
+	// SetupWithManager; tests substitute a fake.
+	MetricQuerier metricsource.Querier
+	// Recorder emits Events on halt and completion; nil disables them.
+	Recorder events.EventRecorder
+	// Now returns the current time for soak timing; nil defaults to time.Now.
+	Now func() time.Time
+}
+
+func (r *FleetRolloutReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=fleetrollouts,verbs=get;list;watch;create;update;patch;delete
@@ -123,23 +149,75 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 		return ctrl.Result{RequeueAfter: fleetRequeueInterval}, nil
 	}
 
-	// Compute per-wave settle status and find the first wave not yet settled.
+	now := r.now()
+	prior := make(map[string]stagesv1.FleetWaveStatus, len(fr.Status.Waves))
+	for _, ws := range fr.Status.Waves {
+		prior[ws.Name] = ws
+	}
+
+	// Pass 1: compute each wave's settle status, carrying its soak deadline (set
+	// the moment it first settles) and prior health forward.
 	fr.Status.Waves = make([]stagesv1.FleetWaveStatus, len(fr.Spec.Waves))
-	firstUnsettled := -1
 	for w := range fr.Spec.Waves {
 		ws := waveStatus(fr.Spec.Waves[w].Name, waveMembers[w], target)
+		prev := prior[ws.Name]
+		ws.Health = prev.Health
+		if ws.Settled {
+			if prev.SoakUntil != nil {
+				ws.SoakUntil = prev.SoakUntil
+			} else {
+				soak := time.Duration(0)
+				if s := fr.Spec.Waves[w].Soak; s != nil {
+					soak = s.Duration
+				}
+				until := metav1.NewTime(now.Add(soak))
+				ws.SoakUntil = &until
+			}
+		}
 		fr.Status.Waves[w] = ws
-		if firstUnsettled == -1 && !ws.Settled {
-			firstUnsettled = w
+	}
+
+	// Pass 2: walk waves in order. A wave that had begun soaking but is no longer
+	// settled has a member that regressed → halt the fleet. A wave passes when it
+	// is settled, its soak has elapsed, and its health gate (if any) is satisfied;
+	// a gate the scalar violates halts the fleet. Open every wave through the first
+	// not-yet-passed one; the rest stay held.
+	firstOpen := -1
+	for w := range fr.Spec.Waves {
+		ws := &fr.Status.Waves[w]
+		if prior[ws.Name].SoakUntil != nil && !ws.Settled {
+			return r.halt(ctx, fr, ws.Name,
+				fmt.Sprintf("wave %q regressed: a member is no longer at version %s and Ready", ws.Name, target))
+		}
+		passed := false
+		if ws.Settled && !now.Before(ws.SoakUntil.Time) {
+			gate := fr.Spec.Waves[w].Gate
+			if gate == nil {
+				passed = true
+			} else {
+				verdict, value, gerr := r.evalGate(ctx, gate)
+				ws.Health = verdict
+				switch {
+				case gerr != nil, verdict == healthUnknown:
+					// A metric outage neither advances nor halts — hold this wave.
+				case verdict == healthPassing:
+					passed = true
+				default: // healthFailing
+					return r.halt(ctx, fr, ws.Name,
+						fmt.Sprintf("wave %q failed its health gate: metric %.4g is outside the threshold", ws.Name, value))
+				}
+			}
+		}
+		if firstOpen == -1 && !passed {
+			firstOpen = w
 		}
 	}
 
-	// Open every wave through the first unsettled one by stamping the approval;
-	// prior waves are already at the target, so their stamps are no-ops. Future
-	// waves stay held until their turn.
-	openThrough := firstUnsettled
-	if firstUnsettled == -1 {
-		openThrough = len(fr.Spec.Waves) - 1 // all settled: everyone is approved
+	// Open every wave through the first not-yet-passed one by stamping the approval;
+	// earlier waves are already at the target, so their stamps are no-ops.
+	openThrough := firstOpen
+	if firstOpen == -1 {
+		openThrough = len(fr.Spec.Waves) - 1
 	}
 	for w := 0; w <= openThrough; w++ {
 		for i := range waveMembers[w] {
@@ -149,7 +227,7 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 		}
 	}
 
-	if firstUnsettled == -1 {
+	if firstOpen == -1 {
 		fr.Status.Phase = stagesv1.FleetCompleted
 		fr.Status.CurrentWave = ""
 		r.setFleetReady(fr, metav1.ConditionTrue, ReasonFleetCompleted,
@@ -158,9 +236,59 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 	}
 
 	fr.Status.Phase = stagesv1.FleetInProgress
-	fr.Status.CurrentWave = fr.Spec.Waves[firstUnsettled].Name
+	fr.Status.CurrentWave = fr.Spec.Waves[firstOpen].Name
 	r.setFleetReady(fr, metav1.ConditionTrue, ReasonFleetProgressing,
 		fmt.Sprintf("rolling out version %s; wave %q open", target, fr.Status.CurrentWave))
+	return ctrl.Result{RequeueAfter: r.requeueAfter(fr, now)}, nil
+}
+
+// requeueAfter wakes a soaking wave exactly when its soak elapses (so the gate is
+// evaluated promptly), and otherwise falls back to the periodic interval that
+// backstops the StageSet watch.
+func (r *FleetRolloutReconciler) requeueAfter(fr *stagesv1.FleetRollout, now time.Time) time.Duration {
+	for w := range fr.Status.Waves {
+		ws := &fr.Status.Waves[w]
+		if ws.Settled && ws.SoakUntil != nil && ws.SoakUntil.Time.After(now) {
+			if d := ws.SoakUntil.Time.Sub(now); d < fleetRequeueInterval {
+				return d
+			}
+		}
+	}
+	return fleetRequeueInterval
+}
+
+// evalGate queries a wave gate's metric and reports the verdict and the scalar.
+// A query or threshold-parse error resolves to Unknown (hold, neither pass nor
+// halt) — a metric outage must not auto-advance or auto-halt the fleet.
+func (r *FleetRolloutReconciler) evalGate(ctx context.Context, gate *stagesv1.FleetWaveGate) (verdict string, value float64, err error) {
+	if r.MetricQuerier == nil {
+		return healthUnknown, 0, fmt.Errorf("no metric querier configured")
+	}
+	// The gate is a fleet-level query run under the controller's own identity.
+	value, err = r.MetricQuerier.Query(ctx, "", "", gate.Source)
+	if err != nil {
+		return healthUnknown, 0, err
+	}
+	ok, terr := metricsource.ThresholdSatisfied(gate.Threshold, value)
+	if terr != nil {
+		return healthUnknown, value, terr
+	}
+	if ok {
+		return healthPassing, value, nil
+	}
+	return healthFailing, value, nil
+}
+
+// halt stops the rollout: no further waves open, phase becomes Halted, and a
+// Warning event records the cause. The halt is re-derived each reconcile, so it
+// clears on its own if the cause does (a member recovers, the gate passes again).
+func (r *FleetRolloutReconciler) halt(_ context.Context, fr *stagesv1.FleetRollout, wave, msg string) (ctrl.Result, error) {
+	fr.Status.Phase = stagesv1.FleetHalted
+	fr.Status.CurrentWave = wave
+	r.setFleetReady(fr, metav1.ConditionFalse, ReasonFleetHalted, msg)
+	if r.Recorder != nil {
+		r.Recorder.Eventf(fr, nil, corev1.EventTypeWarning, ReasonFleetHalted, ReasonFleetHalted, "%s", msg)
+	}
 	return ctrl.Result{RequeueAfter: fleetRequeueInterval}, nil
 }
 
@@ -291,8 +419,27 @@ func (r *FleetRolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.APIReader == nil {
 		r.APIReader = mgr.GetAPIReader()
 	}
+	if r.Recorder == nil {
+		r.Recorder = mgr.GetEventRecorder("fleetrollout-controller")
+	}
+	if r.MetricQuerier == nil {
+		// A fleet gate is a controller-identity query; the client-backed secret
+		// reader resolves bearer-token auth when the gate names a secret, and the
+		// production IP denylist (nil validator) still guards against SSRF.
+		r.MetricQuerier = metricsource.New(r.readSecret, nil, nil)
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&stagesv1.FleetRollout{}).
 		Watches(&stagesv1.StageSet{}, handler.EnqueueRequestsFromMapFunc(r.mapStageSetToFleets)).
 		Complete(r)
+}
+
+// readSecret is the SecretReader for the default metric querier: it reads a
+// Secret's data by name in the namespace the query supplies.
+func (r *FleetRolloutReconciler) readSecret(ctx context.Context, namespace, _ string, name string) (map[string][]byte, error) {
+	var s corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &s); err != nil {
+		return nil, err
+	}
+	return s.Data, nil
 }

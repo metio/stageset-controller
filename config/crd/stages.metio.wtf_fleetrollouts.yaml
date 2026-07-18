@@ -184,6 +184,108 @@ spec:
                 items:
                   description: FleetWave is one ordered group of the rollout.
                   properties:
+                    gate:
+                      description: |-
+                        Gate is a metric the wave must satisfy after it settles and soaks before the
+                        next wave opens. A scalar outside the threshold halts the whole rollout.
+                      properties:
+                        source:
+                          description: Source is the metric to query — a Prometheus
+                            instant query or a webhook.
+                          properties:
+                            prometheus:
+                              description: |-
+                                Prometheus runs an instant query that must evaluate to a single scalar.
+                                PromQL natively covers Sloth, Pyrra, Grafana, and Nobl9's Prometheus API,
+                                so the bulk of SLO installs need no per-tool code. Exactly one of
+                                prometheus or webhook must be set.
+                              properties:
+                                address:
+                                  description: |-
+                                    Address is the Prometheus base URL, e.g. http://prometheus.monitoring:9090.
+                                    In-cluster private addresses are expected and allowed; only loopback,
+                                    link-local (incl. cloud metadata), multicast, and unspecified addresses are
+                                    refused, mirroring the http-action SSRF guard.
+                                  type: string
+                                query:
+                                  description: |-
+                                    Query is an instant PromQL query that MUST evaluate to a single scalar (a
+                                    scalar result, or an instant vector with exactly one sample). For an
+                                    error-budget freeze this is typically the remaining budget as a 0..1 ratio
+                                    (e.g. Sloth's slo:period_error_budget_remaining:ratio{...}).
+                                  type: string
+                                secretRef:
+                                  description: |-
+                                    SecretRef optionally names a Secret in the StageSet's namespace holding a
+                                    bearer token under the "token" key, sent as Authorization: Bearer on the
+                                    query. The Secret is read as the StageSet's serviceAccountName, so it must
+                                    be one that ServiceAccount can get.
+                                  properties:
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                              required:
+                              - address
+                              - query
+                              type: object
+                            webhook:
+                              description: |-
+                                Webhook fetches a JSON document over HTTP and extracts the scalar with a
+                                JSONPath expression — the escape hatch for SaaS SLO APIs (Nobl9, Grafana
+                                Cloud) that have no Prometheus endpoint. Exactly one of prometheus or
+                                webhook must be set.
+                              properties:
+                                jsonPath:
+                                  description: |-
+                                    JSONPath is a kubectl-style JSONPath expression selecting the scalar from
+                                    the response body, e.g. '{.objectives[0].errorBudgetRemaining}'. It must
+                                    resolve to exactly one numeric (or numeric-string) value.
+                                  type: string
+                                secretRef:
+                                  description: |-
+                                    SecretRef optionally names a Secret in the StageSet's namespace holding a
+                                    bearer token under the "token" key, sent as Authorization: Bearer. The
+                                    Secret is read as the StageSet's serviceAccountName, so it must be one
+                                    that ServiceAccount can get.
+                                  properties:
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                                url:
+                                  description: |-
+                                    URL is the endpoint to GET. Public addresses are expected (SaaS APIs);
+                                    loopback, link-local (incl. cloud metadata), multicast, and unspecified
+                                    addresses are refused, mirroring the http-action SSRF guard.
+                                  type: string
+                              required:
+                              - jsonPath
+                              - url
+                              type: object
+                          type: object
+                        threshold:
+                          description: |-
+                            Threshold the queried scalar must satisfy for the wave to pass. A scalar
+                            outside it halts the rollout.
+                          properties:
+                            max:
+                              description: Max, when set, requires the scalar to be
+                                <= this value.
+                              type: string
+                            min:
+                              description: Min, when set, requires the scalar to be
+                                >= this value.
+                              type: string
+                          type: object
+                      required:
+                      - source
+                      - threshold
+                      type: object
                     name:
                       description: Name identifies the wave in status and events.
                       type: string

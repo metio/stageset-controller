@@ -60,6 +60,25 @@ type FleetWave struct {
 	// Ready) before the health gate runs and the next wave opens.
 	// +optional
 	Soak *metav1.Duration `json:"soak,omitempty"`
+
+	// Gate is a metric the wave must satisfy after it settles and soaks before the
+	// next wave opens. A scalar outside the threshold halts the whole rollout.
+	// +optional
+	Gate *FleetWaveGate `json:"gate,omitempty"`
+}
+
+// FleetWaveGate is a metric health check evaluated once a wave has settled and
+// soaked. The query runs under the controller's own identity; scope it to the
+// wave in the query itself (e.g. a PromQL selector).
+type FleetWaveGate struct {
+	// Source is the metric to query — a Prometheus instant query or a webhook.
+	// +required
+	Source MetricSource `json:"source"`
+
+	// Threshold the queried scalar must satisfy for the wave to pass. A scalar
+	// outside it halts the rollout.
+	// +required
+	Threshold Threshold `json:"threshold"`
 }
 
 // FleetPhase is the overall state of a rollout.
