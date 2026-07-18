@@ -94,8 +94,8 @@ func TestReconcile_Migration_RequireCoverageBlocksMajor(t *testing.T) {
 	}
 }
 
-// requireApproval holds a transition with pending migrations until the target
-// version is approved, then proceeds.
+// approvalMode: OnMigrations holds a transition with pending migrations until the
+// target version is approved, then proceeds.
 func TestReconcile_Migration_RequireApprovalHoldsThenProceeds(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
@@ -105,7 +105,7 @@ func TestReconcile_Migration_RequireApprovalHoldsThenProceeds(t *testing.T) {
 		t.Fatalf("create legacy: %v", err)
 	}
 	versioned := func(version string) *stagesv1.VersionSource {
-		return &stagesv1.VersionSource{Value: version, RequireApproval: true}
+		return &stagesv1.VersionSource{Value: version, ApprovalMode: stagesv1.ApprovalOnMigrations}
 	}
 	ss := &stagesv1.StageSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "approval"},
@@ -129,8 +129,8 @@ func TestReconcile_Migration_RequireApprovalHoldsThenProceeds(t *testing.T) {
 	reconcileOnce(t, c, cur)
 
 	held := getStageSet(t, c, ns, "approval")
-	if readyReason(held) != ReasonMigrationApprovalPending {
-		t.Fatalf("Ready reason = %q, want %q", readyReason(held), ReasonMigrationApprovalPending)
+	if readyReason(held) != ReasonAwaitingApproval {
+		t.Fatalf("Ready reason = %q, want %q", readyReason(held), ReasonAwaitingApproval)
 	}
 	if !cmExists(t, c, ns, "legacy") {
 		t.Fatal("migration must not run before approval")
@@ -158,6 +158,59 @@ func TestReconcile_Migration_RequireApprovalHoldsThenProceeds(t *testing.T) {
 	}
 	if done.Status.Version != "2.0.0" {
 		t.Fatalf("version should advance after approval, got %q", done.Status.Version)
+	}
+}
+
+// approvalMode: Always holds a migration-FREE version advance until approval —
+// the behavior a FleetRollout depends on. OnMigrations would let this bump through.
+func TestReconcile_Version_ApprovalAlwaysHoldsMigrationFreeAdvance(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
+	versioned := func(version string) *stagesv1.VersionSource {
+		return &stagesv1.VersionSource{Value: version, ApprovalMode: stagesv1.ApprovalAlways}
+	}
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "fleet-member"},
+		Spec: stagesv1.StageSetSpec{
+			Interval: metav1.Duration{Duration: time.Minute},
+			Version:  versioned("1.0.0"),
+			// No migrations: a bare version bump. OnMigrations wouldn't hold this.
+			Stages: []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea"}}},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	reconcileOnce(t, c, ss) // baseline 1.0.0
+
+	cur := getStageSet(t, c, ns, "fleet-member")
+	cur.Spec.Version = versioned("2.0.0")
+	if err := c.Update(context.Background(), cur); err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	reconcileOnce(t, c, cur)
+
+	held := getStageSet(t, c, ns, "fleet-member")
+	if readyReason(held) != ReasonAwaitingApproval {
+		t.Fatalf("a migration-free advance under Always must hold; reason = %q", readyReason(held))
+	}
+	if held.Status.Version != "1.0.0" {
+		t.Fatalf("version must not advance before approval, got %q", held.Status.Version)
+	}
+
+	// The fleet (here, a hand stamp) approves the target → the advance proceeds.
+	if held.Annotations == nil {
+		held.Annotations = map[string]string{}
+	}
+	held.Annotations[approvedVersionAnnotation] = "2.0.0"
+	if err := c.Update(context.Background(), held); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	reconcileOnce(t, c, held)
+
+	if v := getStageSet(t, c, ns, "fleet-member").Status.Version; v != "2.0.0" {
+		t.Fatalf("version should advance after approval, got %q", v)
 	}
 }
 

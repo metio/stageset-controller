@@ -6,14 +6,33 @@ package controller
 import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
 // approvedVersionAnnotation approves a held version transition: its value is the
-// target version the operator authorizes. When spec.version.requireApproval is
-// set and a transition has pending migrations, the controller proceeds only once
-// this annotation equals the desired version (reason MigrationApprovalPending
-// until then).
+// target version the operator (or a FleetRollout) authorizes. When
+// spec.version.approvalMode holds a transition, the controller proceeds only once
+// this annotation equals the desired version (reason AwaitingApproval until then).
 const approvedVersionAnnotation = "stages.metio.wtf/approved-version"
+
+// versionApprovalNeeded reports whether a version transition must be approved
+// before it proceeds, per spec.version.approvalMode. Baselining (first adoption)
+// and a no-op reconcile are never held; OnMigrations holds only a transition that
+// carries migrations; Always holds every real version change (up or down).
+func versionApprovalNeeded(mode stagesv1.ApprovalMode, plan *migrationPlan, currentVersion string) bool {
+	if plan == nil || !plan.versionSet || plan.baseline {
+		return false
+	}
+	switch mode {
+	case stagesv1.ApprovalAlways:
+		return plan.desired != currentVersion
+	case stagesv1.ApprovalOnMigrations:
+		return len(plan.pending) > 0
+	default: // Never / unset
+		return false
+	}
+}
 
 // migrationApprovalPredicate wakes the controller when the approved-version
 // annotation changes. Approving is a metadata-only edit — it bumps neither

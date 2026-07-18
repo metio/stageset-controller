@@ -3524,8 +3524,8 @@ spec:
                           description: |-
                             RequireManualPromotion holds the rollout at this stage until an operator
                             promotes it with `stagesetctl promote NAME --stage <name>` (which stamps
-                            the stages.metio.wtf/promote annotation). Kept distinct from a migration's
-                            RequireApproval (which gates a version transition, not a stage advance).
+                            the stages.metio.wtf/promote annotation). Kept distinct from
+                            version.approvalMode (which gates a version transition, not a stage advance).
                             Defaults to false.
                           type: boolean
                         restartGate:
@@ -3847,6 +3847,22 @@ spec:
                       boundary that was applied but declares no Down actions is irreversible: the
                       downgrade is refused and names that migration.
                     type: boolean
+                  approvalMode:
+                    description: |-
+                      ApprovalMode holds a version transition until an operator (or a FleetRollout)
+                      approves the target version with the stages.metio.wtf/approved-version
+                      annotation:
+                        - Never (default): no approval gate.
+                        - OnMigrations: hold only a transition that has pending migrations, so
+                          destructive migrations don't run unattended while a config-only version
+                          bump proceeds.
+                        - Always: hold every version advance. A fleet-managed StageSet sets this so
+                          a FleetRollout can pace its adoption of a new version wave by wave.
+                    enum:
+                    - Never
+                    - OnMigrations
+                    - Always
+                    type: string
                   fromArtifact:
                     description: |-
                       FromArtifact reads a single semver string from a file in a stage's
@@ -3901,13 +3917,6 @@ spec:
                     - kind
                     - name
                     type: object
-                  requireApproval:
-                    description: |-
-                      RequireApproval holds a version transition that has pending migrations
-                      until an operator approves the target version with the
-                      stages.metio.wtf/approved-version annotation, so destructive migrations
-                      don't run unattended. Off by default.
-                    type: boolean
                   requireMigrationCoverage:
                     description: |-
                       RequireMigrationCoverage fails the reconcile when a version transition

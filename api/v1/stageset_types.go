@@ -309,8 +309,8 @@ type StagePromotion struct {
 
 	// RequireManualPromotion holds the rollout at this stage until an operator
 	// promotes it with `stagesetctl promote NAME --stage <name>` (which stamps
-	// the stages.metio.wtf/promote annotation). Kept distinct from a migration's
-	// RequireApproval (which gates a version transition, not a stage advance).
+	// the stages.metio.wtf/promote annotation). Kept distinct from
+	// version.approvalMode (which gates a version transition, not a stage advance).
 	// Defaults to false.
 	// +optional
 	RequireManualPromotion bool `json:"requireManualPromotion,omitempty"`
@@ -963,12 +963,18 @@ type VersionSource struct {
 	// +optional
 	RequireMigrationCoverage bool `json:"requireMigrationCoverage,omitempty"`
 
-	// RequireApproval holds a version transition that has pending migrations
-	// until an operator approves the target version with the
-	// stages.metio.wtf/approved-version annotation, so destructive migrations
-	// don't run unattended. Off by default.
+	// ApprovalMode holds a version transition until an operator (or a FleetRollout)
+	// approves the target version with the stages.metio.wtf/approved-version
+	// annotation:
+	//   - Never (default): no approval gate.
+	//   - OnMigrations: hold only a transition that has pending migrations, so
+	//     destructive migrations don't run unattended while a config-only version
+	//     bump proceeds.
+	//   - Always: hold every version advance. A fleet-managed StageSet sets this so
+	//     a FleetRollout can pace its adoption of a new version wave by wave.
+	// +kubebuilder:validation:Enum=Never;OnMigrations;Always
 	// +optional
-	RequireApproval bool `json:"requireApproval,omitempty"`
+	ApprovalMode ApprovalMode `json:"approvalMode,omitempty"`
 
 	// AllowDowngrade permits an intentional version decrease. A downgrade runs
 	// each crossed migration's Down actions in reverse order to unwind the
@@ -979,6 +985,20 @@ type VersionSource struct {
 	// +optional
 	AllowDowngrade bool `json:"allowDowngrade,omitempty"`
 }
+
+// ApprovalMode selects which version transitions hold for approval via the
+// stages.metio.wtf/approved-version annotation.
+type ApprovalMode string
+
+const (
+	// ApprovalNever is the default: no version transition holds for approval.
+	ApprovalNever ApprovalMode = "Never"
+	// ApprovalOnMigrations holds only a transition that has pending migrations.
+	ApprovalOnMigrations ApprovalMode = "OnMigrations"
+	// ApprovalAlways holds every version advance — what a fleet-managed StageSet
+	// sets so a FleetRollout can pace its adoption.
+	ApprovalAlways ApprovalMode = "Always"
+)
 
 // ObjectVersionRef reads the version from a field of one rendered object in a
 // stage's built manifests, so the version travels with the content it versions.
