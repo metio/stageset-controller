@@ -167,6 +167,11 @@ pygmentsUseClasses = true
     name = "Rollback"
     url = "/gating/rollback/"
     weight = 5
+  [[menu.main]]
+    parent = "gating"
+    name = "Fleet rollout"
+    url = "/gating/fleet-rollout/"
+    weight = 6
 
   # 5 ── Security & multi-tenancy.
   [[menu.main]]
@@ -327,6 +332,11 @@ pygmentsUseClasses = true
     name = "lint-migrations"
     url = "/cli/lint-migrations/"
     weight = 6
+  [[menu.main]]
+    parent = "cli"
+    name = "fleet"
+    url = "/cli/fleet/"
+    weight = 7
 
   # 10 ── API reference.
   [[menu.main]]

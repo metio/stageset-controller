@@ -185,6 +185,38 @@ emits a `MigrationsBaselined` event so you can tell this apart from a real no-op
 and confirm the deployment really is at the recorded version. Migrations run only
 on a subsequent transition that crosses their boundary.
 
+## Holding a transition for approval
+
+`spec.version.approvalMode` holds a version transition until an operator approves the
+target version, so a destructive change does not run unattended:
+
+```yaml
+spec:
+  version:
+    value: "2.0.0"
+    approvalMode: OnMigrations   # Never (default) | OnMigrations | Always
+```
+
+- **`Never`** (default) — no approval gate; transitions proceed on their own.
+- **`OnMigrations`** — hold only a transition that carries migrations, so a config-only
+  version bump proceeds while a destructive migration waits.
+- **`Always`** — hold every version advance. A [fleet-managed](/gating/fleet-rollout/)
+  StageSet sets this so a `FleetRollout` can pace its adoption.
+
+While held, the StageSet reports `Ready=False` with reason `AwaitingApproval` (an
+intentional wait, not an error) and `status.pendingMigrations` shows exactly what
+will run. Approve by setting the annotation to the target version:
+
+```shell
+kubectl annotate stageset <name> \
+  stages.metio.wtf/approved-version=2.0.0 --overwrite
+```
+
+The transition proceeds once the annotation equals the desired version. Approval is
+tied to that exact version, so a later transition holds again until you approve the
+new target — a stale approval never carries over. See the
+[`AwaitingApproval`](/runbooks/awaitingapproval/) runbook.
+
 ## Rolling back
 
 Lowering the version below what is deployed is off by default: a mistaken revert of

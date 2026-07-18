@@ -101,6 +101,20 @@ rollback that silently leaves the schema ahead of the code, and
 [`stagesetctl plan`](/cli/plan/) shows which boundaries reverse and which refuse
 *before* you merge the version change.
 
+## Roll a version across a fleet
+
+Helm has no fleet concept. Rolling a new chart version across a hundred tenants means
+running `helm upgrade` a hundred times — in a loop, a CI matrix, or an Argo
+ApplicationSet — with no built-in notion of canary, soak, health gate, or "stop
+everything if the first tenant regresses." You assemble that from external glue.
+
+A [`FleetRollout`](/gating/fleet-rollout/) makes it declarative: one target version,
+ordered waves, a soak and a metric gate between waves, and a fleet-wide halt when a
+wave regresses — one canary regression stops the other ninety-nine before they start.
+It approves the version each tenant's own source already offers, so it paces GitOps
+rather than replacing it. Helm would have to grow a fleet, a version model, and a
+health-gated wave machine to match it — which is to say, become a delivery controller.
+
 ## Using them together
 
 Render a chart to manifests (e.g. via a producer that publishes an

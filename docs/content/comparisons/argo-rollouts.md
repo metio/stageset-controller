@@ -33,6 +33,22 @@ and the order things apply in.
 | Pruning / inventory | no (owns the Rollout's pods) | yes (StageInventory record, per-stage prune) |
 | GitOps reconcile | via your GitOps tool (e.g. Argo CD) | native (Flux controller) |
 
+## In-app canary vs cross-fleet rollout
+
+Argo Rollouts does canary and blue-green **inside one application** — it shifts
+traffic between pod sets, runs analysis, and rolls back the `Deployment`. It does this
+maturely, and `StageSet` does not: there is no per-pod traffic shifting here.
+
+A [`FleetRollout`](/gating/fleet-rollout/) works at the other scale — one version
+rolled across **many independent StageSets** (one per tenant) in ordered waves, with a
+soak, a health gate, and a fleet-wide halt on regression. Argo canaries the pods of a
+single `Rollout`; a `FleetRollout` canaries the tenants of a fleet. The two are
+complementary axes: run an Argo canary inside each tenant *and* stage the version
+across tenants with a `FleetRollout`. On regression a `FleetRollout` can even unwind a
+tenant's schema through its
+[down migrations](/gating/versioned-migrations/#rolling-back) — a version-level
+rollback Argo's manifest-level revert does not reach.
+
 ## Using them together
 
 A realistic setup uses both: `StageSet` rolls out the release in order, and a
