@@ -49,9 +49,17 @@ const (
 	// than an unversioned one.
 	ReasonInvalidVersion = "InvalidVersion"
 
-	// ReasonDowngradeRequiresMigration: the desired version is lower than
-	// status.version. Refused by default — replaying upgrade migrations in
-	// reverse is how data dies. Terminal until the version moves forward.
+	// ReasonDowngradeNotAllowed: the desired version is lower than status.version
+	// and spec.version.allowDowngrade is not set. Refused so a mistaken revert of
+	// a version bump can't silently unwind a schema. Terminal until the version
+	// moves forward or downgrades are enabled.
+	ReasonDowngradeNotAllowed = "DowngradeNotAllowed"
+
+	// ReasonDowngradeRequiresMigration: a downgrade is enabled, but a version
+	// boundary it crosses was applied and declares no Down actions — it is
+	// irreversible. Refused, naming the boundary, rather than lowering the version
+	// while the schema stays ahead of the code. Terminal until the boundary gains
+	// a Down path or the target is raised above it.
 	ReasonDowngradeRequiresMigration = "DowngradeRequiresMigration"
 
 	// ReasonMigrationStageNotFound: a version-selected migration anchors to a
@@ -189,6 +197,7 @@ var AllReasons = []string{
 	ReasonDependencyNotReady,
 	ReasonStalled,
 	ReasonInvalidVersion,
+	ReasonDowngradeNotAllowed,
 	ReasonDowngradeRequiresMigration,
 	ReasonMigrationStageNotFound,
 	ReasonMigrationArtifactInvalid,

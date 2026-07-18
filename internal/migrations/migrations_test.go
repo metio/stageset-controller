@@ -7,8 +7,99 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Masterminds/semver/v3"
+
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
+
+func waitAction(name string) stagesv1.Action {
+	return stagesv1.Action{Name: name, Wait: &stagesv1.WaitAction{Expr: "true"}}
+}
+
+func TestSelectDown(t *testing.T) {
+	t.Parallel()
+	ladder := []stagesv1.Migration{
+		{Name: "m12", To: "1.2.0", Down: []stagesv1.Action{waitAction("d")}},
+		{Name: "m13", To: "1.3.0", Down: []stagesv1.Action{waitAction("d")}},
+		{Name: "m14", To: "1.4.0", Down: []stagesv1.Action{waitAction("d")}},
+	}
+	names := func(ms []*stagesv1.Migration) []string {
+		out := make([]string, len(ms))
+		for i, m := range ms {
+			out[i] = m.Name
+		}
+		return out
+	}
+	eq := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+	tests := []struct {
+		name             string
+		current, desired string
+		wantNames        []string
+	}{
+		{"full unwind is descending", "1.5.0", "1.1.0", []string{"m14", "m13", "m12"}},
+		{"landing at a boundary keeps it", "1.5.0", "1.3.0", []string{"m14"}},
+		{"no change selects nothing", "1.3.0", "1.3.0", nil},
+		{"an upgrade selects nothing", "1.1.0", "1.5.0", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SelectDown(ladder, semver.MustParse(tc.current), semver.MustParse(tc.desired))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !eq(names(got), tc.wantNames) {
+				t.Fatalf("SelectDown(%s→%s) = %v, want %v", tc.current, tc.desired, names(got), tc.wantNames)
+			}
+		})
+	}
+}
+
+func TestValidateMigration_DownActions(t *testing.T) {
+	t.Parallel()
+	base := func() *stagesv1.Migration {
+		return &stagesv1.Migration{Name: "m", To: "1.3.0", Actions: []stagesv1.Action{waitAction("up")}}
+	}
+	t.Run("a well-formed down set validates", func(t *testing.T) {
+		m := base()
+		m.Down = []stagesv1.Action{waitAction("undo")}
+		if err := ValidateMigration(m); err != nil {
+			t.Fatalf("valid down rejected: %v", err)
+		}
+	})
+	t.Run("a down action with no verb is rejected", func(t *testing.T) {
+		m := base()
+		m.Down = []stagesv1.Action{{Name: "undo"}}
+		if err := ValidateMigration(m); err == nil {
+			t.Fatal("a verbless down action must be rejected")
+		}
+	})
+	t.Run("a down action setting scope is rejected", func(t *testing.T) {
+		m := base()
+		d := waitAction("undo")
+		d.Scope = stagesv1.ScopeVersion
+		m.Down = []stagesv1.Action{d}
+		if err := ValidateMigration(m); err == nil {
+			t.Fatal("a scoped down action must be rejected")
+		}
+	})
+	t.Run("a name reused across up and down is allowed", func(t *testing.T) {
+		m := base()
+		m.Down = []stagesv1.Action{waitAction("up")} // same name as the up action
+		if err := ValidateMigration(m); err != nil {
+			t.Fatalf("up and down are separate ledger namespaces: %v", err)
+		}
+	})
+}
 
 func TestParseLadder(t *testing.T) {
 	t.Parallel()

@@ -250,7 +250,7 @@ func TestReconcile_Migration_RunsOnUpgrade(t *testing.T) {
 	}
 }
 
-// A downgrade is refused.
+// A downgrade is refused by default: allowDowngrade is unset.
 func TestReconcile_Migration_DowngradeRefused(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
@@ -267,8 +267,8 @@ func TestReconcile_Migration_DowngradeRefused(t *testing.T) {
 	reconcileOnce(t, c, ss)
 
 	got := getStageSet(t, c, ns, "downgrader")
-	if readyReason(got) != ReasonDowngradeRequiresMigration {
-		t.Fatalf("Ready reason = %q, want %q", readyReason(got), ReasonDowngradeRequiresMigration)
+	if readyReason(got) != ReasonDowngradeNotAllowed {
+		t.Fatalf("Ready reason = %q, want %q", readyReason(got), ReasonDowngradeNotAllowed)
 	}
 	if got.Status.Version != "2.0.0" {
 		t.Fatalf("a refused downgrade must not change the recorded version, got %q", got.Status.Version)

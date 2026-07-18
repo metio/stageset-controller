@@ -117,30 +117,43 @@ func ValidateMigration(m *stagesv1.Migration) error {
 				m.Name, m.From, ">="+from, "="+from)
 		}
 	}
-	if len(m.Actions) > MaxActionsPerMigration {
-		return fmt.Errorf("migration %q has %d actions, exceeding the limit of %d", m.Name, len(m.Actions), MaxActionsPerMigration)
+	if err := validateMigrationActions(m.Name, "actions", m.Actions); err != nil {
+		return err
 	}
-	seen := make(map[string]bool, len(m.Actions))
-	for j := range m.Actions {
-		a := &m.Actions[j]
+	return validateMigrationActions(m.Name, "down", m.Down)
+}
+
+// validateMigrationActions applies the per-action invariants to one direction's
+// action list (up `actions` or the reverse `down` set): the count cap, exactly
+// one verb, a unique non-empty name (the idempotency-ledger key), no scope or
+// completionAnchor, and in-range retries. Action names must be unique within a
+// direction; the up and down sets are separate ledger namespaces, so a name may
+// repeat across them.
+func validateMigrationActions(migName, field string, actions []stagesv1.Action) error {
+	if len(actions) > MaxActionsPerMigration {
+		return fmt.Errorf("migration %q has %d %s, exceeding the limit of %d", migName, len(actions), field, MaxActionsPerMigration)
+	}
+	seen := make(map[string]bool, len(actions))
+	for j := range actions {
+		a := &actions[j]
 		if n := a.VerbCount(); n != 1 {
-			return fmt.Errorf("migration %q action %q: exactly one verb must be set, found %d", m.Name, a.Name, n)
+			return fmt.Errorf("migration %q %s action %q: exactly one verb must be set, found %d", migName, field, a.Name, n)
 		}
 		if a.Name == "" {
-			return fmt.Errorf("migration %q has an action with an empty name; action names are the idempotency-ledger key and must be set", m.Name)
+			return fmt.Errorf("migration %q has a %s action with an empty name; action names are the idempotency-ledger key and must be set", migName, field)
 		}
 		if seen[a.Name] {
-			return fmt.Errorf("migration %q has duplicate action name %q; action names are the idempotency-ledger key and must be unique", m.Name, a.Name)
+			return fmt.Errorf("migration %q has duplicate %s action name %q; action names are the idempotency-ledger key and must be unique", migName, field, a.Name)
 		}
 		seen[a.Name] = true
 		if a.Scope != "" {
-			return fmt.Errorf("migration %q action %q sets scope; scope is valid only on a stage's pre/post actions — a migration action is already keyed to its version transition by the migration ledger", m.Name, a.Name)
+			return fmt.Errorf("migration %q %s action %q sets scope; scope is valid only on a stage's pre/post actions — a migration action is already keyed to its version transition by the migration ledger", migName, field, a.Name)
 		}
 		if a.CompletionAnchor != nil {
-			return fmt.Errorf("migration %q action %q sets completionAnchor; it is valid only on a scope: Lifetime pre/post action", m.Name, a.Name)
+			return fmt.Errorf("migration %q %s action %q sets completionAnchor; it is valid only on a scope: Lifetime pre/post action", migName, field, a.Name)
 		}
 		if a.Retries != nil && (*a.Retries < 0 || *a.Retries > MaxActionRetries) {
-			return fmt.Errorf("migration %q action %q has retries %d; it must be between 0 and %d", m.Name, a.Name, *a.Retries, MaxActionRetries)
+			return fmt.Errorf("migration %q %s action %q has retries %d; it must be between 0 and %d", migName, field, a.Name, *a.Retries, MaxActionRetries)
 		}
 	}
 	return nil
@@ -225,6 +238,42 @@ func Select(ladder []stagesv1.Migration, currentV, desiredV *semver.Version) ([]
 		if outcomes[i].Fires {
 			out = append(out, outcomes[i].Migration)
 		}
+	}
+	return out, nil
+}
+
+// SelectDown returns the migrations a downgrade current→desired (desired <
+// current) crosses, in unwind order — descending target version, newest boundary
+// first — for every migration whose target is in the crossed-down range (desired,
+// current]. It selects by boundary only; the from-constraint is not applied,
+// because a downgrade reverses what was actually recorded as applied, and the
+// caller intersects this with the execution ledger (the empirical truth of what
+// ran) before deciding what to reverse and what is irreversible. It errors only
+// on an unparseable to, which a ValidateLadder'd ladder has none of.
+func SelectDown(ladder []stagesv1.Migration, currentV, desiredV *semver.Version) ([]*stagesv1.Migration, error) {
+	type scored struct {
+		m  *stagesv1.Migration
+		to *semver.Version
+	}
+	list := make([]scored, 0, len(ladder))
+	for i := range ladder {
+		m := &ladder[i]
+		toV, err := semver.NewVersion(m.To)
+		if err != nil {
+			return nil, fmt.Errorf("migration %q has invalid to %q: %w", m.Name, m.To, err)
+		}
+		// Crossed-down range (desired, current]: reversed on the way from current
+		// down to desired.
+		if toV.GreaterThan(desiredV) && !toV.GreaterThan(currentV) {
+			list = append(list, scored{m: m, to: toV})
+		}
+	}
+	// Descending target version; equal targets keep ladder order (stable sort) so
+	// the unwind is deterministic.
+	sort.SliceStable(list, func(i, j int) bool { return list[i].to.GreaterThan(list[j].to) })
+	out := make([]*stagesv1.Migration, len(list))
+	for i := range list {
+		out[i] = list[i].m
 	}
 	return out, nil
 }

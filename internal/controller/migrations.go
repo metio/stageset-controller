@@ -33,7 +33,11 @@ type migrationPlan struct {
 	versionSet bool
 	desired    string
 	baseline   bool
-	pending    []*stagesv1.Migration
+	// downgrade is true when desired < current: pending holds the crossed
+	// boundaries in unwind order (descending), and execution runs each
+	// migration's Down actions instead of Actions.
+	downgrade bool
+	pending   []*stagesv1.Migration
 	// byStage maps a concrete stage name to the migrations anchored before it,
 	// resolved from each migration's Stage value (anchor alias / name / empty).
 	// Populated by resolveAnchors; a migration that resolves to no stage is a
@@ -60,9 +64,13 @@ func (p *migrationPlan) pendingDetails(ss *stagesv1.StageSet) []stagesv1.Pending
 	}
 	out := make([]stagesv1.PendingMigration, 0, len(p.pending))
 	for _, m := range p.pending {
+		acts := m.Actions
+		if p.downgrade {
+			acts = m.Down // a downgrade runs the reverse actions
+		}
 		var verbs []string
-		for i := range m.Actions {
-			verbs = append(verbs, m.Actions[i].Verb())
+		for i := range acts {
+			verbs = append(verbs, acts[i].Verb())
 		}
 		out = append(out, stagesv1.PendingMigration{
 			Name:    m.Name,
@@ -154,8 +162,7 @@ func (r *StageSetReconciler) planVersionMigrations(ctx context.Context, ss *stag
 	}
 	switch {
 	case desiredV.LessThan(currentV):
-		return nil, ReasonDowngradeRequiresMigration,
-			fmt.Sprintf("desired version %s is below the deployed version %s; downgrades are refused", desired, current), nil
+		return r.planDowngrade(ctx, ss, fetcher, currentV, desiredV, desired)
 	case desiredV.Equal(currentV):
 		return plan, "", "", nil // no transition
 	}
@@ -180,6 +187,56 @@ func (r *StageSetReconciler) planVersionMigrations(ctx context.Context, ss *stag
 			fmt.Sprintf("version crosses a major boundary %s → %s but no migration covers it, and requireMigrationCoverage is set", current, desired), nil
 	}
 	plan.pending = pending
+	if reason, msg := resolveAnchors(ss, plan); reason != "" {
+		return nil, reason, msg, nil
+	}
+	return plan, "", "", nil
+}
+
+// planDowngrade builds the plan for an intentional version decrease (desired <
+// current). Refused unless spec.version.allowDowngrade is set; then it unwinds
+// every migration boundary in the crossed-down range (desired, current],
+// descending, running each boundary's Down actions. A crossed boundary that
+// declares no Down actions is irreversible and refuses the downgrade, naming it —
+// lowering the version while its schema change stands would leave the schema
+// ahead of the code. Lowering status.version is itself what makes a later
+// re-upgrade re-run the up migrations, so no separate applied-history record is
+// consulted; the selection is a pure function of the ladder and the two versions.
+//
+// The `from` constraint gates upward application only. A downgrade reverses every
+// crossed boundary regardless of `from`, so Down actions should be authored
+// idempotently (delete-if-exists, restore-if-absent) — the safe default for a
+// reversal in any case.
+func (r *StageSetReconciler) planDowngrade(ctx context.Context, ss *stagesv1.StageSet, fetcher *artifact.Fetcher, currentV, desiredV *semver.Version, desired string) (*migrationPlan, string, string, error) {
+	if ss.Spec.Version == nil || !ss.Spec.Version.AllowDowngrade {
+		return nil, ReasonDowngradeNotAllowed,
+			fmt.Sprintf("desired version %s is below the deployed version %s and downgrades are not enabled; set spec.version.allowDowngrade to enable reversible downgrades", desired, currentV), nil
+	}
+	plan := &migrationPlan{versionSet: true, desired: desired, downgrade: true}
+
+	ladder, migSrc, lreason, lmsg, lerr := r.resolveMigrationLadder(ctx, ss, fetcher)
+	if lerr != nil {
+		return nil, "", "", lerr // transient (source not ready / fetch)
+	}
+	if lreason != "" {
+		return nil, lreason, lmsg, nil
+	}
+	if migSrc != nil {
+		plan.sourceRevision = migSrc.Revision
+		plan.sourceDigest = migSrc.Digest
+	}
+
+	down, derr := migrations.SelectDown(ladder, currentV, desiredV)
+	if derr != nil {
+		return nil, ReasonInvalidVersion, derr.Error(), nil
+	}
+	for _, m := range down {
+		if len(m.Down) == 0 {
+			return nil, ReasonDowngradeRequiresMigration,
+				fmt.Sprintf("downgrade %s → %s crosses migration %q (to %s), which declares no down actions; it is irreversible", currentV, desired, m.Name, m.To), nil
+		}
+	}
+	plan.pending = down
 	if reason, msg := resolveAnchors(ss, plan); reason != "" {
 		return nil, reason, msg, nil
 	}
@@ -495,6 +552,9 @@ func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv
 	if plan == nil || plan.baseline {
 		return nil
 	}
+	if plan.downgrade {
+		return r.runStageDowngrades(ctx, ss, stage, plan, executor)
+	}
 	doneMig := toStringSet(ss.Status.ExecutedMigrations)
 	for _, m := range plan.forStage(stage) {
 		migKey := migrationKey(m)
@@ -522,6 +582,44 @@ func (r *StageSetReconciler) runStageMigrations(ctx context.Context, ss *stagesv
 		doneMig[migKey] = true
 		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationCompleted,
 			fmt.Sprintf("migration %q (to %s) completed%s", m.Name, m.To, src))
+	}
+	return nil
+}
+
+// runStageDowngrades reverses the migrations anchored to this stage, running each
+// boundary's Down actions in the plan's unwind order (descending). It mirrors
+// runStageMigrations: a fully-reversed boundary is recorded in the in-flight
+// ledger (by migKey) so a mid-downgrade requeue skips it, and each completed Down
+// action is tracked under a distinct "<migKey>/down/<action>" key so a retry of a
+// partially-reversed boundary skips the steps that already ran. The whole
+// in-flight ledger is cleared once the transition lowers status.version, so a
+// later re-upgrade — now starting from the lowered version — re-runs the up
+// migrations naturally.
+func (r *StageSetReconciler) runStageDowngrades(ctx context.Context, ss *stagesv1.StageSet, stage string, plan *migrationPlan, executor actionExecutor) error {
+	doneMig := toStringSet(ss.Status.ExecutedMigrations)
+	for _, m := range plan.forStage(stage) {
+		migKey := migrationKey(m)
+		if doneMig[migKey] {
+			continue
+		}
+		downKey := migKey + "/down"
+		actionsDone := actionsDoneFor(ss.Status.ExecutedMigrationActions, downKey)
+		record := func(name string) error {
+			ss.Status.ExecutedMigrationActions = append(ss.Status.ExecutedMigrationActions, downKey+"/"+name)
+			return nil
+		}
+		src := migrationSourceSuffix(plan)
+		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationStarted,
+			fmt.Sprintf("rollback of migration %q (to %s) starting%s", m.Name, m.To, src))
+		if err := executor.Run(ctx, ss.Namespace, m.Down, actionsDone, record); err != nil {
+			r.event(ss, corev1.EventTypeWarning, eventReasonMigrationFailed,
+				fmt.Sprintf("rollback of migration %q failed: %v", m.Name, err))
+			return fmt.Errorf("rollback of migration %q: %w", m.Name, err)
+		}
+		ss.Status.ExecutedMigrations = append(ss.Status.ExecutedMigrations, migKey)
+		doneMig[migKey] = true
+		r.event(ss, corev1.EventTypeNormal, eventReasonMigrationCompleted,
+			fmt.Sprintf("rollback of migration %q (to %s) completed%s", m.Name, m.To, src))
 	}
 	return nil
 }

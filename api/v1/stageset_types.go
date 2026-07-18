@@ -969,6 +969,15 @@ type VersionSource struct {
 	// don't run unattended. Off by default.
 	// +optional
 	RequireApproval bool `json:"requireApproval,omitempty"`
+
+	// AllowDowngrade permits an intentional version decrease. A downgrade runs
+	// each crossed migration's Down actions in reverse order to unwind the
+	// schema, then lowers status.version. Off by default, so a mistaken revert of
+	// a version bump is refused rather than silently reversing a schema. A crossed
+	// boundary that was applied but declares no Down actions is irreversible: the
+	// downgrade is refused and names that migration.
+	// +optional
+	AllowDowngrade bool `json:"allowDowngrade,omitempty"`
 }
 
 // ObjectVersionRef reads the version from a field of one rendered object in a
@@ -1040,9 +1049,20 @@ type Migration struct {
 	// +optional
 	Stage string `json:"stage,omitempty"`
 
-	// Actions run in list order when the boundary is crossed.
+	// Actions run in list order when the boundary is crossed upward by a version
+	// upgrade.
 	// +optional
 	Actions []Action `json:"actions,omitempty"`
+
+	// Down runs in list order when this boundary is crossed downward by an
+	// intentional version downgrade (gated by spec.version.allowDowngrade). It is
+	// the reverse of Actions — e.g. an up that adds a column pairs with a down
+	// that restores the prior schema. Omit it to declare the boundary
+	// irreversible: a downgrade that would cross it is refused and names this
+	// migration, rather than lowering the version while the schema stays ahead of
+	// the code. Validated exactly like Actions.
+	// +optional
+	Down []Action `json:"down,omitempty"`
 }
 
 // MigrationsSource references a Flux source whose artifact holds a serialized
