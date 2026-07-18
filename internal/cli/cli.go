@@ -167,6 +167,7 @@ func newRootCommand(o *options) *cobra.Command {
 	root.AddCommand(newLintMigrationsCommand(o))
 	root.AddCommand(newBaselineCommand(o))
 	root.AddCommand(newResetLedgerCommand(o))
+	root.AddCommand(newPlanCommand(o))
 
 	return root
 }
