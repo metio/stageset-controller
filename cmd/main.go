@@ -179,6 +179,13 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		return 1
 	}
 
+	if err = (&controller.FleetRolloutReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error("unable to create controller", "error", err, "controller", "FleetRollout")
+		return 1
+	}
+
 	var webhookRenewerDone <-chan struct{}
 	if *c.EnableWebhook {
 		if err := (&controller.StageSetValidator{}).SetupWebhookWithManager(mgr); err != nil {

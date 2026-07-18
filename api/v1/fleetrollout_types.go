@@ -153,6 +153,17 @@ type FleetRollout struct {
 	Status FleetRolloutStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the rollout's status conditions, satisfying the fluxcd
+// conditions interface so the shared patch helper and conditions.Set can be used.
+func (in *FleetRollout) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+// SetConditions sets the rollout's status conditions.
+func (in *FleetRollout) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // FleetRolloutList is a list of FleetRollout.

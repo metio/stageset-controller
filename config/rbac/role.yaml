@@ -7,6 +7,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
   - serviceaccounts
   verbs:
   - get
@@ -47,6 +48,7 @@ rules:
 - apiGroups:
   - stages.metio.wtf
   resources:
+  - fleetrollouts
   - stageinventories
   verbs:
   - create
@@ -59,21 +61,22 @@ rules:
 - apiGroups:
   - stages.metio.wtf
   resources:
-  - stageledgers
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-- apiGroups:
-  - stages.metio.wtf
-  resources:
+  - fleetrollouts/status
   - stageledgers/status
   - stagesets/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - stages.metio.wtf
+  resources:
+  - stageledgers
+  verbs:
+  - create
+  - get
+  - list
+  - watch
 - apiGroups:
   - stages.metio.wtf
   resources:
