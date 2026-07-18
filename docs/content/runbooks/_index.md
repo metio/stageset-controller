@@ -29,7 +29,7 @@ one the gate is waiting for — approve, promote, resume, or wait for the window
 | [`UpdateDeferred`](/runbooks/updatedeferred/) | A new revision is held by a closed update window. |
 | [`Soaking`](/runbooks/soaking/) | A healthy stage is holding through its soak window before advancing. |
 | [`AwaitingPromotion`](/runbooks/awaitingpromotion/) | A healthy stage is holding for a manual promotion. |
-| [`MigrationApprovalPending`](/runbooks/migrationapprovalpending/) | A version transition with pending migrations is held for operator approval. |
+| [`AwaitingApproval`](/runbooks/awaitingapproval/) | A version transition is held for operator (or FleetRollout) approval. |
 | [`BudgetExhausted`](/runbooks/budgetexhausted/) | A rollout is frozen because the service is out of its SLO error budget; it resumes on its own when the budget recovers. |
 
 ## Waiting on upstream

@@ -430,7 +430,7 @@ func (r *FleetRolloutReconciler) reader() client.Reader {
 // Ready, and marks the wave settled when every member has. An empty wave is
 // settled — there is nothing to wait for.
 func waveStatus(name string, members []stagesv1.StageSet, target string) stagesv1.FleetWaveStatus {
-	ws := stagesv1.FleetWaveStatus{Name: name, Total: int32(len(members))}
+	ws := stagesv1.FleetWaveStatus{Name: name, Total: int32(len(members))} // #nosec G115 -- a wave has far fewer than 2^31 members
 	for i := range members {
 		atTarget, ready := memberProgress(&members[i], target)
 		if atTarget {
