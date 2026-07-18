@@ -39,6 +39,10 @@ const (
 	ReasonFleetMembersUnassigned = "MembersUnassigned"
 	// ReasonFleetInvalid: the selector or a wave selector is malformed.
 	ReasonFleetInvalid = "InvalidSelector"
+	// ReasonFleetMembersContested: a selected StageSet is also selected by another
+	// FleetRollout. A member must be governed by at most one rollout — two would
+	// fight over its approval annotation — so an overlap fails closed.
+	ReasonFleetMembersContested = "MembersContested"
 	// ReasonFleetHalted: a wave failed its health gate or a settled member
 	// regressed; no further waves open until the cause clears.
 	ReasonFleetHalted = "Halted"
@@ -114,6 +118,17 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 	if err != nil {
 		r.setFleetReady(fr, metav1.ConditionFalse, ReasonFleetInvalid, err.Error())
 		return ctrl.Result{}, nil // a malformed selector is terminal until the spec changes
+	}
+
+	// A member governed by another FleetRollout would have both stamp its approval
+	// annotation and fight over it, so an overlap fails closed — nothing is stamped
+	// until the contention is resolved.
+	if contested, cerr := r.contestedMembers(ctx, fr, members); cerr != nil {
+		return ctrl.Result{}, cerr
+	} else if len(contested) > 0 {
+		r.setFleetReady(fr, metav1.ConditionFalse, ReasonFleetMembersContested,
+			fmt.Sprintf("%d selected StageSet(s) are governed by another FleetRollout: %s", len(contested), strings.Join(contested, ", ")))
+		return ctrl.Result{RequeueAfter: fleetRequeueInterval}, nil
 	}
 
 	// Partition members into waves and detect any that match no wave.
@@ -326,6 +341,44 @@ func (r *FleetRolloutReconciler) members(ctx context.Context, fr *stagesv1.Fleet
 		}
 	}
 	return out, nil
+}
+
+// contestedMembers returns the members of this rollout that another FleetRollout
+// also selects, formatted "namespace/name (also governed by FleetRollout <name>)".
+// It reuses members() against each other rollout so the same selector +
+// namespaceSelector semantics decide overlap; a broken other rollout is skipped
+// rather than blocking this one.
+func (r *FleetRolloutReconciler) contestedMembers(ctx context.Context, fr *stagesv1.FleetRollout, members []stagesv1.StageSet) ([]string, error) {
+	var others stagesv1.FleetRolloutList
+	if err := r.List(ctx, &others); err != nil {
+		return nil, err
+	}
+	claimedBy := map[string]string{} // "ns/name" -> other rollout name
+	for i := range others.Items {
+		o := &others.Items[i]
+		if o.Name == fr.Name {
+			continue
+		}
+		oMembers, err := r.members(ctx, o)
+		if err != nil {
+			continue // a malformed other rollout must not block this one
+		}
+		for j := range oMembers {
+			key := oMembers[j].Namespace + "/" + oMembers[j].Name
+			if _, seen := claimedBy[key]; !seen {
+				claimedBy[key] = o.Name
+			}
+		}
+	}
+	var conflicts []string
+	for i := range members {
+		key := members[i].Namespace + "/" + members[i].Name
+		if other, ok := claimedBy[key]; ok {
+			conflicts = append(conflicts, fmt.Sprintf("%s (also governed by FleetRollout %s)", key, other))
+		}
+	}
+	sort.Strings(conflicts)
+	return conflicts, nil
 }
 
 // approve stamps the target version onto a member's approved-version annotation,

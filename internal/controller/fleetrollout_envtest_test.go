@@ -360,6 +360,42 @@ func TestFleetRollout_NamespaceSelectorBounds(t *testing.T) {
 	}
 }
 
+// TestFleetRollout_ContestedMembersRefused proves a StageSet selected by two
+// FleetRollouts fails the rollout closed rather than letting both fight over its
+// approval annotation.
+func TestFleetRollout_ContestedMembersRefused(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	const app = "contested"
+	fleetMember(t, c, ns, "shared", app, "0")
+
+	mkFleet := func(name, target string) *stagesv1.FleetRollout {
+		return &stagesv1.FleetRollout{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: stagesv1.FleetRolloutSpec{
+				TargetVersion: target,
+				Selector:      appSelector(app),
+				Waves:         []stagesv1.FleetWave{{Name: "canary", Selector: ringSelector("0")}},
+			},
+		}
+	}
+	for _, fr := range []*stagesv1.FleetRollout{mkFleet("contest-a", "2.0.0"), mkFleet("contest-b", "3.0.0")} {
+		if err := c.Create(context.Background(), fr); err != nil {
+			t.Fatalf("create %s: %v", fr.Name, err)
+		}
+	}
+
+	reconcileFleet(t, c, "contest-a")
+	got := getFleet(t, c, "contest-a")
+	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != ReasonFleetMembersContested {
+		t.Fatalf("Ready condition = %+v, want False/MembersContested", cond)
+	}
+	if got := memberApproved(t, c, ns, "shared"); got != "" {
+		t.Fatalf("a contested member must not be approved, got %q", got)
+	}
+}
+
 // TestFleetRollout_UnassignedMemberIsFlagged proves a selected StageSet that
 // matches no wave fails the rollout closed rather than being silently skipped.
 func TestFleetRollout_UnassignedMemberIsFlagged(t *testing.T) {
