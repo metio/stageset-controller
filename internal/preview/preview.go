@@ -99,6 +99,9 @@ type StageRender struct {
 	Objects  []*unstructured.Unstructured
 	Revision string // artifact revision, empty when rendered from a local dir
 	Local    bool   // true when the source came from SourceDirs
+	// Files is the stage's source tree as fetched, before decryption or build —
+	// the same bytes the reconciler reads a spec.version.fromArtifact file from.
+	Files map[string]string
 }
 
 // SelectStages returns the stages to render: all of them when names is empty,
@@ -138,6 +141,7 @@ func (e *Engine) RenderStage(ctx context.Context, ss *stagesv1.StageSet, stage *
 	if err != nil {
 		return StageRender{}, err
 	}
+	rawFiles := files
 	if e.Decryptor != nil {
 		files, err = e.Decryptor.DecryptFiles(files)
 		if err != nil {
@@ -152,7 +156,7 @@ func (e *Engine) RenderStage(ctx context.Context, ss *stagesv1.StageSet, stage *
 	if err != nil {
 		return StageRender{}, fmt.Errorf("build stage %q: %w", stage.Name, err)
 	}
-	return StageRender{Stage: stage.Name, Objects: objs, Revision: revision, Local: local}, nil
+	return StageRender{Stage: stage.Name, Objects: objs, Revision: revision, Local: local, Files: rawFiles}, nil
 }
 
 // sourceFiles returns the artifact file tree for a stage, preferring a local

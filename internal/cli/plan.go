@@ -5,13 +5,17 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/actionplan"
@@ -22,33 +26,103 @@ import (
 )
 
 type planOptions struct {
-	name       string
-	stages     []string
-	sourceDirs []string
+	names         []string
+	stages        []string
+	sourceDirs    []string
+	output        string
+	allNamespaces bool
+	selector      string
+}
+
+// --- the plan data model (rendered as text, JSON, or YAML) ---
+
+// stageSetPlan is one StageSet's predicted next reconcile.
+type stageSetPlan struct {
+	Namespace  string          `json:"namespace"`
+	Name       string          `json:"name"`
+	Version    *versionPlan    `json:"version,omitempty"`
+	Stages     []stagePlan     `json:"stages,omitempty"`
+	Migrations []migrationPlan `json:"migrations,omitempty"`
+	Gates      []string        `json:"gates,omitempty"`
+	Prunes     []prunePlan     `json:"prunes,omitempty"`
+	Notes      []string        `json:"notes,omitempty"`
+	// Error is set when this StageSet could not be planned (render failed, a
+	// decryption key was unreadable). During a fan-out a broken StageSet reports
+	// its error here and the rest are still planned, rather than aborting the run.
+	Error string `json:"error,omitempty"`
+	// WouldRun is true when the reconcile would run an action or migration, or
+	// prune an object — the signal behind the exit code.
+	WouldRun bool `json:"wouldRun"`
+}
+
+type versionPlan struct {
+	Current string `json:"current,omitempty"`
+	Desired string `json:"desired,omitempty"`
+}
+
+type stagePlan struct {
+	Name     string          `json:"name"`
+	Revision string          `json:"revision,omitempty"`
+	Actions  []actionVerdict `json:"actions,omitempty"`
+}
+
+type actionVerdict struct {
+	Phase  string `json:"phase"`
+	Name   string `json:"name"`
+	Scope  string `json:"scope"`
+	State  string `json:"state"`
+	Reason string `json:"reason"`
+}
+
+type migrationPlan struct {
+	Name    string   `json:"name"`
+	From    string   `json:"from,omitempty"`
+	To      string   `json:"to"`
+	Stage   string   `json:"stage"`
+	Actions []string `json:"actions,omitempty"`
+}
+
+type prunePlan struct {
+	Stage        string `json:"stage"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	StateBearing bool   `json:"stateBearing"`
 }
 
 func newPlanCommand(o *options) *cobra.Command {
 	opts := planOptions{}
 	cmd := &cobra.Command{
-		Use:   "plan NAME",
+		Use:   "plan [NAME...]",
 		Short: "Preview what the next reconcile will do — which actions run, skip, or re-run",
 		Long: "The behavioral sibling of `diff`: where `diff` shows which objects change, `plan` shows what the next " +
-			"reconcile will DO — per stage, which pre/post actions will run, skip, or re-run, and why. It predicts " +
-			"what will be ATTEMPTED, in what order, under which scope — never whether an action will succeed. It reads " +
-			"the cluster (ledgers, completionAnchor witnesses) but changes nothing; exit code 1 means the reconcile " +
-			"would run at least one action.",
-		Args: cobra.ExactArgs(1),
+			"reconcile will DO — per stage, which pre/post actions will run, skip, or re-run and why, which migrations " +
+			"are queued, what gate would hold the rollout, and which objects would be pruned. It predicts what will be " +
+			"ATTEMPTED, in what order — never whether an action will succeed. Plan one StageSet by name, several by " +
+			"name, or a whole fleet with --all-namespaces / --selector; -o json|yaml emits a machine-readable plan. It " +
+			"reads the cluster but changes nothing; exit code 1 means at least one plan would run something.",
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.name = args[0]
+			opts.names = args
 			return runPlan(cmd.Context(), o, opts)
 		},
 	}
 	cmd.Flags().StringArrayVar(&opts.stages, "stage", nil, "Limit the plan to these stages (repeatable). Default: all.")
 	cmd.Flags().StringArrayVar(&opts.sourceDirs, "source-dir", nil, "stage=DIR to render a stage from a local directory instead of its source (repeatable).")
+	cmd.Flags().StringVarP(&opts.output, "output", "o", "text", "Output format: text, json, or yaml.")
+	cmd.Flags().BoolVarP(&opts.allNamespaces, "all-namespaces", "A", false, "Plan every StageSet across all namespaces.")
+	cmd.Flags().StringVarP(&opts.selector, "selector", "l", "", "Plan StageSets matching a label selector.")
 	return cmd
 }
 
 func runPlan(ctx context.Context, o *options, opts planOptions) error {
+	switch opts.output {
+	case "text", "json", "yaml":
+	default:
+		return usageErr(fmt.Errorf("--output must be one of text, json, yaml"))
+	}
+	if len(opts.names) > 0 && (opts.allNamespaces || opts.selector != "") {
+		return usageErr(fmt.Errorf("name arguments cannot be combined with --all-namespaces or --selector"))
+	}
 	sourceDirs, err := parseSourceDirs(opts.sourceDirs)
 	if err != nil {
 		return runtimeErr(err)
@@ -57,28 +131,106 @@ func runPlan(ctx context.Context, o *options, opts planOptions) error {
 	if err != nil {
 		return runtimeErr(err)
 	}
-	var ss stagesv1.StageSet
-	if err := c.Get(ctx, client.ObjectKey{Namespace: o.namespace(), Name: opts.name}, &ss); err != nil {
-		return runtimeErr(err)
-	}
-	selected, err := preview.SelectStages(&ss, opts.stages)
+
+	targets, err := planTargets(ctx, c, o, opts)
 	if err != nil {
 		return runtimeErr(err)
 	}
+	if len(targets) == 0 {
+		fmt.Fprintln(o.streams.ErrOut, "no StageSets matched")
+		return nil
+	}
 
-	// The StageLedger gates scope: Lifetime actions; read it under the caller's own
-	// credentials (absent means nothing recorded yet).
+	fanOut := len(opts.names) == 0
+	plans := make([]stageSetPlan, 0, len(targets))
+	anyWouldRun := false
+	sawError := false
+	for i := range targets {
+		p, perr := computeStageSetPlan(ctx, o, c, &targets[i], opts.stages, sourceDirs)
+		if perr != nil {
+			// An explicitly named target surfaces its error directly; during a
+			// fan-out one broken StageSet must not hide the rest, so its error is
+			// recorded against it and the run continues.
+			if !fanOut {
+				return runtimeErr(perr)
+			}
+			plans = append(plans, stageSetPlan{Namespace: targets[i].Namespace, Name: targets[i].Name, Error: perr.Error()})
+			sawError = true
+			continue
+		}
+		plans = append(plans, *p)
+		if p.WouldRun {
+			anyWouldRun = true
+		}
+	}
+
+	if err := renderPlans(o.streams.Out, plans, opts.output); err != nil {
+		return runtimeErr(err)
+	}
+	// Exit code: a StageSet that could not be planned is a runtime failure (3) and
+	// outranks a would-run plan; otherwise diff-style — 1 when at least one plan
+	// would run something, 0 when none would.
+	switch {
+	case sawError:
+		return &exitErr{code: exitError}
+	case anyWouldRun:
+		return &exitErr{code: exitDiff}
+	default:
+		return nil
+	}
+}
+
+// planTargets resolves the StageSets to plan: the named ones, or — with no names
+// — every StageSet in the namespace, all namespaces, or matching a selector.
+func planTargets(ctx context.Context, c client.Client, o *options, opts planOptions) ([]stagesv1.StageSet, error) {
+	if len(opts.names) > 0 {
+		out := make([]stagesv1.StageSet, 0, len(opts.names))
+		for _, name := range opts.names {
+			var ss stagesv1.StageSet
+			if err := c.Get(ctx, client.ObjectKey{Namespace: o.namespace(), Name: name}, &ss); err != nil {
+				return nil, err
+			}
+			out = append(out, ss)
+		}
+		return out, nil
+	}
+	var listOpts []client.ListOption
+	if !opts.allNamespaces {
+		listOpts = append(listOpts, client.InNamespace(o.namespace()))
+	}
+	if opts.selector != "" {
+		sel, err := labels.Parse(opts.selector)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --selector: %w", err)
+		}
+		listOpts = append(listOpts, client.MatchingLabelsSelector{Selector: sel})
+	}
+	var list stagesv1.StageSetList
+	if err := c.List(ctx, &list, listOpts...); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// computeStageSetPlan renders one StageSet and predicts its next reconcile,
+// returning the structured plan. It reads the cluster but mutates nothing.
+func computeStageSetPlan(ctx context.Context, o *options, c client.Client, ss *stagesv1.StageSet, stages []string, sourceDirs map[string]string) (*stageSetPlan, error) {
+	selected, err := preview.SelectStages(ss, stages)
+	if err != nil {
+		return nil, err
+	}
+
 	var lifetime *stagesv1.StageLedger
 	var ledger stagesv1.StageLedger
 	if lerr := c.Get(ctx, client.ObjectKey{Namespace: ss.Namespace, Name: ss.Name}, &ledger); lerr == nil {
 		lifetime = &ledger
 	} else if !apierrors.IsNotFound(lerr) {
-		return runtimeErr(lerr)
+		return nil, lerr
 	}
 
-	dec, derr := o.stageSetDecryptor(ctx, c, false, &ss)
+	dec, derr := o.stageSetDecryptor(ctx, c, false, ss)
 	if derr != nil {
-		return runtimeErr(derr)
+		return nil, derr
 	}
 	engine := preview.NewEngine(c, false)
 	engine.SourceDirs = sourceDirs
@@ -87,9 +239,9 @@ func runPlan(ctx context.Context, o *options, opts planOptions) error {
 	renders := make(map[string]preview.StageRender, len(selected))
 	renderedRefs := map[string][]inventory.ObjectRef{}
 	for i := range selected {
-		render, rerr := engine.RenderStage(ctx, &ss, &selected[i])
+		render, rerr := engine.RenderStage(ctx, ss, &selected[i])
 		if rerr != nil {
-			return runtimeErr(rerr)
+			return nil, rerr
 		}
 		renders[selected[i].Name] = render
 		refs := make([]inventory.ObjectRef, 0, len(render.Objects))
@@ -99,48 +251,108 @@ func runPlan(ctx context.Context, o *options, opts planOptions) error {
 		renderedRefs[selected[i].Name] = refs
 	}
 
-	desired, versionNote := resolvePlanVersion(&ss, renders)
+	desired, versionNote := resolvePlanVersion(ss, renders)
 	priorStages := indexStageStatuses(ss.Status.Stages)
 
-	out := o.streams.Out
-	header := fmt.Sprintf("StageSet %s/%s", ss.Namespace, ss.Name)
+	p := &stageSetPlan{Namespace: ss.Namespace, Name: ss.Name}
 	if ss.Spec.Version != nil {
-		header += fmt.Sprintf("  (version %s → %s)", orNone(ss.Status.Version), orNone(desired))
+		p.Version = &versionPlan{Current: ss.Status.Version, Desired: desired}
 	}
-	fmt.Fprintln(out, header)
 
 	anyLifetime := false
-	willRun := false
 	for i := range selected {
 		stage := &selected[i]
-		render := renders[stage.Name]
-		fmt.Fprintf(out, "  stage %s  (revision %s)\n", stage.Name, orNone(render.Revision))
-		verdicts := actionplan.ActionVerdicts(ctx, c, stage, actionplan.VerdictInputs{
+		sp := stagePlan{Name: stage.Name, Revision: renders[stage.Name].Revision}
+		for _, v := range actionplan.ActionVerdicts(ctx, c, stage, actionplan.VerdictInputs{
 			Namespace:      ss.Namespace,
-			Revision:       render.Revision,
+			Revision:       renders[stage.Name].Revision,
 			Versioned:      ss.Spec.Version != nil,
 			DesiredVersion: desired,
 			CurrentVersion: ss.Status.Version,
 			Prior:          priorStages[stage.Name],
 			Lifetime:       lifetime,
-		})
-		for _, v := range verdicts {
-			fmt.Fprintf(out, "    %-4s %-24s %-8s (scope: %s — %s)\n", v.Phase, v.Name, v.State, v.Scope, v.Reason)
+		}) {
+			sp.Actions = append(sp.Actions, actionVerdict{
+				Phase: v.Phase, Name: v.Name, Scope: string(v.Scope), State: string(v.State), Reason: v.Reason,
+			})
 			if v.State != actionplan.Skip {
-				willRun = true
+				p.WouldRun = true
 			}
 			if v.Scope == stagesv1.ScopeLifetime {
 				anyLifetime = true
 			}
 		}
+		p.Stages = append(p.Stages, sp)
 	}
 
-	// Migrations the controller has queued for the version transition (from its
-	// last-computed status). A pending migration is work the next reconcile runs.
-	if migs := pendingMigrations(&ss); len(migs) > 0 {
-		willRun = true
+	for _, m := range pendingMigrations(ss) {
+		p.WouldRun = true
+		p.Migrations = append(p.Migrations, migrationPlan{Name: m.Name, From: m.From, To: m.To, Stage: m.Stage, Actions: m.Actions})
+	}
+
+	p.Gates = planGates(ss, priorStages, selected, time.Now())
+
+	if prunes, perr := engine.PrunePlan(ctx, ss, renderedRefs); perr != nil {
+		p.Notes = append(p.Notes, "prune preview unavailable: "+perr.Error())
+	} else {
+		for _, it := range prunes {
+			p.WouldRun = true
+			p.Prunes = append(p.Prunes, prunePlan{Stage: it.Stage, Kind: it.Ref.Kind, Name: it.Ref.Name, StateBearing: isStateBearing(it.Ref)})
+		}
+	}
+
+	if versionNote != "" {
+		p.Notes = append(p.Notes, versionNote)
+	}
+	if anyLifetime {
+		p.Notes = append(p.Notes, "scope: Lifetime results reflect the current cluster (completionAnchor witnesses are read live).")
+	}
+	return p, nil
+}
+
+func renderPlans(out io.Writer, plans []stageSetPlan, format string) error {
+	switch format {
+	case "json":
+		b, err := json.MarshalIndent(plans, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(b))
+		return err
+	case "yaml":
+		b, err := yaml.Marshal(plans)
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(b)
+		return err
+	default:
+		for i := range plans {
+			renderPlanText(out, &plans[i])
+		}
+		return nil
+	}
+}
+
+func renderPlanText(out io.Writer, p *stageSetPlan) {
+	header := fmt.Sprintf("StageSet %s/%s", p.Namespace, p.Name)
+	if p.Version != nil {
+		header += fmt.Sprintf("  (version %s → %s)", orNone(p.Version.Current), orNone(p.Version.Desired))
+	}
+	fmt.Fprintln(out, header)
+	if p.Error != "" {
+		fmt.Fprintf(out, "  error: %s\n", p.Error)
+		return
+	}
+	for _, s := range p.Stages {
+		fmt.Fprintf(out, "  stage %s  (revision %s)\n", s.Name, orNone(s.Revision))
+		for _, a := range s.Actions {
+			fmt.Fprintf(out, "    %-4s %-24s %-8s (scope: %s — %s)\n", a.Phase, a.Name, a.State, a.Scope, a.Reason)
+		}
+	}
+	if len(p.Migrations) > 0 {
 		fmt.Fprintln(out, "  migrations:")
-		for _, m := range migs {
+		for _, m := range p.Migrations {
 			verbs := ""
 			if len(m.Actions) > 0 {
 				verbs = "  [" + strings.Join(m.Actions, ", ") + "]"
@@ -148,47 +360,25 @@ func runPlan(ctx context.Context, o *options, opts planOptions) error {
 			fmt.Fprintf(out, "    %-24s %s → %s  before %s%s\n", m.Name, orNone(m.From), m.To, m.Stage, verbs)
 		}
 	}
-
-	// Gates that would hold the rollout. The update window is recomputed now (a
-	// pure function of the schedule and the clock); the promotion and error-budget
-	// holds are read from status, so they reflect the last observed state.
-	if gates := planGates(&ss, priorStages, selected, time.Now()); len(gates) > 0 {
+	if len(p.Gates) > 0 {
 		fmt.Fprintln(out, "  gates:")
-		for _, g := range gates {
+		for _, g := range p.Gates {
 			fmt.Fprintf(out, "    %s\n", g)
 		}
 	}
-
-	// Objects that would be pruned — in a stage's inventory but no longer in its
-	// render. Pruning a state-bearing object (a PVC, a StatefulSet) destroys data,
-	// so it is flagged: the "a prune deletes the database" hazard surfaced as a red
-	// line here, not discovered as an incident.
-	if prunes, perr := engine.PrunePlan(ctx, &ss, renderedRefs); perr != nil {
-		fmt.Fprintf(out, "  note: prune preview unavailable: %v\n", perr)
-	} else if len(prunes) > 0 {
-		willRun = true
+	if len(p.Prunes) > 0 {
 		fmt.Fprintln(out, "  prunes:")
-		for _, it := range prunes {
-			if isStateBearing(it.Ref) {
-				fmt.Fprintf(out, "    ⚠ %s/%s  (stage %s) — deleting this destroys its data\n", it.Ref.Kind, it.Ref.Name, it.Stage)
+		for _, pr := range p.Prunes {
+			if pr.StateBearing {
+				fmt.Fprintf(out, "    ⚠ %s/%s  (stage %s) — deleting this destroys its data\n", pr.Kind, pr.Name, pr.Stage)
 			} else {
-				fmt.Fprintf(out, "    %s/%s  (stage %s)\n", it.Ref.Kind, it.Ref.Name, it.Stage)
+				fmt.Fprintf(out, "    %s/%s  (stage %s)\n", pr.Kind, pr.Name, pr.Stage)
 			}
 		}
 	}
-
-	if versionNote != "" {
-		fmt.Fprintf(out, "  note: %s\n", versionNote)
+	for _, n := range p.Notes {
+		fmt.Fprintf(out, "  note: %s\n", n)
 	}
-	if anyLifetime {
-		fmt.Fprintln(out, "  note: scope: Lifetime results reflect the current cluster (completionAnchor witnesses are read live).")
-	}
-
-	// diff-style exit code: 1 when the reconcile would run at least one action.
-	if willRun {
-		return &exitErr{code: exitDiff}
-	}
-	return nil
 }
 
 // resolvePlanVersion resolves spec.version for the preview from an inline value or
@@ -223,7 +413,23 @@ func resolvePlanVersion(ss *stagesv1.StageSet, renders map[string]preview.StageR
 		}
 		return ver, ""
 	default: // FromArtifact
-		return "", "version.fromArtifact is not resolved in the preview; version-scoped actions shown as would-run"
+		idx, err := actionplan.VersionStageIndex(ss, v.FromArtifact.Stage)
+		if err != nil {
+			return "", "version.fromArtifact: " + err.Error() + "; version-scoped actions shown as would-run"
+		}
+		render, ok := renders[ss.Spec.Stages[idx].Name]
+		if !ok {
+			return "", "version.fromArtifact stage was not among the planned stages; version-scoped actions shown as would-run"
+		}
+		content, ok := render.Files[v.FromArtifact.Path]
+		if !ok {
+			return "", "version.fromArtifact: version file " + v.FromArtifact.Path + " not found in the stage source; version-scoped actions shown as would-run"
+		}
+		ver := strings.TrimSpace(content)
+		if ver == "" {
+			return "", "version.fromArtifact: version file " + v.FromArtifact.Path + " is empty; version-scoped actions shown as would-run"
+		}
+		return ver, ""
 	}
 }
 

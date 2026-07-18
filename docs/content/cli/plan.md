@@ -17,13 +17,24 @@ and it predicts what will be **attempted**, in what order, under which scope —
 never whether an action will succeed.
 
 ```text
-stagesetctl plan NAME [flags]
+stagesetctl plan [NAME...] [flags]
 ```
+
+Plan one StageSet by name, several by name, or a whole fleet with
+`--all-namespaces` / `--selector`; `-o json|yaml` emits the plan as data for a
+CI step or a PR comment.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--stage` | _(all)_ | Limit the plan to these stages (repeatable). |
 | `--source-dir` | _(none)_ | `stage=DIR` to render a stage from a local directory instead of its source (repeatable). |
+| `--output`, `-o` | `text` | Output format: `text`, `json`, or `yaml`. |
+| `--all-namespaces`, `-A` | `false` | Plan every StageSet across all namespaces. |
+| `--selector`, `-l` | _(none)_ | Plan StageSets matching a label selector. |
+
+Name arguments select those StageSets by name; with no name, `--all-namespaces`
+and `--selector` choose the set to plan (a bare `plan` plans every StageSet in the
+namespace). Combining a name with either flag is a usage error.
 
 `plan` follows the [`diff`](/cli/diff/) exit-code convention, so it works as a
 merge gate: **0** when the reconcile would run nothing, **1** when at least one
@@ -58,7 +69,24 @@ window (recomputed now, a pure function of the schedule and the clock), an
 state-bearing one (a PVC, a StatefulSet) with `⚠`, so a prune that would destroy
 data is a red line in the plan rather than an incident after the fact.
 
-A version resolved off the rendered manifests (an inline `spec.version.value` or
-`spec.version.fromObject`) is reproducible from the source; a
-`spec.version.fromArtifact` version is not yet resolved in the preview, so
-version-scoped actions are shown as would-run.
+The version is resolved from the source the same way the controller resolves it:
+an inline `spec.version.value`, a field of a rendered object
+(`spec.version.fromObject`), or a version file in a stage's artifact
+(`spec.version.fromArtifact`) — each reproducible from the source, so
+version-scoped verdicts are exact.
+
+## Planning a fleet
+
+With `--all-namespaces` or `--selector`, `plan` covers many StageSets at once and
+`-o json` turns the result into data — one array element per StageSet, each with
+its stages, action verdicts, migrations, gates, and prunes — for a CI gate or a
+PR comment across the fleet:
+
+```text
+stagesetctl plan --all-namespaces -o json
+```
+
+The exit code aggregates: **3** if any StageSet could not be planned, otherwise
+**1** if any would run something, **0** if none would. A StageSet that fails to
+plan — an unreadable decryption key, a source that will not render — reports its
+`error` and the rest are still planned, so one broken tenant never hides the fleet.
