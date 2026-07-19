@@ -138,6 +138,12 @@ const (
 	// run halts at that stage; later stages do not run.
 	ReasonStageFailed = "StageFailed"
 
+	// ReasonImageUnverified: a stage referenced an image that fails an
+	// ImageVerificationPolicy — unsigned, the wrong identity, or missing a required
+	// attestation — or (under --require-image-verification) matches no policy. The
+	// stage is held before apply; nothing unverified is deployed.
+	ReasonImageUnverified = "ImageUnverified"
+
 	// ReasonRBACDenied: an apiserver call the reconciler made — resolving a
 	// source CR, an impersonated tenant get/list, or the apply itself — failed
 	// with Forbidden, or referenced a kind the apiserver does not know (the CRD
@@ -212,6 +218,7 @@ var AllReasons = []string{
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,
+	ReasonImageUnverified,
 	ReasonRBACDenied,
 	ReasonSoaking,
 	ReasonAwaitingPromotion,

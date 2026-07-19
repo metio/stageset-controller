@@ -54,6 +54,7 @@ import (
 	"github.com/metio/stageset-controller/internal/artifact"
 	"github.com/metio/stageset-controller/internal/build"
 	"github.com/metio/stageset-controller/internal/decryptor"
+	"github.com/metio/stageset-controller/internal/imageverify"
 	"github.com/metio/stageset-controller/internal/inventory"
 	"github.com/metio/stageset-controller/internal/metrics"
 	"github.com/metio/stageset-controller/internal/metricsource"
@@ -169,6 +170,14 @@ type StageSetReconciler struct {
 	// ladder runs only if its source is pinned to an immutable revision
 	// (digest/commit). When false, a mutable-pinned source runs but warns.
 	RequirePinnedMigrationSources bool
+	// ImageVerifier verifies (and digest-pins) the container images a stage's
+	// rendered objects reference against cluster ImageVerificationPolicies, before
+	// apply. Nil disables the gate (no verifier wired); SetupWithManager defaults it
+	// to the sigstore-go verifier, and tests inject a fake.
+	ImageVerifier imageverify.Verifier
+	// RequireImageVerification is the global --require-image-verification flag:
+	// deny-by-default, an image matching no ImageVerificationPolicy is rejected.
+	RequireImageVerification bool
 	// ObjectLevelKMS is the global --object-level-kms flag: when true, SOPS
 	// cloud KMS decryption uses the StageSet's serviceAccountName federated to
 	// a cloud identity (object-level identity) instead of the controller's
@@ -227,6 +236,7 @@ type StageSetReconciler struct {
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageinventories,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageledgers,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stageledgers/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=stages.metio.wtf,resources=imageverificationpolicies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=externalartifacts,verbs=get;list;watch
 // Producer kinds whose failures the controller surfaces via dynamic watches:
 // the Flux artifact-publishing sources and the JaaS snippet producer. A custom
@@ -851,6 +861,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// `kubectl get -l stages.metio.wtf/stage=<stage>` answers "what does
 			// this stage own" with no project-specific tooling.
 			apply.StampStageLabel(objects, stagesv1.StageLabel, stage.Name)
+			// Image-verification gate: verify (and digest-pin) every image these
+			// objects reference before applying, so a stage never applies an
+			// unverified image.
+			if verr := r.verifyStageImages(ctx, &ss, stage.Name, objects); verr != nil {
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, opImageVerification, verr, stageStatuses, led)
+			}
 			conflicts, cerr := apply.ResolveConflictHandling(objects, stage, apply.NewForceToken())
 			if cerr != nil {
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "conflict policy", cerr, stageStatuses, led)
@@ -1519,6 +1535,8 @@ const (
 	// migration-specific Ready reasons.
 	opMigration      = "migration"
 	opMigrationDirty = "migration halted (dirty)"
+	// opImageVerification is the failStage op string that selects ReasonImageUnverified.
+	opImageVerification = "image verification"
 	// maxActionFailures is the consecutive-failure count at which a stage carrying
 	// an incomplete scope: Lifetime action escalates from retrying to a halted
 	// ActionDirty state, so a destructive bootstrap stops auto-retrying against an
@@ -1543,6 +1561,8 @@ func failReason(op string, cause error) (reason string, terminal bool) {
 		return ReasonMigrationFailed, false
 	case op == opMigrationDirty:
 		return ReasonMigrationDirty, true
+	case op == opImageVerification:
+		return ReasonImageUnverified, true
 	case op == opActionDirty:
 		return ReasonActionDirty, true
 	default:

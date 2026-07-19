@@ -41,6 +41,7 @@ import (
 	"github.com/metio/stageset-controller/internal/cliflags"
 	"github.com/metio/stageset-controller/internal/controller"
 	"github.com/metio/stageset-controller/internal/gate"
+	"github.com/metio/stageset-controller/internal/imageverify/sigstore"
 	"github.com/metio/stageset-controller/internal/mcp"
 	"github.com/metio/stageset-controller/internal/metrics"
 	"github.com/metio/stageset-controller/internal/observability"
@@ -170,6 +171,8 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		NoCrossNamespaceRefs:            *c.NoCrossNamespaceRefs,
 		RequireVerifiedMigrationSources: *c.RequireVerifiedMigrationSources,
 		RequirePinnedMigrationSources:   *c.RequirePinnedMigrationSources,
+		RequireImageVerification:        *c.RequireImageVerification,
+		ImageVerifier:                   sigstore.New(sigstore.WithLogger(logger.With("logger", "imageverify")), sigstore.WithTrustedRootPath(*c.ImageVerificationTrustedRoot)),
 		ObjectLevelKMS:                  *c.ObjectLevelKMS,
 		DefaultInterval:                 *c.DefaultInterval,
 		MaxTeardownWait:                 *c.MaxTeardownWait,
@@ -190,6 +193,10 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	if *c.EnableWebhook {
 		if err := (&controller.StageSetValidator{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error("unable to create webhook", "error", err, "webhook", "StageSet")
+			return 1
+		}
+		if err := (&controller.ImageVerificationPolicyValidator{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error("unable to create webhook", "error", err, "webhook", "ImageVerificationPolicy")
 			return 1
 		}
 		switch *c.WebhookCertMode {

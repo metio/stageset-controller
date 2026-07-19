@@ -71,6 +71,14 @@ rules:
 - apiGroups:
   - stages.metio.wtf
   resources:
+  - imageverificationpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - stages.metio.wtf
+  resources:
   - stageledgers
   verbs:
   - create

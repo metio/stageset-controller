@@ -15,5 +15,5 @@
 # carries an inline SPDX header, and controller-gen rewrites the file wholesale —
 # without it the header is dropped and REUSE fails.
 
-go tool controller-gen crd rbac:roleName=stageset-controller paths="./..." output:crd:artifacts:config=config/crd
+go tool controller-gen crd rbac:roleName=stageset-controller webhook paths="./..." output:crd:artifacts:config=config/crd output:webhook:artifacts:config=config/webhook
 go tool controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."

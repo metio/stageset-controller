@@ -163,8 +163,8 @@ func refName(ref string) string {
 		}
 		return ref
 	}
-	if colon := strings.IndexByte(ref, ':'); colon >= 0 {
-		return ref[:colon]
+	if before, _, found := strings.Cut(ref, ":"); found {
+		return before
 	}
 	return ref
 }
