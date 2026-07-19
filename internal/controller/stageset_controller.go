@@ -255,6 +255,15 @@ type StageSetReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;update
+// The EventRecorder emits an Event on every Ready-condition transition, and the
+// promotion event gate lists core-group Events — so the core rule carries list
+// alongside the writes. controller-runtime's events.v1 recorder writes through
+// the events.k8s.io group, authorized separately from the core group.
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;list;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// The promotion restart/event gate lists pods on the apply-target cluster to
+// decide whether a stage may advance (single-tenant path, an uncached list).
+// +kubebuilder:rbac:groups="",resources=pods,verbs=list
 // There is deliberately NO secrets/configmaps rule here. Every Secret and
 // ConfigMap this controller reads is one a StageSet named in its own spec —
 // postBuild substituteFrom, the metric-source bearer token, decryption keys,

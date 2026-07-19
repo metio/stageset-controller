@@ -7,12 +7,26 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - list
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - namespaces
   - serviceaccounts
   verbs:
   - get
   - list
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
 - apiGroups:
   - ""
   resources:
@@ -26,6 +40,13 @@ rules:
   verbs:
   - get
   - update
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
 - apiGroups:
   - jaas.metio.wtf
   resources:
