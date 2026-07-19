@@ -68,20 +68,13 @@ spec:
                       description: Key verifies against a cosign public key held in
                         a Secret.
                       properties:
-                        secretRef:
-                          description: SecretRef names the Secret holding the PEM
-                            public key (under key "cosign.pub").
-                          properties:
-                            name:
-                              type: string
-                            namespace:
-                              type: string
-                          required:
-                          - name
-                          - namespace
-                          type: object
+                        publicKey:
+                          description: |-
+                            PublicKey is the PEM-encoded public key (the contents of a cosign.pub), the
+                            counterpart of the private key that signed the image.
+                          type: string
                       required:
-                      - secretRef
+                      - publicKey
                       type: object
                     keyless:
                       description: |-

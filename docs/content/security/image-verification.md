@@ -35,10 +35,30 @@ The globs match the ref without its tag or digest: `*` spans one path segment, `
 spans any number, so `ghcr.io/acme/**` covers `ghcr.io/acme/api` and
 `ghcr.io/acme/team/worker` alike.
 
-An authority is a **keyless** identity — the Fulcio certificate a
-[cosign](https://docs.sigstore.dev/) keyless signature carries. Match the OIDC issuer
-with `issuer` (exact) or `issuerRegExp`, and the certificate subject with `subject`
-(exact) or `subjectRegExp`; set exactly one form of each.
+An authority is one accepted signer — set exactly one of `keyless` or `key`:
+
+- **keyless** — the Fulcio certificate a [cosign](https://docs.sigstore.dev/) keyless
+  signature carries. Match the OIDC issuer with `issuer` (exact) or `issuerRegExp`, and
+  the certificate subject with `subject` (exact) or `subjectRegExp`; set exactly one
+  form of each.
+- **key** — a cosign public key, carried inline. The key is public, so it lives in the
+  policy itself — no Secret, and the controller needs no secret-read privilege:
+
+  ```yaml
+  spec:
+    images:
+      - "registry.internal/**"
+    authorities:
+      - key:
+          publicKey: |
+            -----BEGIN PUBLIC KEY-----
+            MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE…
+            -----END PUBLIC KEY-----
+  ```
+
+  Paste the contents of the `cosign.pub` produced by `cosign generate-key-pair`. A
+  key signature is verified against the current time — the key does not expire, so
+  trust rests on the signature over the digest, as with `cosign verify --key`.
 
 ## How a stage is gated
 
@@ -114,6 +134,6 @@ cluster without egress, point it at an offline trusted-root bundle:
 
 ## Constraints
 
-Authorities are keyless Fulcio certificate identities. A `key` authority or a
-`requireAttestations` entry is rejected by the [admission webhook](/security/admission-webhook/)
-so a policy never advertises a guarantee the controller does not enforce.
+A `requireAttestations` entry is rejected by the [admission webhook](/security/admission-webhook/):
+signature verification is enforced, attestation-predicate verification is not, so a
+policy never advertises a guarantee the controller does not keep.

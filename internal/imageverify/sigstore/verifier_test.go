@@ -11,6 +11,8 @@ import (
 	"io"
 	"testing"
 
+	"github.com/sigstore/sigstore-go/pkg/bundle"
+	"github.com/sigstore/sigstore-go/pkg/sign"
 	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
@@ -22,16 +24,17 @@ const (
 	testIssuer   = "https://token.actions.githubusercontent.com"
 )
 
-// signedFixture mints a VirtualSigstore, signs a fake image manifest, and returns the
-// keyless verifier plus the signed entity and the digest cosign would have signed —
-// everything verifyImage needs, with no registry or network.
-func signedFixture(t *testing.T) (*verify.Verifier, verify.SignedEntity, []byte) {
+var manifest = []byte("fake image manifest bytes")
+
+// keylessFixture mints a VirtualSigstore, signs a fake image manifest, and returns a
+// lazy provider for the keyless verifier plus the signed entity and the digest cosign
+// would have signed — everything verifyImage needs, with no registry or network.
+func keylessFixture(t *testing.T) (func() (*verify.Verifier, error), verify.SignedEntity, []byte) {
 	t.Helper()
 	vs, err := ca.NewVirtualSigstore()
 	if err != nil {
 		t.Fatalf("NewVirtualSigstore: %v", err)
 	}
-	manifest := []byte("fake image manifest bytes")
 	sum := sha256.Sum256(manifest)
 	entity, err := vs.Sign(testIdentity, testIssuer, manifest)
 	if err != nil {
@@ -41,7 +44,7 @@ func signedFixture(t *testing.T) (*verify.Verifier, verify.SignedEntity, []byte)
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
-	return verifier, entity, sum[:]
+	return func() (*verify.Verifier, error) { return verifier, nil }, entity, sum[:]
 }
 
 func keyless(issuer, issuerRE, subject, subjectRE string) stagesv1.VerificationAuthority {
@@ -50,7 +53,13 @@ func keyless(issuer, issuerRE, subject, subjectRE string) stagesv1.VerificationA
 	}}
 }
 
-func TestVerifyImage(t *testing.T) {
+// noKeyless is a provider that fails if called — a key-only policy must never build
+// the Sigstore-root-backed keyless verifier.
+func noKeyless() (*verify.Verifier, error) {
+	return nil, errors.New("keyless verifier must not be built")
+}
+
+func TestVerifyImage_Keyless(t *testing.T) {
 	tests := []struct {
 		name        string
 		authorities []stagesv1.VerificationAuthority
@@ -73,7 +82,6 @@ func TestVerifyImage(t *testing.T) {
 		{
 			name:        "second authority verifies when the first does not",
 			authorities: []stagesv1.VerificationAuthority{keyless(testIssuer, "", "someone-else", ""), keyless(testIssuer, "", testIdentity, "")},
-			wantErr:     false,
 		},
 		{
 			name:        "wrong subject is rejected",
@@ -92,8 +100,8 @@ func TestVerifyImage(t *testing.T) {
 			wantErr:     true,
 		},
 		{
-			name:        "a policy with no keyless authority is rejected",
-			authorities: []stagesv1.VerificationAuthority{{Key: &stagesv1.KeyAuthority{}}},
+			name:        "a policy with no authority is rejected",
+			authorities: []stagesv1.VerificationAuthority{{}},
 			wantErr:     true,
 		},
 		{
@@ -105,7 +113,7 @@ func TestVerifyImage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verifier, entity, digest := signedFixture(t)
+			provider, entity, digest := keylessFixture(t)
 			entities := []verify.SignedEntity{entity}
 			if tt.noEntities {
 				entities = nil
@@ -114,7 +122,7 @@ func TestVerifyImage(t *testing.T) {
 				other := sha256.Sum256([]byte("a different manifest"))
 				digest = other[:]
 			}
-			err := verifyImage(verifier, entities, "sha256", digest, tt.authorities)
+			err := verifyImage(provider, entities, "sha256", digest, tt.authorities)
 			if tt.wantErr && err == nil {
 				t.Fatal("want a verification error, got nil")
 			}
@@ -123,6 +131,59 @@ func TestVerifyImage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// keySignedFixture signs the fake manifest with a fresh ephemeral key and returns the
+// bundle, the key's PEM, and the signed digest.
+func keySignedFixture(t *testing.T) (verify.SignedEntity, string, []byte) {
+	t.Helper()
+	kp, err := sign.NewEphemeralKeypair(nil)
+	if err != nil {
+		t.Fatalf("NewEphemeralKeypair: %v", err)
+	}
+	pubPEM, err := kp.GetPublicKeyPem()
+	if err != nil {
+		t.Fatalf("GetPublicKeyPem: %v", err)
+	}
+	pb, err := sign.Bundle(&sign.PlainData{Data: manifest}, kp, sign.BundleOptions{})
+	if err != nil {
+		t.Fatalf("sign.Bundle: %v", err)
+	}
+	sum := sha256.Sum256(manifest)
+	return &bundle.Bundle{Bundle: pb}, pubPEM, sum[:]
+}
+
+func TestVerifyImage_Key(t *testing.T) {
+	entity, pubPEM, digest := keySignedFixture(t)
+	keyAuth := func(pem string) []stagesv1.VerificationAuthority {
+		return []stagesv1.VerificationAuthority{{Key: &stagesv1.KeyAuthority{PublicKey: pem}}}
+	}
+
+	t.Run("matching key verifies", func(t *testing.T) {
+		if err := verifyImage(noKeyless, []verify.SignedEntity{entity}, "sha256", digest, keyAuth(pubPEM)); err != nil {
+			t.Fatalf("want success, got %v", err)
+		}
+	})
+
+	t.Run("a different key is rejected", func(t *testing.T) {
+		_, otherPEM, _ := keySignedFixture(t)
+		if err := verifyImage(noKeyless, []verify.SignedEntity{entity}, "sha256", digest, keyAuth(otherPEM)); err == nil {
+			t.Fatal("want rejection when the key does not match")
+		}
+	})
+
+	t.Run("a different digest is rejected", func(t *testing.T) {
+		other := sha256.Sum256([]byte("a different manifest"))
+		if err := verifyImage(noKeyless, []verify.SignedEntity{entity}, "sha256", other[:], keyAuth(pubPEM)); err == nil {
+			t.Fatal("want rejection when the digest does not match")
+		}
+	})
+
+	t.Run("a malformed key is rejected", func(t *testing.T) {
+		if err := verifyImage(noKeyless, []verify.SignedEntity{entity}, "sha256", digest, keyAuth("not a pem key")); err == nil {
+			t.Fatal("want rejection for a malformed key")
+		}
+	})
 }
 
 type errLayer struct {
@@ -149,14 +210,11 @@ func TestParseBundleLayer_RejectsBadInput(t *testing.T) {
 	}
 }
 
-// TestVerify_RejectsUnsupportedConfig pins the fail-closed guards for config this
-// version does not yet enforce: a key authority and any attestation requirement are
-// refused before any network call, so nothing unverified slips through.
+// TestVerify_RejectsUnsupportedConfig pins the fail-closed guard for config this
+// version does not yet enforce: an attestation requirement is refused before any
+// network call, so nothing unverified slips through.
 func TestVerify_RejectsUnsupportedConfig(t *testing.T) {
 	v := New()
-	if _, err := v.Verify(context.Background(), "reg.io/app:1", []stagesv1.VerificationAuthority{{Key: &stagesv1.KeyAuthority{}}}, nil); err == nil {
-		t.Fatal("want a key-authority refusal")
-	}
 	if _, err := v.Verify(context.Background(), "reg.io/app:1", nil, []stagesv1.AttestationRequirement{{PredicateType: "x"}}); err == nil {
 		t.Fatal("want an attestation-requirement refusal")
 	}

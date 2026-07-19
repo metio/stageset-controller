@@ -64,20 +64,14 @@ type KeylessAuthority struct {
 	SubjectRegExp string `json:"subjectRegExp,omitempty"`
 }
 
-// KeyAuthority verifies signatures with a cosign public key from a Secret.
+// KeyAuthority verifies signatures with a cosign public key. The key is public, so
+// it is carried inline in the (cluster-scoped, admin-owned) policy — no Secret, and
+// the controller needs no secret-read privilege to verify against it.
 type KeyAuthority struct {
-	// SecretRef names the Secret holding the PEM public key (under key "cosign.pub").
+	// PublicKey is the PEM-encoded public key (the contents of a cosign.pub), the
+	// counterpart of the private key that signed the image.
 	// +required
-	SecretRef SecretReference `json:"secretRef"`
-}
-
-// SecretReference is a cluster-scoped Secret reference (namespace is required
-// because the policy is cluster-scoped and cannot default it).
-type SecretReference struct {
-	// +required
-	Namespace string `json:"namespace"`
-	// +required
-	Name string `json:"name"`
+	PublicKey string `json:"publicKey"`
 }
 
 // AttestationRequirement requires a verified attestation of a predicate type,

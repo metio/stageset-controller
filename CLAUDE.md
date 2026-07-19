@@ -164,13 +164,16 @@ nix develop --command go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/
     between check and apply. Fail-closed: a failure holds the stage under
     `ReasonImageUnverified` before anything applies; `--require-image-verification`
     adds deny-by-default for ungoverned images; the `stages.metio.wtf/skip-image-verification`
-    annotation is an audited one-reconcile break-glass. **Phase 1 is keyless-only**
-    (Fulcio cert identity) — `ImageVerificationPolicyValidator` rejects a `key`
-    authority or a `requireAttestations` entry at admission (and the verifier
-    fails-closed as defense-in-depth), so a policy never advertises a guarantee the
-    controller doesn't keep. Verification runs each reconcile (no per-digest cache
-    yet). `--image-verification-trusted-root` points at an offline root for
-    air-gapped clusters; otherwise the public Sigstore root loads lazily over TUF.
+    annotation is an audited one-reconcile break-glass. Authorities are **keyless**
+    (Fulcio cert identity, verified against the Sigstore root) or **key** (a cosign
+    public key carried *inline* in the policy — a public key needs no Secret, so the
+    controller needs no secret-read privilege; verified against current time, as
+    `cosign verify --key`). `requireAttestations` is still rejected at admission
+    (signatures are enforced, attestation predicates are not yet), so a policy never
+    advertises a guarantee the controller doesn't keep. Verification runs each
+    reconcile (no per-digest cache yet). `--image-verification-trusted-root` points at
+    an offline root for air-gapped clusters; otherwise the public Sigstore root loads
+    lazily over TUF (only when a keyless authority is present).
   - `gate/` + `celeval/` — readiness gating and CEL expression evaluation.
   - `window/` — `updateWindows` (cron+duration / absolute ranges, IANA tz).
   - `artifact/` + `build/` — fetch ExternalArtifact tarballs and build stages.

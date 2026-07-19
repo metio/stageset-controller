@@ -4,10 +4,28 @@
 package controller
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"testing"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
+
+// testPublicKeyPEM is a valid PEM-encoded ECDSA P-256 public key.
+var testPublicKeyPEM = func() string {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		panic(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+}()
 
 func ivpFixture(spec stagesv1.ImageVerificationPolicySpec) *stagesv1.ImageVerificationPolicy {
 	return &stagesv1.ImageVerificationPolicy{Spec: spec}
@@ -48,18 +66,22 @@ func TestValidateImageVerificationPolicy(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "inline public key authority verifies",
+			spec: stagesv1.ImageVerificationPolicySpec{Images: []string{"reg.io/**"}, Authorities: []stagesv1.VerificationAuthority{{Key: &stagesv1.KeyAuthority{PublicKey: testPublicKeyPEM}}}},
+		},
+		{
+			name:    "malformed public key is rejected",
+			spec:    stagesv1.ImageVerificationPolicySpec{Images: []string{"reg.io/**"}, Authorities: []stagesv1.VerificationAuthority{{Key: &stagesv1.KeyAuthority{PublicKey: "not a pem"}}}},
+			wantErr: true,
+		},
+		{
 			name:    "attestation requirement is rejected this version",
 			spec:    stagesv1.ImageVerificationPolicySpec{Images: []string{"reg.io/**"}, Authorities: []stagesv1.VerificationAuthority{keylessAuth(good)}, RequireAttestations: []stagesv1.AttestationRequirement{{PredicateType: "https://slsa.dev/provenance/v1"}}},
 			wantErr: true,
 		},
 		{
-			name:    "key authority is rejected this version",
-			spec:    stagesv1.ImageVerificationPolicySpec{Images: []string{"reg.io/**"}, Authorities: []stagesv1.VerificationAuthority{{Key: &stagesv1.KeyAuthority{SecretRef: stagesv1.SecretReference{Namespace: "ns", Name: "k"}}}}},
-			wantErr: true,
-		},
-		{
 			name:    "both keyless and key set",
-			spec:    stagesv1.ImageVerificationPolicySpec{Images: []string{"reg.io/**"}, Authorities: []stagesv1.VerificationAuthority{{Keyless: &good, Key: &stagesv1.KeyAuthority{}}}},
+			spec:    stagesv1.ImageVerificationPolicySpec{Images: []string{"reg.io/**"}, Authorities: []stagesv1.VerificationAuthority{{Keyless: &good, Key: &stagesv1.KeyAuthority{PublicKey: testPublicKeyPEM}}}},
 			wantErr: true,
 		},
 		{

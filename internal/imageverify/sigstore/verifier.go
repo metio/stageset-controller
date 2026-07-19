@@ -96,11 +96,6 @@ func (v *Verifier) Verify(ctx context.Context, ref string, authorities []stagesv
 	if len(require) > 0 {
 		return "", errors.New("attestation requirements are not enforced in this version; remove requireAttestations from the policy")
 	}
-	for i := range authorities {
-		if authorities[i].Key != nil {
-			return "", errors.New("key authorities are not supported in this version; use a keyless authority")
-		}
-	}
 
 	parsed, err := name.ParseReference(ref)
 	if err != nil {
@@ -127,11 +122,9 @@ func (v *Verifier) Verify(ctx context.Context, ref string, authorities []stagesv
 		return "", fmt.Errorf("fetch signatures for %q: %w", ref, err)
 	}
 
-	verifier, err := v.trustedVerifier()
-	if err != nil {
-		return "", err
-	}
-	if err := verifyImage(verifier, entities, desc.Digest.Algorithm, digestHex, authorities); err != nil {
+	// The keyless verifier (and its trusted-root load) is built lazily, so a policy
+	// with only key authorities verifies fully offline.
+	if err := verifyImage(v.trustedVerifier, entities, desc.Digest.Algorithm, digestHex, authorities); err != nil {
 		return "", err
 	}
 	return digestRef.String(), nil

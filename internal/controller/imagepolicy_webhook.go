@@ -5,6 +5,8 @@ package controller
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"regexp"
 	"strings"
@@ -96,7 +98,7 @@ func validateAuthority(i int, a *stagesv1.VerificationAuthority) error {
 	case a.Keyless == nil && a.Key == nil:
 		return fmt.Errorf("spec.authorities[%d] sets neither keyless nor key; set exactly one", i)
 	case a.Key != nil:
-		return fmt.Errorf("spec.authorities[%d] is a key authority, which is not supported in this version; use keyless", i)
+		return validateKeyAuthority(i, a.Key)
 	}
 
 	k := a.Keyless
@@ -105,6 +107,19 @@ func validateAuthority(i int, a *stagesv1.VerificationAuthority) error {
 	}
 	if err := validateMatcher(i, "subject", k.Subject, k.SubjectRegExp); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateKeyAuthority checks the inline public key is a PEM-encoded public key, so a
+// malformed key is rejected at admission instead of holding every governed image.
+func validateKeyAuthority(i int, k *stagesv1.KeyAuthority) error {
+	block, _ := pem.Decode([]byte(k.PublicKey))
+	if block == nil {
+		return fmt.Errorf("spec.authorities[%d].key.publicKey is not PEM-encoded", i)
+	}
+	if _, err := x509.ParsePKIXPublicKey(block.Bytes); err != nil {
+		return fmt.Errorf("spec.authorities[%d].key.publicKey is not a valid public key: %w", i, err)
 	}
 	return nil
 }
