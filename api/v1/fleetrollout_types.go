@@ -11,12 +11,14 @@ import (
 // selected set of StageSets, in ordered waves.
 // +kubebuilder:validation:XValidation:rule="self.onRegression != 'Rollback' || (has(self.previousVersion) && size(self.previousVersion) > 0)",message="previousVersion is required when onRegression is Rollback"
 type FleetRolloutSpec struct {
-	// TargetVersion is the version this rollout approves across the fleet. The
-	// controller stamps it as each wave opens; a member advances to it only when
-	// its own source already offers that version, so the rollout paces adoption
-	// rather than pushing versions — it composes with GitOps.
-	// +required
-	TargetVersion string `json:"targetVersion"`
+	// TargetVersion optionally pins the version this rollout approves. Omit it —
+	// the recommended default — and the fleet derives each member's target from
+	// its own held advance (status.pendingVersion), pacing whatever version the
+	// members' sources offer without restating it here; the FleetRollout becomes a
+	// standing wave policy that paces every future advance. Set it only to pin a
+	// specific, bounded rollout of exactly that version.
+	// +optional
+	TargetVersion string `json:"targetVersion,omitempty"`
 
 	// Selector chooses the StageSets that participate in this rollout. A member
 	// must also set spec.version.approvalMode: Always so it holds each advance for

@@ -6,14 +6,16 @@ tags: [fleet, progressive-delivery, waves, versioning, rollback, multi-tenancy]
 
 When you run one product across many StageSets — one per tenant, often one per
 namespace — a new version reaches every tenant at once. A `FleetRollout` paces that:
-it rolls a single `targetVersion` across a selected set of StageSets in **ordered
-waves**, opening the next wave only after the current one reaches the version, stays
-healthy through a soak and a metric gate, and **halts the whole fleet** the moment a
-wave regresses.
+it rolls a version across a selected set of StageSets in **ordered waves**, opening
+the next wave only after the current one reaches the version, stays healthy through a
+soak and a metric gate, and **halts the whole fleet** the moment a wave regresses.
 
 A `FleetRollout` is cluster-scoped — a fleet spans namespaces. It **approves** the
 version each member's own source already offers; it does not push versions, so it
-composes with GitOps rather than bypassing it.
+composes with GitOps rather than bypassing it. By default it does not even name the
+version — it **derives** each member's target from the advance that member is already
+holding, so one `FleetRollout` becomes a standing wave policy that paces every future
+version its members' sources publish, with nothing to keep in sync.
 
 ## Make members fleet-managed
 
@@ -49,9 +51,9 @@ Label your tenants into rings, then roll wave by wave:
 apiVersion: stages.metio.wtf/v1
 kind: FleetRollout
 metadata:
-  name: moodle-2-0
+  name: moodle
 spec:
-  targetVersion: "2.0.0"
+  # No targetVersion: the fleet derives it from each member's own held advance.
   selector:
     matchLabels: { app: moodle }          # the whole fleet
   namespaceSelector:                       # optional; omit to span every namespace
@@ -77,13 +79,20 @@ Each wave is a label selector over the members. A member that matches `selector`
 no wave fails the rollout closed (`MembersUnassigned`) rather than being silently
 skipped.
 
+**Deriving vs. pinning the version.** With no `targetVersion` (above), the fleet reads
+each held member's `status.pendingVersion` — the advance its own source is offering —
+and approves *that*, so you never restate a version the source already declares and
+the two can't drift. Set `targetVersion: "2.0.0"` only to pin a specific, bounded
+rollout of exactly that version; a member whose source does not offer the pinned
+version waits until it does.
+
 ## How a rollout progresses
 
 The controller opens one wave at a time:
 
-1. **Open** the wave — stamp the target version onto each member's approval, releasing
-   its held advance. Members reach the version when their own source offers it.
-2. **Settle** — wait until every member of the wave is at the target version and
+1. **Open** the wave — stamp the version onto each member's approval, releasing its
+   held advance. Members reach the version when their own source offers it.
+2. **Settle** — wait until every member of the wave has adopted its version and is
    Ready.
 3. **Soak** — hold the wave's `soak` after it settles.
 4. **Gate** — evaluate the wave's `gate` metric. A scalar within the threshold passes;

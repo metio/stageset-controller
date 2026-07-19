@@ -198,6 +198,10 @@ func TestReconcile_Version_ApprovalAlwaysHoldsMigrationFreeAdvance(t *testing.T)
 	if held.Status.Version != "1.0.0" {
 		t.Fatalf("version must not advance before approval, got %q", held.Status.Version)
 	}
+	// The held version is exposed for a FleetRollout to derive its target from.
+	if held.Status.PendingVersion != "2.0.0" {
+		t.Fatalf("status.pendingVersion should be the held version 2.0.0, got %q", held.Status.PendingVersion)
+	}
 
 	// The fleet (here, a hand stamp) approves the target → the advance proceeds.
 	if held.Annotations == nil {
@@ -209,8 +213,12 @@ func TestReconcile_Version_ApprovalAlwaysHoldsMigrationFreeAdvance(t *testing.T)
 	}
 	reconcileOnce(t, c, held)
 
-	if v := getStageSet(t, c, ns, "fleet-member").Status.Version; v != "2.0.0" {
-		t.Fatalf("version should advance after approval, got %q", v)
+	advanced := getStageSet(t, c, ns, "fleet-member")
+	if advanced.Status.Version != "2.0.0" {
+		t.Fatalf("version should advance after approval, got %q", advanced.Status.Version)
+	}
+	if advanced.Status.PendingVersion != "" {
+		t.Fatalf("status.pendingVersion should clear once the advance proceeds, got %q", advanced.Status.PendingVersion)
 	}
 }
 

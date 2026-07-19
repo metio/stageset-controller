@@ -514,6 +514,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			migPlan.desired, detail, approvedVersionAnnotation, migPlan.desired)
 		r.setReady(&ss, metav1.ConditionFalse, ReasonAwaitingApproval, msg)
 		ss.Status.ObservedGeneration = ss.Generation
+		ss.Status.PendingVersion = migPlan.desired // the version awaiting approval, for a FleetRollout to read
 		metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonAwaitingApproval).Inc()
 		r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, ReasonAwaitingApproval, msg)
 		if uerr := r.patchStatus(ctx, patchHelper, &ss); uerr != nil {
@@ -521,6 +522,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		return ctrl.Result{RequeueAfter: permanentRetryInterval}, nil
 	}
+	ss.Status.PendingVersion = "" // proceeded past the approval gate: nothing held
 
 	// SOPS decryptor (nil when spec.decryption is unset). Built once per
 	// reconcile; the key Secret is read under the tenant SA.

@@ -28,11 +28,14 @@ FleetRollout moodle-2-0  →  version 2.0.0
     ✓ moodle-beta/app             2.0.0  Ready
   wave broad    1/3 at 2.0.0, 3 ready
     ✓ moodle-x/app                2.0.0  Ready
-    … moodle-y/app                1.0.0  held → awaiting approval
-    … moodle-z/app                1.0.0  held → awaiting approval
+    … moodle-y/app                1.0.0  held → awaiting 2.0.0
+    … moodle-z/app                1.0.0  held → awaiting 2.0.0
   wave rest
-    … moodle-old/app              1.0.0  held → awaiting approval
+    … moodle-old/app              1.0.0  held → awaiting 2.0.0
 ```
+
+The header shows the version being rolled out — the pinned `spec.targetVersion`, or
+the version members are advancing to when it is [derived](/gating/fleet-rollout/).
 
 Each member carries a mark: **✓** at the target version and Ready, **⚠** at the
 target but not Ready (regressed), **…** still on the old version and held awaiting its

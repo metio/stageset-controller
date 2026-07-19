@@ -1253,6 +1253,13 @@ type StageSetStatus struct {
 	// +optional
 	Version string `json:"version,omitempty"`
 
+	// PendingVersion is the version this StageSet is currently held awaiting
+	// approval for (spec.version.approvalMode), empty when nothing is held. A
+	// FleetRollout reads it to derive which version to approve — the version the
+	// member's own source already offers — so a fleet need not restate a target.
+	// +optional
+	PendingVersion string `json:"pendingVersion,omitempty"`
+
 	// PendingMigrations lists the migrations the next run will execute, with
 	// enough detail (boundary, resolved anchor stage, action verbs, content
 	// digest) that operators see exactly what destructive work is about to run

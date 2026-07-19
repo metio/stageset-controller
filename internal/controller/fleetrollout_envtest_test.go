@@ -60,6 +60,7 @@ func settleMember(t *testing.T, c client.Client, ns, name, version string) {
 	t.Helper()
 	ss := getStageSet(t, c, ns, name)
 	ss.Status.Version = version
+	ss.Status.PendingVersion = "" // adopted: nothing awaiting approval
 	ss.Status.ObservedGeneration = ss.Generation
 	apimeta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
 		Type: ConditionReady, Status: metav1.ConditionTrue, Reason: ReasonReady,
@@ -67,6 +68,23 @@ func settleMember(t *testing.T, c client.Client, ns, name, version string) {
 	})
 	if err := c.Status().Update(context.Background(), ss); err != nil {
 		t.Fatalf("settle member %s: %v", name, err)
+	}
+}
+
+// holdMember simulates a member held awaiting approval for version — Ready=False,
+// status.pendingVersion set — which is what the StageSet reconciler produces under
+// approvalMode: Always with a pending advance the fleet has not yet approved.
+func holdMember(t *testing.T, c client.Client, ns, name, version string) {
+	t.Helper()
+	ss := getStageSet(t, c, ns, name)
+	ss.Status.PendingVersion = version
+	ss.Status.ObservedGeneration = ss.Generation
+	apimeta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
+		Type: ConditionReady, Status: metav1.ConditionFalse, Reason: ReasonAwaitingApproval,
+		Message: "awaiting approval", ObservedGeneration: ss.Generation,
+	})
+	if err := c.Status().Update(context.Background(), ss); err != nil {
+		t.Fatalf("hold member %s: %v", name, err)
 	}
 }
 
@@ -189,6 +207,58 @@ func TestFleetRollout_OpensWavesInOrder(t *testing.T) {
 	}
 	if cond := apimeta.FindStatusCondition(final.Status.Conditions, ConditionReady); cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != ReasonFleetCompleted {
 		t.Fatalf("Ready condition = %+v, want True/Completed", cond)
+	}
+}
+
+// TestFleetRollout_DerivedTargetFromPendingVersion proves that with NO
+// spec.targetVersion the fleet derives each member's target from its own held
+// advance (status.pendingVersion) and paces it wave by wave — zero manual target.
+func TestFleetRollout_DerivedTargetFromPendingVersion(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	const app = "derived"
+	fleetMember(t, c, ns, "w0", app, "0")
+	fleetMember(t, c, ns, "w1", app, "1")
+	// Both members' sources offer 2.0.0, so each is held awaiting approval for it.
+	holdMember(t, c, ns, "w0", "2.0.0")
+	holdMember(t, c, ns, "w1", "2.0.0")
+
+	fr := &stagesv1.FleetRollout{
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-derived"},
+		Spec: stagesv1.FleetRolloutSpec{
+			// No TargetVersion — derived.
+			Selector: appSelector(app),
+			Waves: []stagesv1.FleetWave{
+				{Name: "canary", Selector: ringSelector("0")},
+				{Name: "broad", Selector: ringSelector("1")},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), fr); err != nil {
+		t.Fatalf("create FleetRollout: %v", err)
+	}
+
+	// Wave 0 approved to its own pending version; wave 1 held.
+	reconcileFleet(t, c, "fleet-derived")
+	if got := memberApproved(t, c, ns, "w0"); got != "2.0.0" {
+		t.Fatalf("wave-0 member should be approved to its derived pending version 2.0.0, got %q", got)
+	}
+	if got := memberApproved(t, c, ns, "w1"); got != "" {
+		t.Fatalf("wave-1 member must be held until wave 0 settles, got %q", got)
+	}
+
+	// Wave 0 adopts → wave 1 opens (also derived).
+	settleMember(t, c, ns, "w0", "2.0.0")
+	reconcileFleet(t, c, "fleet-derived")
+	if got := memberApproved(t, c, ns, "w1"); got != "2.0.0" {
+		t.Fatalf("wave-1 member should be approved once wave 0 settled, got %q", got)
+	}
+
+	// Wave 1 adopts → completed.
+	settleMember(t, c, ns, "w1", "2.0.0")
+	reconcileFleet(t, c, "fleet-derived")
+	if got := getFleet(t, c, "fleet-derived"); got.Status.Phase != stagesv1.FleetCompleted {
+		t.Fatalf("phase = %q, want Completed", got.Status.Phase)
 	}
 }
 

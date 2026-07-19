@@ -112,7 +112,6 @@ func (r *FleetRolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.FleetRollout) (ctrl.Result, error) {
 	fr.Status.ObservedGeneration = fr.Generation
-	target := fr.Spec.TargetVersion
 
 	members, err := r.members(ctx, fr)
 	if err != nil {
@@ -165,6 +164,7 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 	}
 
 	now := r.now()
+	versionLabel := fleetVersionLabel(fr, members)
 	prior := make(map[string]stagesv1.FleetWaveStatus, len(fr.Status.Waves))
 	for _, ws := range fr.Status.Waves {
 		prior[ws.Name] = ws
@@ -174,7 +174,7 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 	// the moment it first settles) and prior health forward.
 	fr.Status.Waves = make([]stagesv1.FleetWaveStatus, len(fr.Spec.Waves))
 	for w := range fr.Spec.Waves {
-		ws := waveStatus(fr.Spec.Waves[w].Name, waveMembers[w], target)
+		ws := waveStatus(fr, fr.Spec.Waves[w].Name, waveMembers[w])
 		prev := prior[ws.Name]
 		ws.Health = prev.Health
 		if ws.Settled {
@@ -202,7 +202,7 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 		ws := &fr.Status.Waves[w]
 		if prior[ws.Name].SoakUntil != nil && !ws.Settled {
 			return r.halt(ctx, fr, ws.Name, waveMembers[w],
-				fmt.Sprintf("wave %q regressed: a member is no longer at version %s and Ready", ws.Name, target))
+				fmt.Sprintf("wave %q regressed: a member is no longer adopted and Ready", ws.Name))
 		}
 		passed := false
 		if ws.Settled && !now.Before(ws.SoakUntil.Time) {
@@ -236,7 +236,7 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 	}
 	for w := 0; w <= openThrough; w++ {
 		for i := range waveMembers[w] {
-			if err := r.approve(ctx, &waveMembers[w][i], target); err != nil {
+			if err := r.approve(ctx, &waveMembers[w][i], fleetApprovalVersion(fr, &waveMembers[w][i])); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -246,14 +246,14 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 		fr.Status.Phase = stagesv1.FleetCompleted
 		fr.Status.CurrentWave = ""
 		r.setFleetReady(fr, metav1.ConditionTrue, ReasonFleetCompleted,
-			fmt.Sprintf("all %d wave(s) reached version %s", len(fr.Spec.Waves), target))
+			fmt.Sprintf("all %d wave(s) have adopted %s", len(fr.Spec.Waves), versionLabel))
 		return ctrl.Result{}, nil
 	}
 
 	fr.Status.Phase = stagesv1.FleetInProgress
 	fr.Status.CurrentWave = fr.Spec.Waves[firstOpen].Name
 	r.setFleetReady(fr, metav1.ConditionTrue, ReasonFleetProgressing,
-		fmt.Sprintf("rolling out version %s; wave %q open", target, fr.Status.CurrentWave))
+		fmt.Sprintf("rolling out %s; wave %q open", versionLabel, fr.Status.CurrentWave))
 	return ctrl.Result{RequeueAfter: r.requeueAfter(fr, now)}, nil
 }
 
@@ -408,7 +408,9 @@ func (r *FleetRolloutReconciler) contestedMembers(ctx context.Context, fr *stage
 // approve stamps the target version onto a member's approved-version annotation,
 // releasing its held transition. Idempotent: a member already approved is skipped.
 func (r *FleetRolloutReconciler) approve(ctx context.Context, ss *stagesv1.StageSet, target string) error {
-	if ss.Annotations[approvedVersionAnnotation] == target {
+	// An empty target means the member has no advance awaiting approval (the
+	// derived path): nothing to stamp.
+	if target == "" || ss.Annotations[approvedVersionAnnotation] == target {
 		return nil
 	}
 	patch := client.MergeFrom(ss.DeepCopy())
@@ -426,14 +428,14 @@ func (r *FleetRolloutReconciler) reader() client.Reader {
 	return r.Client
 }
 
-// waveStatus counts a wave's members that have reached the target version and are
-// Ready, and marks the wave settled when every member has. An empty wave is
+// waveStatus counts a wave's members that have adopted their intended version and
+// are Ready, and marks the wave settled when every member has. An empty wave is
 // settled — there is nothing to wait for.
-func waveStatus(name string, members []stagesv1.StageSet, target string) stagesv1.FleetWaveStatus {
+func waveStatus(fr *stagesv1.FleetRollout, name string, members []stagesv1.StageSet) stagesv1.FleetWaveStatus {
 	ws := stagesv1.FleetWaveStatus{Name: name, Total: int32(len(members))} // #nosec G115 -- a wave has far fewer than 2^31 members
 	for i := range members {
-		atTarget, ready := memberProgress(&members[i], target)
-		if atTarget {
+		adopted, ready := memberProgress(fr, &members[i])
+		if adopted {
 			ws.AtTarget++
 		}
 		if ready {
@@ -444,15 +446,62 @@ func waveStatus(name string, members []stagesv1.StageSet, target string) stagesv
 	return ws
 }
 
-// memberProgress reports whether a StageSet has reached the target version and is
+// memberProgress reports whether a StageSet has adopted its intended version and is
 // healthy at its current spec — Ready, fully reconciled, with no new revision held
 // back (the same "usable" predicate dependenciesReady applies to a dependency).
-func memberProgress(ss *stagesv1.StageSet, target string) (atTarget, ready bool) {
-	atTarget = ss.Status.Version == target
+// "Adopted" means the pinned target (spec.targetVersion) is deployed, or — when the
+// target is derived — the member has no advance awaiting approval.
+func memberProgress(fr *stagesv1.FleetRollout, ss *stagesv1.StageSet) (adopted, ready bool) {
+	adopted = fleetAdopted(fr, ss)
 	ready = isReady(ss) &&
 		ss.Status.ObservedGeneration == ss.Generation &&
 		(ss.Status.PendingUpdate == nil || len(ss.Status.PendingUpdate.Revisions) == 0)
-	return atTarget, ready
+	return adopted, ready
+}
+
+// fleetApprovalVersion is the version to stamp on a member's approval: the pinned
+// spec.targetVersion when set, otherwise the member's own held advance
+// (status.pendingVersion) — the version its source already offers. Empty means the
+// member has nothing awaiting approval, so approve() is a no-op.
+func fleetApprovalVersion(fr *stagesv1.FleetRollout, ss *stagesv1.StageSet) string {
+	if fr.Spec.TargetVersion != "" {
+		return fr.Spec.TargetVersion
+	}
+	return ss.Status.PendingVersion
+}
+
+// fleetAdopted reports whether a member has reached its intended version: equal to
+// the pinned target when set, otherwise no advance awaiting approval (the derived
+// default — the member has caught up to what its source offers).
+func fleetAdopted(fr *stagesv1.FleetRollout, ss *stagesv1.StageSet) bool {
+	if fr.Spec.TargetVersion != "" {
+		return ss.Status.Version == fr.Spec.TargetVersion
+	}
+	return ss.Status.PendingVersion == ""
+}
+
+// fleetVersionLabel is the version shown in status/events: the pinned target when
+// set, otherwise the single distinct version members are advancing to (or a summary
+// when none or several) — derived for display only.
+func fleetVersionLabel(fr *stagesv1.FleetRollout, members []stagesv1.StageSet) string {
+	if fr.Spec.TargetVersion != "" {
+		return "version " + fr.Spec.TargetVersion
+	}
+	pending := map[string]bool{}
+	for i := range members {
+		if v := members[i].Status.PendingVersion; v != "" {
+			pending[v] = true
+		}
+	}
+	switch len(pending) {
+	case 0:
+		return "the current version"
+	case 1:
+		for v := range pending {
+			return "version " + v
+		}
+	}
+	return "mixed versions"
 }
 
 func (r *FleetRolloutReconciler) setFleetReady(fr *stagesv1.FleetRollout, status metav1.ConditionStatus, reason, message string) {

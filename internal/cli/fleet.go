@@ -108,7 +108,7 @@ func fleetMembers(ctx context.Context, c client.Client, fr *stagesv1.FleetRollou
 
 func writeFleetView(out io.Writer, fr *stagesv1.FleetRollout, members []stagesv1.StageSet) {
 	target := fr.Spec.TargetVersion
-	fmt.Fprintf(out, "FleetRollout %s  →  version %s\n", fr.Name, target)
+	fmt.Fprintf(out, "FleetRollout %s  →  %s\n", fr.Name, fleetDisplayVersion(fr, members))
 	phase := string(fr.Status.Phase)
 	if phase == "" {
 		phase = "Pending"
@@ -129,8 +129,12 @@ func writeFleetView(out io.Writer, fr *stagesv1.FleetRollout, members []stagesv1
 	for i := range fr.Spec.Waves {
 		wave := &fr.Spec.Waves[i]
 		ws := waveStatus[wave.Name]
-		fmt.Fprintf(out, "  wave %s   %d/%d at %s, %d ready%s\n",
-			wave.Name, ws.AtTarget, ws.Total, target, ws.Ready, waveState(ws))
+		label := "adopted"
+		if target != "" {
+			label = "at " + target
+		}
+		fmt.Fprintf(out, "  wave %s   %d/%d %s, %d ready%s\n",
+			wave.Name, ws.AtTarget, ws.Total, label, ws.Ready, waveState(ws))
 		sel, err := metav1.LabelSelectorAsSelector(&wave.Selector)
 		if err != nil {
 			continue
@@ -147,7 +151,7 @@ func writeFleetView(out io.Writer, fr *stagesv1.FleetRollout, members []stagesv1
 		sort.Strings(names)
 		for _, key := range names {
 			m := byName[key]
-			fmt.Fprintf(out, "    %s %-28s %s\n", memberMark(&m, target), key, memberState(&m, target))
+			fmt.Fprintf(out, "    %s %-28s %s\n", memberMark(fr, &m), key, memberState(fr, &m))
 		}
 	}
 }
@@ -167,31 +171,72 @@ func waveState(ws stagesv1.FleetWaveStatus) string {
 	return suffix
 }
 
-// memberMark is a one-glyph status for a member: at target, regressed, or held.
-func memberMark(m *stagesv1.StageSet, target string) string {
+// memberAdopted reports whether a member has reached its intended version: the
+// pinned spec.targetVersion when set, otherwise no advance awaiting approval (the
+// derived default).
+func memberAdopted(fr *stagesv1.FleetRollout, m *stagesv1.StageSet) bool {
+	if fr.Spec.TargetVersion != "" {
+		return m.Status.Version == fr.Spec.TargetVersion
+	}
+	return m.Status.PendingVersion == ""
+}
+
+// memberMark is a one-glyph status for a member: adopted, regressed, or held.
+func memberMark(fr *stagesv1.FleetRollout, m *stagesv1.StageSet) string {
 	switch {
-	case m.Status.Version == target && stageSetReady(m):
+	case memberAdopted(fr, m) && stageSetReady(m):
 		return "✓"
-	case m.Status.Version == target:
+	case memberAdopted(fr, m):
 		return "⚠"
 	default:
 		return "…"
 	}
 }
 
-func memberState(m *stagesv1.StageSet, target string) string {
+func memberState(fr *stagesv1.FleetRollout, m *stagesv1.StageSet) string {
 	switch {
-	case m.Status.Version == target && stageSetReady(m):
-		return m.Status.Version + "  Ready"
-	case m.Status.Version == target:
-		return m.Status.Version + "  not Ready (regressed)"
+	case memberAdopted(fr, m) && stageSetReady(m):
+		return orNoneVersion(m.Status.Version) + "  Ready"
+	case memberAdopted(fr, m):
+		return orNoneVersion(m.Status.Version) + "  not Ready (regressed)"
 	default:
-		v := m.Status.Version
-		if v == "" {
-			v = "(none)"
+		awaiting := m.Status.PendingVersion
+		if fr.Spec.TargetVersion != "" {
+			awaiting = fr.Spec.TargetVersion
 		}
-		return v + "  held → awaiting approval"
+		return orNoneVersion(m.Status.Version) + "  held → awaiting " + orNoneVersion(awaiting)
 	}
+}
+
+func orNoneVersion(v string) string {
+	if v == "" {
+		return "(none)"
+	}
+	return v
+}
+
+// fleetDisplayVersion is the version shown in the header: the pinned target when
+// set, otherwise the single distinct version members are advancing to (or a
+// summary).
+func fleetDisplayVersion(fr *stagesv1.FleetRollout, members []stagesv1.StageSet) string {
+	if fr.Spec.TargetVersion != "" {
+		return "version " + fr.Spec.TargetVersion
+	}
+	pending := map[string]bool{}
+	for i := range members {
+		if v := members[i].Status.PendingVersion; v != "" {
+			pending[v] = true
+		}
+	}
+	switch len(pending) {
+	case 0:
+		return "the current version"
+	case 1:
+		for v := range pending {
+			return "version " + v
+		}
+	}
+	return "mixed versions"
 }
 
 func stageSetReady(m *stagesv1.StageSet) bool {

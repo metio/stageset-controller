@@ -84,7 +84,7 @@ func TestFleet_ShowsWaveProgress(t *testing.T) {
 	for _, want := range []string{
 		"FleetRollout view-fleet", "version 2.0.0", "phase: InProgress", "wave: broad",
 		"wave canary", "1/1 at 2.0.0", "settled", "✓", "w0",
-		"wave broad", "w1", "held → awaiting approval",
+		"wave broad", "w1", "held → awaiting 2.0.0",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("fleet view missing %q:\n%s", want, stdout)
