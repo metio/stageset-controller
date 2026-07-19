@@ -152,6 +152,25 @@ nix develop --command go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/
     inventory up too. Stage names are lowercase-validated, so the label match is
     case-exact without normalisation.
   - `apply/` + `actions/` — server-side apply and the typed action executors.
+  - `imageverify/` — the between-build-and-apply image-verification gate. The core
+    package is pure and dependency-light (image extraction from standard workload
+    pod specs, glob matching, policy selection, digest-pinning) behind a `Verifier`
+    interface; the heavy engine lives in `imageverify/sigstore` (sigstore-go keyless
+    verification + go-containerregistry OCI-referrer bundle fetch), kept out of the
+    core by an `arch-go` rule. The reconciler hook (`verifyStageImages`, in
+    `controller/imagegate.go`) matches each rendered image against the cluster-scoped
+    `ImageVerificationPolicy` resources, verifies governed images, and rewrites each
+    to the digest it verified (`repository@sha256:…`) so a tag can't be swapped
+    between check and apply. Fail-closed: a failure holds the stage under
+    `ReasonImageUnverified` before anything applies; `--require-image-verification`
+    adds deny-by-default for ungoverned images; the `stages.metio.wtf/skip-image-verification`
+    annotation is an audited one-reconcile break-glass. **Phase 1 is keyless-only**
+    (Fulcio cert identity) — `ImageVerificationPolicyValidator` rejects a `key`
+    authority or a `requireAttestations` entry at admission (and the verifier
+    fails-closed as defense-in-depth), so a policy never advertises a guarantee the
+    controller doesn't keep. Verification runs each reconcile (no per-digest cache
+    yet). `--image-verification-trusted-root` points at an offline root for
+    air-gapped clusters; otherwise the public Sigstore root loads lazily over TUF.
   - `gate/` + `celeval/` — readiness gating and CEL expression evaluation.
   - `window/` — `updateWindows` (cron+duration / absolute ranges, IANA tz).
   - `artifact/` + `build/` — fetch ExternalArtifact tarballs and build stages.
