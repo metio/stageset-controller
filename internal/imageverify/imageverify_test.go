@@ -48,6 +48,30 @@ func TestExtractImages(t *testing.T) {
 	}
 }
 
+func TestPinImages(t *testing.T) {
+	d := obj("Deployment", podTemplate(
+		[]any{container("app", "reg.io/app:1.0")},
+		[]any{container("migrate", "reg.io/migrate:1.0")},
+	))
+	cj := obj("CronJob", map[string]any{"jobTemplate": map[string]any{"spec": podTemplate([]any{container("job", "reg.io/job:3")}, nil)}})
+	objects := []*unstructured.Unstructured{d, cj}
+	pins := map[string]string{
+		"reg.io/app:1.0":     "reg.io/app@sha256:aaa",
+		"reg.io/migrate:1.0": "reg.io/migrate@sha256:bbb",
+		"reg.io/job:3":       "reg.io/job@sha256:ccc",
+		// An unrelated pin must be ignored.
+		"reg.io/absent:9": "reg.io/absent@sha256:zzz",
+	}
+	if err := PinImages(objects, pins); err != nil {
+		t.Fatalf("PinImages: %v", err)
+	}
+	got := ExtractImages(objects)
+	want := []string{"reg.io/app@sha256:aaa", "reg.io/job@sha256:ccc", "reg.io/migrate@sha256:bbb"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("after PinImages ExtractImages = %v, want %v", got, want)
+	}
+}
+
 func TestRefName(t *testing.T) {
 	tests := map[string]string{
 		"reg.io/app:1.2":                   "reg.io/app",

@@ -46,6 +46,50 @@ func ExtractImages(objects []*unstructured.Unstructured) []string {
 	return out
 }
 
+// PinImages rewrites every container image in objects that appears as a key in pins
+// to its pinned value (name@digest), so the applied manifest is byte-pinned to what
+// was verified — a tag can't be swapped between the check and the apply.
+func PinImages(objects []*unstructured.Unstructured, pins map[string]string) error {
+	if len(pins) == 0 {
+		return nil
+	}
+	for _, o := range objects {
+		base := podSpecPath(o.GetKind())
+		if base == nil {
+			continue
+		}
+		for _, field := range []string{"containers", "initContainers", "ephemeralContainers"} {
+			path := append(append([]string{}, base...), field)
+			list, found, err := unstructured.NestedSlice(o.Object, path...)
+			if !found || err != nil {
+				continue
+			}
+			changed := false
+			for i := range list {
+				m, ok := list[i].(map[string]any)
+				if !ok {
+					continue
+				}
+				img, ok := m["image"].(string)
+				if !ok {
+					continue
+				}
+				if pinned, ok := pins[img]; ok && pinned != img {
+					m["image"] = pinned
+					list[i] = m
+					changed = true
+				}
+			}
+			if changed {
+				if err := unstructured.SetNestedSlice(o.Object, list, path...); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func imagesInObject(o *unstructured.Unstructured) []string {
 	base := podSpecPath(o.GetKind())
 	if base == nil {
