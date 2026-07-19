@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/Masterminds/semver/v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -114,7 +115,27 @@ func ValidateSpec(ss *stagesv1.StageSet) error {
 	if err := validateReadyChecks(ss); err != nil {
 		return err
 	}
+	if err := validateDependsOn(ss); err != nil {
+		return err
+	}
 	return window.Validate(ss.Spec.UpdateWindows)
+}
+
+// validateDependsOn rejects a dependency whose minVersion is not a semver, so the
+// version-floor gate can't silently never satisfy at reconcile time.
+func validateDependsOn(ss *stagesv1.StageSet) error {
+	for i := range ss.Spec.DependsOn {
+		dep := &ss.Spec.DependsOn[i]
+		if dep.Name == "" {
+			return fmt.Errorf("spec.dependsOn[%d]: name is required", i)
+		}
+		if dep.MinVersion != "" {
+			if _, err := semver.NewVersion(dep.MinVersion); err != nil {
+				return fmt.Errorf("spec.dependsOn[%d] (%s): minVersion %q is not a valid semver: %w", i, dep.Name, dep.MinVersion, err)
+			}
+		}
+	}
+	return nil
 }
 
 // validateReadyChecks rejects malformed stage readiness checks at admission: a

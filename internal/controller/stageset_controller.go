@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	fluxconditions "github.com/fluxcd/pkg/runtime/conditions"
 	"github.com/fluxcd/pkg/runtime/jitter"
@@ -2084,8 +2085,43 @@ func (r *StageSetReconciler) dependenciesReady(ctx context.Context, ss *stagesv1
 		if d.Status.PendingUpdate != nil && len(d.Status.PendingUpdate.Revisions) > 0 {
 			return false, fmt.Sprintf("dependency %s/%s has a new revision held by an update window", ns, dep.Name), nil
 		}
+		// A version floor: the dependency must be deployed at or above minVersion,
+		// so a dependent that needs its database migrated first waits for the exact
+		// version, not merely for Ready.
+		if dep.MinVersion != "" {
+			ok, err := versionAtLeast(d.Status.Version, dep.MinVersion)
+			if err != nil {
+				return false, fmt.Sprintf("dependency %s/%s minVersion %q is not a valid semver: %v", ns, dep.Name, dep.MinVersion, err), nil
+			}
+			if !ok {
+				return false, fmt.Sprintf("dependency %s/%s is at version %s, need >= %s", ns, dep.Name, orNoneVersion(d.Status.Version), dep.MinVersion), nil
+			}
+		}
 	}
 	return true, "", nil
+}
+
+// versionAtLeast reports whether the deployed version is at or above min. A min
+// that is not a semver is an error (admission catches it); a deployed version that
+// is empty or unparseable is simply not yet at the floor — the dependent waits.
+func versionAtLeast(have, min string) (bool, error) {
+	minV, err := semver.NewVersion(min)
+	if err != nil {
+		return false, err
+	}
+	haveV, err := semver.NewVersion(have)
+	if err != nil {
+		return false, nil // not yet at a comparable version
+	}
+	return !haveV.LessThan(minV), nil
+}
+
+// orNoneVersion renders an empty version as "(none)" for messages.
+func orNoneVersion(v string) string {
+	if v == "" {
+		return "(none)"
+	}
+	return v
 }
 
 // graphReader is the reader the cross-object dependency/source walk uses: the

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fluxcd/pkg/apis/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -48,7 +47,7 @@ func TestDependenciesReady_HeldNewRevisionGatesDependents(t *testing.T) {
 	dependent := func(dep string) *stagesv1.StageSet {
 		return &stagesv1.StageSet{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dependent", Generation: 1},
-			Spec:       stagesv1.StageSetSpec{DependsOn: []meta.NamespacedObjectReference{{Name: dep}}},
+			Spec:       stagesv1.StageSetSpec{DependsOn: []stagesv1.Dependency{{Name: dep}}},
 		}
 	}
 	newReconciler := func(dep *stagesv1.StageSet) *StageSetReconciler {
@@ -89,9 +88,9 @@ func TestDependenciesReady_HeldNewRevisionGatesDependents(t *testing.T) {
 
 func stageSetDependsOn(t *testing.T, c client.Client, ns, name, eaName string, deps ...string) *stagesv1.StageSet {
 	t.Helper()
-	depRefs := make([]meta.NamespacedObjectReference, 0, len(deps))
+	depRefs := make([]stagesv1.Dependency, 0, len(deps))
 	for _, d := range deps {
-		depRefs = append(depRefs, meta.NamespacedObjectReference{Name: d})
+		depRefs = append(depRefs, stagesv1.Dependency{Name: d})
 	}
 	ss := &stagesv1.StageSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
@@ -143,6 +142,60 @@ func TestReconcile_DependencyReady(t *testing.T) {
 	}
 	if !cmExists(t, c, ns, "dependent-obj") {
 		t.Fatal("dependent should apply once the gate clears")
+	}
+}
+
+// TestReconcile_DependencyVersionGate proves minVersion holds the dependent until
+// the dependency is deployed at or above that version — Ready alone is not enough.
+func TestReconcile_DependencyVersionGate(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+
+	// The dependency, reconciled Ready, deployed at 1.0.0.
+	servedArtifact(t, c, ns, "ea-a", "", map[string]string{"a.yaml": configMapManifest(ns, "dep-obj")})
+	a := newStageSet(t, c, ns, "db", stagesv1.SourceReference{Name: "ea-a"})
+	reconcileOnce(t, c, a)
+	a = getStageSet(t, c, ns, "db")
+	a.Status.Version = "1.0.0"
+	if err := c.Status().Update(context.Background(), a); err != nil {
+		t.Fatalf("set dependency version: %v", err)
+	}
+
+	// The dependent needs the dependency at >= 2.0.0.
+	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"b.yaml": configMapManifest(ns, "app-obj")})
+	b := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:  metav1.Duration{Duration: time.Minute},
+			DependsOn: []stagesv1.Dependency{{Name: "db", MinVersion: "2.0.0"}},
+			Stages:    []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea-b"}}},
+		},
+	}
+	if err := c.Create(context.Background(), b); err != nil {
+		t.Fatalf("create dependent: %v", err)
+	}
+	reconcileOnce(t, c, b)
+
+	// Held: the dependency is Ready but only at 1.0.0.
+	if r := readyReason(getStageSet(t, c, ns, "app")); r != ReasonDependencyNotReady {
+		t.Fatalf("dependent should hold below minVersion; reason = %q", r)
+	}
+	if cmExists(t, c, ns, "app-obj") {
+		t.Fatal("a version-gated dependent must not apply its stages")
+	}
+
+	// The dependency reaches 2.0.0 → the dependent proceeds.
+	a = getStageSet(t, c, ns, "db")
+	a.Status.Version = "2.0.0"
+	if err := c.Status().Update(context.Background(), a); err != nil {
+		t.Fatalf("advance dependency version: %v", err)
+	}
+	reconcileOnce(t, c, b)
+	if r := readyReason(getStageSet(t, c, ns, "app")); r != ReasonReady {
+		t.Fatalf("dependent should proceed once the dependency reaches minVersion, reason = %q", r)
+	}
+	if !cmExists(t, c, ns, "app-obj") {
+		t.Fatal("dependent should apply once the version gate clears")
 	}
 }
 
@@ -239,7 +292,7 @@ func TestDependenciesReady_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
 	dependent := &stagesv1.StageSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "dependent", Generation: 1},
 		Spec: stagesv1.StageSetSpec{
-			DependsOn: []meta.NamespacedObjectReference{{Namespace: "platform", Name: "dep"}},
+			DependsOn: []stagesv1.Dependency{{Namespace: "platform", Name: "dep"}},
 		},
 	}
 	ok, _, err := r.dependenciesReady(context.Background(), dependent)
@@ -268,7 +321,7 @@ func TestHasDependencyCycle_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
 	dependent := &stagesv1.StageSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "dependent"},
 		Spec: stagesv1.StageSetSpec{
-			DependsOn: []meta.NamespacedObjectReference{{Namespace: "platform", Name: "dep"}},
+			DependsOn: []stagesv1.Dependency{{Namespace: "platform", Name: "dep"}},
 		},
 	}
 	cycle, err := r.hasDependencyCycle(context.Background(), dependent)

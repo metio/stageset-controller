@@ -84,20 +84,29 @@ spec:
                 type: object
               dependsOn:
                 description: |-
-                  DependsOn lists StageSets that must be Ready (with observed
-                  generation) before this one reconciles. Semantics match
-                  kustomize-controller.
+                  DependsOn lists StageSets that must be Ready (with observed generation
+                  current and no new revision held back) — and optionally at a minimum version
+                  — before this one reconciles. A typed extension of kustomize-controller's
+                  dependsOn: ordering plus readiness, and a version floor when set.
                 items:
                   description: |-
-                    NamespacedObjectReference contains enough information to locate the referenced Kubernetes resource object in any
-                    namespace.
+                    Dependency is a StageSet this one waits on before it rolls: the dependency must
+                    be Ready at its observed generation with no new revision held back, and — when
+                    minVersion is set — deployed at or above that version.
                   properties:
+                    minVersion:
+                      description: |-
+                        MinVersion additionally requires the dependency's status.version to be at or
+                        above this semver — so the dependent waits not just for Ready, but for Ready
+                        AT a version (e.g. an app that needs its database migrated to 5.2 first).
+                        Omit to gate on readiness alone.
+                      type: string
                     name:
-                      description: Name of the referent.
+                      description: Name of the StageSet depended on.
                       type: string
                     namespace:
-                      description: Namespace of the referent, when not specified it
-                        acts as LocalObjectReference.
+                      description: Namespace of the dependency; defaults to this StageSet's
+                        namespace.
                       type: string
                   required:
                   - name
