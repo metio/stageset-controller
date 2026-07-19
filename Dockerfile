@@ -9,7 +9,7 @@
 # lockstep with the flake's Go so prod and dev builds agree — cgr.dev
 # throttles anonymous pulls, making its large Go builder layer very slow to
 # fetch in CI.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.5@sha256:079e59808d2d252516e27e3f3a9c003740dee7f75e55aa71528766d52bcfc16a AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.5@sha256:ae5a2316d12f3e78fd99177dad452e6ad4f240af2d71d57b480c3477f250fec6 AS build
 # Recent golang base images default GOTOOLCHAIN=local, which blocks auto-download
 # of a higher toolchain directive in go.mod. `auto` lets go.mod pin a newer
 # toolchain than this base image without a Dockerfile change.
@@ -39,7 +39,7 @@ RUN go tool controller-gen crd paths=./api/... output:crd:dir=/crds
 # distroless/static publishes amd64, arm64, arm/v7, ppc64le, riscv64, and s390x
 # — the same arch set every metio image ships, so this controller is
 # co-schedulable with jaas and the JOI images on any node architecture.
-FROM gcr.io/distroless/static:nonroot@sha256:d29e660cc75a5b6b1334e03c5c81ccf9bc0884a002c6000dbf0fb96034814478
+FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 COPY --from=build /app/stageset-controller /usr/bin/
 # The generated CRDs ride along so downstream tooling (the Helm chart's
 # vendoring step) can extract them straight from the released image.
