@@ -47,3 +47,12 @@ dependenciesRules:
       internal:
         - "**.internal.cli"
         - "**.internal.controller"
+  # The imageverify core (image extraction, glob matching, policy selection) is
+  # pure and dependency-light: it must stay free of the heavy verification engine
+  # (sigstore-go) and registry client (go-containerregistry), which live in the
+  # internal.imageverify.sigstore subpackage behind the Verifier interface.
+  - package: "**.internal.imageverify"
+    shouldNotDependsOn:
+      external:
+        - "github.com.sigstore.**"
+        - "github.com.google.go-containerregistry.**"
