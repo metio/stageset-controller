@@ -58,14 +58,24 @@ spec:
 ## Ordering between StageSets
 
 `dependsOn` gates this StageSet on others being Ready at their observed generation
-— cross-release ordering. (Ordering *within* a StageSet is the order of `stages`.)
+with no new revision held back — cross-release ordering. (Ordering *within* a
+StageSet is the order of `stages`.) A dependency may also carry a `minVersion`: the
+dependent then waits not just for the dependency to be Ready, but for it to be
+deployed **at or above** that version — so an app that needs its database migrated
+to 5.2 first waits for exactly that, not merely for the database to be up.
 
 ```yaml
 spec:
   dependsOn:
     - name: platform
       namespace: platform-system
+    - name: db
+      minVersion: "5.2.0"     # wait until the database is deployed at ≥ 5.2.0
 ```
+
+The dependent holds under the `DependencyNotReady` reason until every dependency is
+Ready and at its `minVersion`; a `minVersion` that is not a semver is rejected at
+admission.
 
 ## Security and targeting
 

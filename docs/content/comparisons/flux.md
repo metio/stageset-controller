@@ -27,6 +27,10 @@ like `StageSet`. The difference is granularity.
 - **Typed actions between steps.** Migrations, HTTP gates, waits, and transient
   applies are first-class [actions](/defining-a-release/actions/); in plain Flux you'd model
   these as extra Kustomizations and Jobs.
+- **Typed dependencies.** `dependsOn` exists in Flux too, but only as readiness
+  ordering. `StageSet` adds a `minVersion` floor — a dependent waits until its
+  dependency is deployed *at or above* a version, not merely Ready, so "the app rolls
+  only once the database is migrated to 5.2" is a declared gate, not a hope.
 - **Release-level features.** [Update windows](/gating/update-windows/),
   [versioned migrations](/gating/versioned-migrations/), and
   [rollback](/gating/rollback/) operate across the whole staged release.

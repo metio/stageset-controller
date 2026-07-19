@@ -37,11 +37,12 @@ type StageSetSpec struct {
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
 
-	// DependsOn lists StageSets that must be Ready (with observed
-	// generation) before this one reconciles. Semantics match
-	// kustomize-controller.
+	// DependsOn lists StageSets that must be Ready (with observed generation
+	// current and no new revision held back) — and optionally at a minimum version
+	// — before this one reconciles. A typed extension of kustomize-controller's
+	// dependsOn: ordering plus readiness, and a version floor when set.
 	// +optional
-	DependsOn []meta.NamespacedObjectReference `json:"dependsOn,omitempty"`
+	DependsOn []Dependency `json:"dependsOn,omitempty"`
 
 	// ServiceAccountName impersonated for all cluster operations,
 	// including actions.
@@ -122,6 +123,26 @@ type StageSetSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +required
 	Stages []Stage `json:"stages"`
+}
+
+// Dependency is a StageSet this one waits on before it rolls: the dependency must
+// be Ready at its observed generation with no new revision held back, and — when
+// minVersion is set — deployed at or above that version.
+type Dependency struct {
+	// Name of the StageSet depended on.
+	// +required
+	Name string `json:"name"`
+
+	// Namespace of the dependency; defaults to this StageSet's namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// MinVersion additionally requires the dependency's status.version to be at or
+	// above this semver — so the dependent waits not just for Ready, but for Ready
+	// AT a version (e.g. an app that needs its database migrated to 5.2 first).
+	// Omit to gate on readiness alone.
+	// +optional
+	MinVersion string `json:"minVersion,omitempty"`
 }
 
 // UpdateWindow is one allow/deny window. It is either recurring (schedule +

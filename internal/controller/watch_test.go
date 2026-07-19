@@ -7,7 +7,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/fluxcd/pkg/apis/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -140,7 +139,7 @@ func TestMapStageSetDependents(t *testing.T) {
 	a := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "dep-a"}}
 	b := &stagesv1.StageSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "dep-b"},
-		Spec:       stagesv1.StageSetSpec{DependsOn: []meta.NamespacedObjectReference{{Name: "dep-a"}}},
+		Spec:       stagesv1.StageSetSpec{DependsOn: []stagesv1.Dependency{{Name: "dep-a"}}},
 	}
 	c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(a, b).Build()
 	r := &StageSetReconciler{Client: c}

@@ -70,7 +70,7 @@ func TestDependsOnKeys_DefaultsNamespace(t *testing.T) {
 	ss := &stagesv1.StageSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "web"},
 		Spec: stagesv1.StageSetSpec{
-			DependsOn: []fluxmeta.NamespacedObjectReference{
+			DependsOn: []stagesv1.Dependency{
 				{Name: "db"},
 				{Name: "cache", Namespace: "shared"},
 			},

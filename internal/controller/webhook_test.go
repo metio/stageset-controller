@@ -26,6 +26,29 @@ func stageSetWith(actions *stagesv1.StageActions) *stagesv1.StageSet {
 	}
 }
 
+func TestValidateDependsOn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		dep     stagesv1.Dependency
+		wantErr bool
+	}{
+		{"readiness-only", stagesv1.Dependency{Name: "db"}, false},
+		{"valid minVersion", stagesv1.Dependency{Name: "db", MinVersion: "2.0.0"}, false},
+		{"empty name", stagesv1.Dependency{MinVersion: "2.0.0"}, true},
+		{"invalid minVersion", stagesv1.Dependency{Name: "db", MinVersion: "two"}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{Spec: stagesv1.StageSetSpec{DependsOn: []stagesv1.Dependency{tc.dep}}}
+			if err := validateDependsOn(ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validateDependsOn err = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateStages(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
