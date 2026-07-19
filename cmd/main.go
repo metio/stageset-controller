@@ -172,7 +172,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		RequireVerifiedMigrationSources: *c.RequireVerifiedMigrationSources,
 		RequirePinnedMigrationSources:   *c.RequirePinnedMigrationSources,
 		RequireImageVerification:        *c.RequireImageVerification,
-		ImageVerifier:                   sigstore.New(sigstore.WithLogger(logger.With("logger", "imageverify")), sigstore.WithTrustedRootPath(*c.ImageVerificationTrustedRoot)),
+		ImageVerifier:                   sigstore.New(sigstore.WithLogger(logger.With("logger", "imageverify")), sigstore.WithTrustedRootPath(*c.ImageVerificationTrustedRoot), sigstore.WithInsecureRegistries([]string(*c.ImageVerificationInsecure))),
 		ObjectLevelKMS:                  *c.ObjectLevelKMS,
 		DefaultInterval:                 *c.DefaultInterval,
 		MaxTeardownWait:                 *c.MaxTeardownWait,

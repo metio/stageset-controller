@@ -186,6 +186,25 @@ func TestVerifyImage_Key(t *testing.T) {
 	})
 }
 
+func TestParseReference_Insecure(t *testing.T) {
+	v := New(WithInsecureRegistries([]string{"registry.internal:5000"}))
+	insecure, err := v.parseReference("registry.internal:5000/app:v1")
+	if err != nil {
+		t.Fatalf("parse insecure ref: %v", err)
+	}
+	if got := insecure.Context().Registry.Scheme(); got != "http" {
+		t.Fatalf("insecure registry scheme = %q, want http", got)
+	}
+
+	secure, err := v.parseReference("ghcr.io/acme/app:v1")
+	if err != nil {
+		t.Fatalf("parse secure ref: %v", err)
+	}
+	if got := secure.Context().Registry.Scheme(); got != "https" {
+		t.Fatalf("unlisted registry scheme = %q, want https", got)
+	}
+}
+
 type errLayer struct {
 	data []byte
 	err  error

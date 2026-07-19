@@ -132,6 +132,16 @@ cluster without egress, point it at an offline trusted-root bundle:
 --image-verification-trusted-root=/etc/sigstore/trusted_root.json
 ```
 
+An on-prem registry served over plain HTTP (no TLS) is fetched over HTTPS by default
+and fails the handshake. List each such registry so its verification fetches use HTTP;
+repeat the flag per registry:
+
+```text
+--image-verification-insecure-registry=registry.internal:5000
+```
+
+This governs only the verifier's bundle fetch, not the kubelet's image pulls.
+
 ## Constraints
 
 A `requireAttestations` entry is rejected by the [admission webhook](/security/admission-webhook/):

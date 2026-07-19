@@ -48,6 +48,7 @@ type Verifier struct {
 	keychain        authn.Keychain
 	transport       http.RoundTripper
 	trustedRootPath string
+	insecure        map[string]bool
 	logger          *slog.Logger
 
 	once     sync.Once
@@ -69,6 +70,21 @@ func WithTransport(t http.RoundTripper) Option { return func(v *Verifier) { v.tr
 // fetching the public Sigstore root over TUF. Empty fetches the public good instance.
 func WithTrustedRootPath(path string) Option {
 	return func(v *Verifier) { v.trustedRootPath = path }
+}
+
+// WithInsecureRegistries lists registry hosts (host[:port]) whose bundles are fetched
+// over plain HTTP — an on-prem or in-cluster registry without TLS. It governs only
+// verification fetches, never the kubelet's image pulls.
+func WithInsecureRegistries(hosts []string) Option {
+	return func(v *Verifier) {
+		if len(hosts) == 0 {
+			return
+		}
+		v.insecure = make(map[string]bool, len(hosts))
+		for _, h := range hosts {
+			v.insecure[h] = true
+		}
+	}
 }
 
 // WithLogger injects a logger; nil falls back to slog.Default().
@@ -97,7 +113,7 @@ func (v *Verifier) Verify(ctx context.Context, ref string, authorities []stagesv
 		return "", errors.New("attestation requirements are not enforced in this version; remove requireAttestations from the policy")
 	}
 
-	parsed, err := name.ParseReference(ref)
+	parsed, err := v.parseReference(ref)
 	if err != nil {
 		return "", fmt.Errorf("parse image ref %q: %w", ref, err)
 	}
@@ -128,6 +144,18 @@ func (v *Verifier) Verify(ctx context.Context, ref string, authorities []stagesv
 		return "", err
 	}
 	return digestRef.String(), nil
+}
+
+// parseReference parses ref, marking its registry insecure (HTTP) when it is in the
+// configured insecure set — so a bundle fetch against an on-prem HTTP registry
+// resolves over http instead of failing a TLS handshake.
+func (v *Verifier) parseReference(ref string) (name.Reference, error) {
+	if len(v.insecure) > 0 {
+		if pre, err := name.ParseReference(ref); err == nil && v.insecure[pre.Context().RegistryStr()] {
+			return name.ParseReference(ref, name.Insecure)
+		}
+	}
+	return name.ParseReference(ref)
 }
 
 // trustedVerifier loads the Sigstore trusted root once and builds the keyless

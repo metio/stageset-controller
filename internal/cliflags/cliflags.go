@@ -70,6 +70,7 @@ type Flags struct {
 	RequirePinnedMigrationSources   *bool
 	RequireImageVerification        *bool
 	ImageVerificationTrustedRoot    *string
+	ImageVerificationInsecure       *StringSlice
 	AllowedActionHosts              *StringSlice
 	DefaultInterval                 *time.Duration
 	MaxTeardownWait                 *time.Duration
@@ -232,6 +233,7 @@ func Register(fs *flag.FlagSet) *Flags {
 		RequirePinnedMigrationSources:   new(bool),
 		RequireImageVerification:        new(bool),
 		ImageVerificationTrustedRoot:    new(string),
+		ImageVerificationInsecure:       &StringSlice{},
 		AllowedActionHosts:              &StringSlice{},
 		DefaultInterval:                 new(time.Duration),
 		MaxTeardownWait:                 new(time.Duration),
@@ -296,6 +298,7 @@ func Register(fs *flag.FlagSet) *Flags {
 	fs.BoolVar(f.RequirePinnedMigrationSources, group("require-pinned-migration-sources", recon), false, "Require a spec.migrationsSourceRef source to be pinned to an immutable revision (OCIRepository spec.ref.digest or GitRepository spec.ref.commit) before its destructive migration ladder runs, so a tag/branch overwrite can't auto-roll new destructive content. When off, a mutable-pinned source still runs but emits a Warning event. Off by default; recommended in production.")
 	fs.BoolVar(f.RequireImageVerification, group("require-image-verification", recon), false, "Deny-by-default for the image-verification gate: hold a stage whose rendered container images match no ImageVerificationPolicy, instead of applying them ungoverned. When off, only images a policy governs are verified (an ungoverned image applies unchanged). Off by default; strongly recommended in production once policies cover every registry you deploy from.")
 	fs.StringVar(f.ImageVerificationTrustedRoot, group("image-verification-trusted-root", recon), "", "Path to an offline Sigstore trusted-root JSON for image verification (air-gapped clusters). Empty fetches the public Sigstore root over TUF on first use.")
+	fs.Var(f.ImageVerificationInsecure, group("image-verification-insecure-registry", recon), "Registry host[:port] whose images are pulled over plain HTTP during image verification (an on-prem/in-cluster registry without TLS); repeatable. Only affects verification bundle fetches, not the kubelet's image pulls.")
 	fs.StringVar(f.TracingEndpoint, group("tracing-endpoint", tracing), "", "OTLP gRPC collector host:port (e.g. otel-collector.observability.svc:4317). Empty disables tracing entirely.")
 	fs.BoolVar(f.TracingInsecure, group("tracing-insecure", tracing), false, "Skip TLS when dialing the OTLP collector. Use only for in-cluster collectors that don't terminate TLS themselves.")
 	fs.Float64Var(f.TracingSampleRatio, group("tracing-sample-ratio", tracing), 1.0, "TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.")
