@@ -56,30 +56,30 @@ done
 log "Push a signed and an unsigned image (distinct digests)"
 docker pull "$SIGNED_BASE"
 docker tag "$SIGNED_BASE" localhost:5000/app:signed
-docker push localhost:5000/app:signed
+SIGNED_DIGEST="$(docker push localhost:5000/app:signed 2>&1 | grep -oE 'sha256:[0-9a-f]{64}' | head -1)"
+[ -n "$SIGNED_DIGEST" ] || die "could not resolve the pushed signed-image digest"
+log "Signed image digest: ${SIGNED_DIGEST}"
 docker pull "$UNSIGNED_BASE"
 docker tag "$UNSIGNED_BASE" localhost:5000/app:unsigned
 docker push localhost:5000/app:unsigned
 
-SIGNED_DIGEST="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' localhost:5000/app:signed \
-  | grep '^localhost:5000/app@' | head -1 | cut -d@ -f2)"
-[ -n "$SIGNED_DIGEST" ] || die "could not resolve the pushed signed-image digest"
-log "Signed image digest: ${SIGNED_DIGEST}"
-
-log "Generate a cosign key pair and sign the signed image (new bundle format, no Rekor)"
-export COSIGN_PASSWORD=""
+log "Generate a cosign key pair and sign the signed image (key, OCI 1.1 referrer, no Rekor)"
+# COSIGN_EXPERIMENTAL enables oci-1-1 referrer storage; an empty signing-config keeps
+# the signature hermetic (no Rekor/Fulcio/TSA). cosign v3 emits the new bundle format
+# by default and stores it as an OCI 1.1 referrer — native referrers API when the
+# registry supports it, else the spec's fallback tag, both of which
+# go-containerregistry's Referrers() reads.
+export COSIGN_PASSWORD="" COSIGN_EXPERIMENTAL=1
 ( cd "$WORK" && cosign generate-key-pair )
-# registry-referrers-mode=oci-1-1 stores the bundle as an OCI 1.1 referrer (native
-# API + the spec's fallback tag), which is what go-containerregistry's Referrers()
-# reads. cosign's default "legacy" mode writes a .sig tag the verifier does not look
-# at.
+cosign signing-config create --out "${WORK}/signing-config.json"
 cosign sign --yes \
   --key "${WORK}/cosign.key" \
-  --new-bundle-format \
+  --signing-config "${WORK}/signing-config.json" \
   --registry-referrers-mode=oci-1-1 \
-  --tlog-upload=false \
   --allow-insecure-registry \
   "localhost:5000/app@${SIGNED_DIGEST}"
+log "Registry tags after signing (a sha256-<hex> entry is the bundle referrer):"
+curl -fsS http://localhost:5000/v2/app/tags/list 2>/dev/null || true
 
 log "Create the ImageVerificationPolicy with the public key inline"
 {
