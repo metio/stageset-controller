@@ -752,9 +752,69 @@ jobs:
           kubectl -n stageset-system logs deploy/stageset-controller --all-containers=true --tail=200 || true
           kubectl -n mesh-clients logs deploy/mesh-deny --all-containers=true --tail=50 || true
 
+  image-verify:
+    name: Image verification (cosign signature gate + digest pin)
+    needs: discover
+    if: needs.discover.outputs.chart_version != '' && needs.discover.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Clone Git Repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Build container image
+        run: docker build -t ghcr.io/metio/stageset-controller:smoke .
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          version: ${{ needs.discover.outputs.kind_latest }}
+          cluster_name: stageset-image-verify
+          node_image: kindest/node:${{ needs.discover.outputs.k8s_latest }}
+          wait: 180s
+      - name: Load image into kind
+        run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-image-verify
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Cluster prereqs (Flux source CRDs + in-cluster registry)
+        run: |
+          hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+          hack/smoke/setup-registry.sh image-verify
+      - name: Install the released chart with the dev image (insecure registry arg)
+        run: |
+          # Same install as the matrix job (webhook off, dev image, HEAD CRDs, broad
+          # RoleBinding for the controller's own apply identity). The in-cluster
+          # registry is plain HTTP, so the dev binary needs the new
+          # --image-verification-insecure-registry flag the released chart cannot pass
+          # yet — appended to the controller's args directly. It affects only the
+          # verifier's bundle fetch, not the kubelet (the scenario runs 0 replicas).
+          helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
+            --version "${{ needs.discover.outputs.chart_version }}" \
+            --namespace stageset-system --create-namespace \
+            --set-string image.tag=smoke \
+            --set webhook.enabled=false \
+            --wait --timeout 5m
+          kubectl apply --server-side --force-conflicts -f config/crd/
+          kubectl create clusterrolebinding stageset-smoke-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=stageset-system:stageset-controller
+          arg="--image-verification-insecure-registry=registry.image-verify.svc.cluster.local:5000"
+          kubectl -n stageset-system patch deploy stageset-controller --type=json \
+            -p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"${arg}\"}]"
+          kubectl -n stageset-system rollout status deploy/stageset-controller --timeout=180s
+      - name: Scenario — cosign signature gate (verify + pin vs held)
+        run: hack/smoke/scenario-image-verify.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n stageset-system get all || true
+          kubectl -n stageset-system logs deploy/stageset-controller --tail=300 || true
+          kubectl -n image-verify get all || true
+          kubectl get imageverificationpolicies -o yaml || true
+          kubectl -n default describe stageset iv-signed iv-unsigned || true
+          kubectl -n default get deploy || true
+
   system-tests:
     name: System Tests
-    needs: [discover, smoke, s3, s3-seaweedfs, ha, selfsigned, scale-smoke, new-fields, rollout-gates, networkpolicy-enforcement, servicemesh]
+    needs: [discover, smoke, s3, s3-seaweedfs, ha, selfsigned, scale-smoke, new-fields, rollout-gates, networkpolicy-enforcement, servicemesh, image-verify]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
