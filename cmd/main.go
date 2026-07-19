@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 	// Embed the IANA time zone database: update-window timeZones resolve via
 	// time.LoadLocation, and the distroless static runtime image ships no
@@ -23,12 +24,15 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	authorizationv1client "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -46,6 +50,7 @@ import (
 	"github.com/metio/stageset-controller/internal/metrics"
 	"github.com/metio/stageset-controller/internal/observability"
 	"github.com/metio/stageset-controller/internal/rollbackstore"
+	"github.com/metio/stageset-controller/internal/startupcheck"
 	"github.com/metio/stageset-controller/internal/webhook/selfsigned"
 )
 
@@ -296,9 +301,28 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		setupLog.Error("unable to set up health check", "error", err)
 		return 1
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	// Readiness reflects cache sync, not a bare ping: a pod whose informers can't
+	// sync (missing CRD/RBAC) stays NotReady + alertable while liveness keeps it
+	// alive — no crash-loop.
+	readiness := &readinessGate{}
+	if err := mgr.Add(readiness); err != nil {
+		setupLog.Error("unable to add readiness gate", "error", err)
+		return 1
+	}
+	if err := mgr.AddReadyzCheck("readyz", readiness.check); err != nil {
 		setupLog.Error("unable to set up ready check", "error", err)
 		return 1
+	}
+
+	// Diagnose an un-syncable watch out of band: if a CRD is missing or the
+	// ClusterRole can't list/watch it, log one actionable line per resource until
+	// the prerequisite appears. The manager retries the informer meanwhile
+	// (cacheSyncTimeout), so this never gates startup — it only explains the wait.
+	if authz, err := authorizationv1client.NewForConfig(restCfg); err != nil {
+		setupLog.Error("unable to build authorization client for startup checks; skipping", "error", err)
+	} else {
+		checker := &startupcheck.Checker{Mapper: mgr.GetRESTMapper(), Review: authz.SelfSubjectAccessReviews(), Logger: logger}
+		go checker.LogUntilReady(ctx, watchedResources(), 30*time.Second)
 	}
 
 	setupLog.Info("starting manager")
@@ -331,6 +355,63 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 // this one.
 const gracefulShutdownTimeout = 30 * time.Second
 
+// cacheSyncTimeout is effectively unbounded: a controller-runtime controller
+// treats a source that does not sync within this window as fatal and exits the
+// process, so the default (2m) turns a missing CRD or an incomplete operator
+// ClusterRole into a crash-loop. Waiting indefinitely instead keeps the pod
+// alive and retrying the informer, so the failure degrades to "not ready,
+// waiting" (see startupcheck for the actionable log) and self-heals the moment
+// the CRD is installed or the RBAC is granted — no restart. In a healthy cluster
+// the caches sync in well under a second, so this is never reached.
+const cacheSyncTimeout = 100 * 365 * 24 * time.Hour
+
+// readinessGate flips the readyz probe to healthy once the manager's caches have
+// synced: its Start runs only after cache sync (a non-leader-election runnable,
+// so on every replica). A pod whose informers cannot sync — a missing CRD or an
+// incomplete ClusterRole — therefore stays NotReady and alertable rather than
+// falsely Ready, while liveness stays green (healthz.Ping) so it is never
+// restarted. Mirrors jaas's readinessSignal.
+type readinessGate struct{ ready atomic.Bool }
+
+func (*readinessGate) NeedLeaderElection() bool { return false }
+
+func (g *readinessGate) Start(ctx context.Context) error {
+	g.ready.Store(true)
+	<-ctx.Done()
+	return nil
+}
+
+func (g *readinessGate) check(*http.Request) error {
+	if g.ready.Load() {
+		return nil
+	}
+	return errors.New("controller caches have not synced")
+}
+
+// watchedResources are the CRDs the manager keeps informers on. The startup
+// preflight names any that is uninstalled or unreadable so the cause of a
+// not-ready pod is one clear log line, not raw reflector spam. Flux source kinds
+// are omitted: their watches are already gated on the RESTMapper resolving them
+// and are optional, so a not-installed source CRD is expected, not a fault.
+func watchedResources() []startupcheck.Target {
+	const group = "stages.metio.wtf"
+	kinds := map[string]string{
+		"StageSet":       "stagesets",
+		"StageInventory": "stageinventories",
+		"StageLedger":    "stageledgers",
+		"FleetRollout":   "fleetrollouts",
+	}
+	targets := make([]startupcheck.Target, 0, len(kinds))
+	for kind, resource := range kinds {
+		targets = append(targets, startupcheck.Target{
+			GVK:      schema.GroupVersionKind{Group: group, Version: "v1", Kind: kind},
+			Group:    group,
+			Resource: resource,
+		})
+	}
+	return targets
+}
+
 func buildManagerOptions(c *cliflags.Flags, env []string) ctrl.Options {
 	mgrOpts := ctrl.Options{
 		Scheme:                  scheme,
@@ -339,6 +420,7 @@ func buildManagerOptions(c *cliflags.Flags, env []string) ctrl.Options {
 		LeaderElection:          *c.EnableLeaderElection,
 		LeaderElectionID:        "stageset-controller.stages.metio.wtf",
 		GracefulShutdownTimeout: new(gracefulShutdownTimeout),
+		Controller:              ctrlconfig.Controller{CacheSyncTimeout: cacheSyncTimeout},
 		// Webhook serves on every replica (admission must, even non-leaders);
 		// only reconcilers are leader-gated.
 		WebhookServer: webhook.NewServer(webhook.Options{Port: *c.WebhookPort, CertDir: *c.WebhookCertDir}),

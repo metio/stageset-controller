@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/metio/stageset-controller/internal/cliflags"
 )
@@ -60,6 +61,37 @@ func TestBuildManagerOptions_SetsGracefulShutdownTimeout(t *testing.T) {
 	if *opts.GracefulShutdownTimeout != gracefulShutdownTimeout {
 		t.Errorf("GracefulShutdownTimeout = %s, want %s", *opts.GracefulShutdownTimeout, gracefulShutdownTimeout)
 	}
+}
+
+// TestBuildManagerOptions_SetsUnboundedCacheSyncTimeout pins the crash-loop
+// guard: a controller whose informer cannot sync (missing CRD / RBAC) must wait
+// indefinitely and keep the pod alive, not hit the 2m default and exit.
+func TestBuildManagerOptions_SetsUnboundedCacheSyncTimeout(t *testing.T) {
+	opts := buildManagerOptions(flagsFor(t, nil), nil)
+	if opts.Controller.CacheSyncTimeout != cacheSyncTimeout {
+		t.Errorf("CacheSyncTimeout = %s, want %s", opts.Controller.CacheSyncTimeout, cacheSyncTimeout)
+	}
+	if opts.Controller.CacheSyncTimeout < 365*24*time.Hour {
+		t.Errorf("CacheSyncTimeout = %s, want effectively unbounded (>= 1 year)", opts.Controller.CacheSyncTimeout)
+	}
+}
+
+// TestReadinessGate_FlipsAfterStart proves readyz reports not-ready until the
+// gate's Start runs (which controller-runtime invokes only after cache sync).
+func TestReadinessGate_FlipsAfterStart(t *testing.T) {
+	g := &readinessGate{}
+	if err := g.check(nil); err == nil {
+		t.Fatal("readyz should be not-ready before cache sync")
+	}
+	go func() { _ = g.Start(t.Context()) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if g.check(nil) == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("readyz never became ready after Start")
 }
 
 // TestBuildManagerOptions_PropagatesWatchNamespaces proves the watch-scope
