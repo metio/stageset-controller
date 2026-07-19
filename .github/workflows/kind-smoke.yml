@@ -772,8 +772,8 @@ jobs:
           wait: 180s
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-image-verify
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Enter the flake devShell (provides cosign)
+        uses: metio/nix-devshell@1976169d4c51b321be318ade369ccf689849f9f0 # 2026.7.6091757
       - name: Cluster prereqs (Flux source CRDs + in-cluster registry)
         run: |
           hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
@@ -801,7 +801,9 @@ jobs:
             -p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"${arg}\"}]"
           kubectl -n stageset-system rollout status deploy/stageset-controller --timeout=180s
       - name: Scenario — cosign signature gate (verify + pin vs held)
-        run: hack/smoke/scenario-image-verify.sh
+        # Run inside the devShell so cosign is the flake-pinned version; host
+        # docker/kubectl/curl stay on PATH.
+        run: nix develop --command bash hack/smoke/scenario-image-verify.sh
       - name: Diagnostics on failure
         if: failure()
         run: |
