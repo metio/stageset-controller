@@ -223,11 +223,16 @@ type StageSetReconciler struct {
 	// controller is the built controller, kept (via Build instead of Complete)
 	// so producer watches can be added dynamically — producer GVKs aren't known
 	// until a StageSet references one. mgrCache constructs their source.Kind
-	// sources. watchedProducers single-flights engagement per GVK.
+	// sources. watchedProducers single-flights engagement per GVK;
+	// missingProducers holds the GVKs a StageSet references whose CRDs aren't
+	// installed yet, so the CRDWatcher can engage them the moment the CRD is
+	// Established. Both maps are guarded by watchMu: a GVK moves from
+	// missingProducers to watchedProducers on a successful engage.
 	controller       controller.Controller
 	mgrCache         cache.Cache
 	watchMu          sync.Mutex
 	watchedProducers map[schema.GroupVersionKind]struct{}
+	missingProducers map[schema.GroupVersionKind]struct{}
 }
 
 // +kubebuilder:rbac:groups=stages.metio.wtf,resources=stagesets,verbs=get;list;watch;update;patch
@@ -244,6 +249,11 @@ type StageSetReconciler struct {
 // back-pointer), just without the fast-failure watch unless its RBAC is added.
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=gitrepositories;ocirepositories;buckets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=jaas.metio.wtf,resources=jsonnetsnippets,verbs=get;list;watch
+// The CRDWatcher subscribes to the CustomResourceDefinition stream so a
+// producer watch engages the moment its CRD is installed, instead of at the
+// next reconcile of a referencing StageSet. Read-only; cluster-scoped, so it
+// lives on the cluster ClusterRole.
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 // Local-cluster apply assumes the tenant SA's identity by minting a
 // short-lived TokenRequest token for it — no `impersonate` verb. The token
 // authenticates as system:serviceaccount:<ns>:<sa>, so the tenant SA's RBAC
@@ -2390,6 +2400,7 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.controller = c
 	r.mgrCache = mgr.GetCache()
 	r.watchedProducers = map[schema.GroupVersionKind]struct{}{}
+	r.missingProducers = map[schema.GroupVersionKind]struct{}{}
 	return nil
 }
 
@@ -2494,9 +2505,11 @@ func isProducerRef(ref stagesv1.SourceReference) bool {
 // StageSet references it, so the producer FAILING (a status change that
 // publishes no new artifact) surfaces on the referencing StageSet immediately
 // instead of waiting for retryInterval. ExternalArtifact is already watched
-// statically; an uninstalled producer kind is skipped and retried on a later
-// reconcile once its CRD exists. Idempotent and concurrency-safe; only a
-// successful Watch records the GVK, so a transient failure re-engages.
+// statically. A producer kind whose CRD isn't installed yet is recorded in
+// missingProducers so the CRDWatcher engages it the instant the CRD becomes
+// Established; the next reconcile of a referencing StageSet is the backstop if
+// the watcher isn't running. Idempotent and concurrency-safe; only a successful
+// Watch records the GVK in watchedProducers, so a transient failure re-engages.
 func (r *StageSetReconciler) engageProducerWatch(gvk schema.GroupVersionKind) {
 	if r.controller == nil || gvk.Empty() || gvk == artifact.ExternalArtifactGVK {
 		return
@@ -2507,20 +2520,76 @@ func (r *StageSetReconciler) engageProducerWatch(gvk schema.GroupVersionKind) {
 		return
 	}
 	if _, err := r.RESTMapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
-		return // kind not installed yet; engage on a later reconcile
+		// Kind not installed yet. Record it so the CRDWatcher engages the watch
+		// the moment the CRD is Established, rather than waiting for the next
+		// reconcile to re-attempt.
+		r.missingProducers[gvk] = struct{}{}
+		return
 	}
+	// Error deliberately ignored: watchProducerLocked bumps the engagement
+	// metric on failure and leaves the GVK unwatched, and the next reconcile of
+	// a referencing StageSet re-attempts.
+	_ = r.watchProducerLocked(gvk)
+}
+
+// watchProducerLocked engages the source.Kind watch for gvk and records it as
+// watched, pruning it from missingProducers. The caller holds watchMu. Returns
+// the controller.Watch error (nil on success); a failure bumps the engagement
+// metric and leaves the GVK unwatched so a later attempt retries.
+func (r *StageSetReconciler) watchProducerLocked(gvk schema.GroupVersionKind) error {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
 	src := source.Kind(r.mgrCache, client.Object(obj), handler.EnqueueRequestsFromMapFunc(r.mapProducer))
 	if err := r.controller.Watch(src); err != nil {
 		// A failed engagement is otherwise silent: the producer kind stays
 		// unwatched, so dependent StageSets stop re-triggering on its upstream
-		// changes until a later reconcile re-attempts. Count it so a sustained
-		// pattern surfaces in Prometheus even though the next reconcile retries.
+		// changes until a later attempt succeeds. Count it so a sustained
+		// pattern surfaces in Prometheus even though a retry follows.
 		metrics.WatchEngagementFailuresTotal.WithLabelValues(gvk.String()).Inc()
-		return
+		return err
 	}
 	r.watchedProducers[gvk] = struct{}{}
+	delete(r.missingProducers, gvk)
+	return nil
+}
+
+// MissingProducerKinds returns a snapshot of the producer GVKs a StageSet
+// references whose CRDs aren't installed in the cluster yet. The CRDWatcher
+// intersects each incoming Established CRD against this set to decide which
+// watches to engage. Returns a defensive copy so callers can iterate without
+// holding watchMu.
+func (r *StageSetReconciler) MissingProducerKinds() []schema.GroupVersionKind {
+	r.watchMu.Lock()
+	defer r.watchMu.Unlock()
+	out := make([]schema.GroupVersionKind, 0, len(r.missingProducers))
+	for gvk := range r.missingProducers {
+		out = append(out, gvk)
+	}
+	return out
+}
+
+// EngageProducerWatch wires a producer watch into the live controller for a
+// now-installed CRD. Called by the CRDWatcher when a previously-missing
+// producer kind becomes Established. Unlike engageProducerWatch it skips the
+// RESTMapper gate — the CRD-stream event already confirms the kind is served,
+// and the source.Kind informer resolves the fresh GVK itself. The watch's
+// initial LIST fans out through mapProducer, so every StageSet referencing the
+// kind re-reconciles at once — no process restart, no waiting for the interval.
+// Idempotent: re-engaging an already-watched GVK is a no-op.
+func (r *StageSetReconciler) EngageProducerWatch(ctx context.Context, gvk schema.GroupVersionKind) error {
+	if r.controller == nil {
+		return fmt.Errorf("EngageProducerWatch called before SetupWithManager")
+	}
+	r.watchMu.Lock()
+	defer r.watchMu.Unlock()
+	if _, ok := r.watchedProducers[gvk]; ok {
+		return nil
+	}
+	if err := r.watchProducerLocked(gvk); err != nil {
+		return fmt.Errorf("engage producer watch %s: %w", gvk, err)
+	}
+	log.FromContext(ctx).Info("engaged dynamic watch on newly-installed producer kind", "gvk", gvk.String())
+	return nil
 }
 
 // mapProducer maps a producer object's change to the StageSets whose sourceRef

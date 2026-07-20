@@ -169,7 +169,7 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		return 1
 	}
 
-	if err = (&controller.StageSetReconciler{
+	stageSetReconciler := &controller.StageSetReconciler{
 		Client:                          mgr.GetClient(),
 		ShardCap:                        *c.ShardCap,
 		AllowedActionHosts:              []string(*c.AllowedActionHosts),
@@ -182,8 +182,19 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 		DefaultInterval:                 *c.DefaultInterval,
 		MaxTeardownWait:                 *c.MaxTeardownWait,
 		RollbackStore:                   rollbackStore,
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err = stageSetReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error("unable to create controller", "error", err, "controller", "StageSet")
+		return 1
+	}
+	// Engage a producer watch the instant a referenced-but-missing producer CRD
+	// is installed, instead of at the next reconcile of a referencing StageSet.
+	if err = mgr.Add(&controller.CRDWatcher{
+		RestCfg: restCfg,
+		Engager: stageSetReconciler,
+		Logger:  logger.With("logger", "crdwatcher"),
+	}); err != nil {
+		setupLog.Error("unable to add CRD watcher", "error", err)
 		return 1
 	}
 
