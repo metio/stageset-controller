@@ -87,7 +87,7 @@ jobs:
           n=$(docker image inspect stageset-controller-dashboard-verify:latest --format '{{ len .RootFS.Layers }}')
           [ "$n" = "1" ] || { echo "::error::dashboard image has $n layers, expected 1"; exit 1; }
       - uses: metio/nix-devshell@1976169d4c51b321be318ade369ccf689849f9f0 # 2026.7.6091757
-      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
