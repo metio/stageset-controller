@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Actions on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/actions/</link><description>Recent content in Actions on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/actions/index.xml" rel="self" type="application/rss+xml"/><item><title>ActionDirty</title><link>https://stageset.projects.metio.wtf/runbooks/actiondirty/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/actiondirty/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=ActionDirty&lt;/code&gt;. The Message names the stage whose action
+ladder keeps failing. The controller has &lt;strong&gt;stopped auto-retrying&lt;/strong&gt; — there is no
+backoff requeue — and &lt;code&gt;status.actionFailureCount&lt;/code&gt; is at the threshold. The stage
+carries a &lt;code&gt;scope: Lifetime&lt;/code&gt; action that has not yet completed.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage whose action ladder still has a &lt;code&gt;scope: Lifetime&lt;/code&gt; action to complete
+failed repeatedly (the consecutive-failure threshold). A &lt;code&gt;scope: Lifetime&lt;/code&gt;
+action is a once-ever bootstrap — a database install, a schema create, a seed —
+and re-attempting it against an uncertain state can be destructive. Rather than
+keep retrying, the controller halts and waits for a human, the same model as
+&lt;a href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/"&gt;&lt;code&gt;MigrationDirty&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;</description></item><item><title>Actions</title><link>https://stageset.projects.metio.wtf/defining-a-release/actions/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/actions/</guid><description>&lt;p&gt;Actions are typed steps the controller runs around a stage&amp;rsquo;s apply. They turn an
+ordered apply into an orchestrated rollout — run a migration before the app, gate
+the stage on an external check, clean up on failure.&lt;/p&gt;
+&lt;p&gt;A stage has three action hooks:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;pre&lt;/code&gt;&lt;/strong&gt; — run before the manifests are built and applied. A failure aborts the
+stage with nothing applied.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;post&lt;/code&gt;&lt;/strong&gt; — run after the apply is verified. The stage is &lt;code&gt;Ready&lt;/code&gt; only if these
+all succeed.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;onFailure&lt;/code&gt;&lt;/strong&gt; — best-effort steps run on any failure from the apply onward.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; fires at the &lt;em&gt;moment&lt;/em&gt; of failure, before any rollback. For
+cleanup that must run &lt;em&gt;after&lt;/em&gt; the previous manifests are restored, use the
+StageSet-level &lt;a href="#post-rollback-cleanup-onrollback"&gt;&lt;code&gt;onRollback&lt;/code&gt;&lt;/a&gt;
+ hook instead.&lt;/p&gt;</description></item><item><title>Best practices</title><link>https://stageset.projects.metio.wtf/guides/best-practices/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/best-practices/</guid><description>&lt;p&gt;StageSet works best when you lean into what it is: a delivery controller that
+keeps the &lt;em&gt;render&lt;/em&gt; pure and owns &lt;em&gt;ordering, gating, and execution memory&lt;/em&gt;. Almost
+every practice below — good or bad — follows from respecting or fighting that
+split. The one-line test for a decision is: &lt;strong&gt;does this belong in what should
+exist (the render) or in when and whether it runs (StageSet)?&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;For a single application, a small team, or a chart you distribute to others,
+Helm&amp;rsquo;s simplicity and ecosystem may serve you better; see
+&lt;a href="#when-helm-is-the-better-choice"&gt;when Helm is the better choice&lt;/a&gt;
+. These practices
+assume the case StageSet is built for — a multi-component, multi-tenant, stateful,
+policy-gated release.&lt;/p&gt;</description></item><item><title>MigrationFailed</title><link>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationfailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationFailed&lt;/code&gt;. The Message names the migration and the
+failed action. The run halts at the anchoring stage; &lt;code&gt;status.version&lt;/code&gt; is not
+advanced. The controller retries with backoff.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration anchored before a stage ran an action that failed (a &lt;code&gt;job&lt;/code&gt; that
+errored, an &lt;code&gt;http&lt;/code&gt; call that returned an error, a &lt;code&gt;wait&lt;/code&gt; that timed out, an
+&lt;code&gt;apply&lt;/code&gt;/&lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt; the apiserver rejected). This reason is distinct from
+&lt;code&gt;StageFailed&lt;/code&gt; so you can tell a migration failure from the stage&amp;rsquo;s own apply.&lt;/p&gt;</description></item><item><title>StageFailed</title><link>https://stageset.projects.metio.wtf/runbooks/stagefailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/stagefailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=StageFailed&lt;/code&gt;. The Message names the stage and the operation that failed (&lt;code&gt;fetch artifact&lt;/code&gt;, &lt;code&gt;build&lt;/code&gt;, &lt;code&gt;apply&lt;/code&gt;, &lt;code&gt;verify&lt;/code&gt;, a pre/post action, or &lt;code&gt;connect to target cluster&lt;/code&gt;). The run halts at that stage; later stages keep their previous revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage failed during execution. By operation:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;fetch artifact&lt;/strong&gt; — the artifact URL was unreachable, or its bytes failed digest verification. Transient fetch failures (network, 5xx, source not ready) back off and retry. Terminal ones — a digest mismatch, an oversized tarball, or a URL the SSRF guard rejects — stop requeuing, since the same fetch would fail the same way; the next genuine watch event or interval tick re-runs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply RBAC / missing CRD&lt;/strong&gt; — a &lt;code&gt;Forbidden&lt;/code&gt; apply, or a manifest whose kind the apiserver doesn&amp;rsquo;t know, is reported as &lt;a href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/"&gt;&lt;code&gt;RBACDenied&lt;/code&gt;&lt;/a&gt;
+ (terminal), not &lt;code&gt;StageFailed&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;build&lt;/strong&gt; — kustomize build or post-build substitution failed (a missing &lt;code&gt;substituteFrom&lt;/code&gt; source, an invalid patch, a malformed manifest).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply&lt;/strong&gt; — the server-side apply was rejected: an immutable-field conflict, or an &lt;strong&gt;RBAC denial&lt;/strong&gt; under the impersonated &lt;code&gt;serviceAccountName&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;verify&lt;/strong&gt; — applied objects did not become Ready within the stage timeout (kstatus).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;pre/post action&lt;/strong&gt; — a &lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; action failed or timed out.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;connect to target cluster&lt;/strong&gt; — a &lt;code&gt;spec.kubeConfig&lt;/code&gt; Secret was missing, unparseable, or used the unsupported cloud-provider &lt;code&gt;configMapRef&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message: which stage + operation&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# For apply/verify failures, inspect what the stage tried to apply:&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageinventory &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --selector stages.metio.wtf/stage-set&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;name&amp;gt;,stages.metio.wtf/stage&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;stage&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Match the operation in the Message:&lt;/p&gt;</description></item><item><title>stagesetctl baseline</title><link>https://stageset.projects.metio.wtf/cli/baseline/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/baseline/</guid><description>&lt;p&gt;Adopts a system whose once-per-lifetime bootstrap already ran by asserting an
+action complete in the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#run-once-ever-scope-lifetime"&gt;StageLedger&lt;/a&gt;
+&amp;rsquo;s
+&lt;code&gt;spec.baseline&lt;/code&gt; — the controller promotes it to a recorded completion without
+running the action. &lt;code&gt;--export&lt;/code&gt; instead prints the ledger&amp;rsquo;s current completions as
+a committable &lt;code&gt;spec.baseline&lt;/code&gt; snippet, for disaster recovery or renaming a ledger.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl baseline NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Stage the action belongs to.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--action&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Name of the &lt;code&gt;scope: Lifetime&lt;/code&gt; action to baseline.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--export&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Print the ledger&amp;rsquo;s current completions as a &lt;code&gt;spec.baseline&lt;/code&gt; snippet instead of adding one. Mutually exclusive with &lt;code&gt;--stage&lt;/code&gt;/&lt;code&gt;--action&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;When the StageSet exists, the named action must be a &lt;code&gt;scope: Lifetime&lt;/code&gt; action or
+the command fails (a typo guard). When it does not exist yet, the command
+proceeds — applying the ledger before the StageSet is the race-free adoption
+order — and the controller validates the entry once the StageSet is applied.&lt;/p&gt;</description></item><item><title>stagesetctl plan</title><link>https://stageset.projects.metio.wtf/cli/plan/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/plan/</guid><description>&lt;p&gt;Where &lt;a href="https://stageset.projects.metio.wtf/cli/diff/"&gt;&lt;code&gt;diff&lt;/code&gt;&lt;/a&gt;
+ shows which objects a reconcile would change, &lt;code&gt;plan&lt;/code&gt;
+shows what it would &lt;strong&gt;do&lt;/strong&gt;: per stage, which &lt;code&gt;pre&lt;/code&gt;/&lt;code&gt;post&lt;/code&gt;
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ will run, skip, or re-run on the next
+reconcile, and why. It renders each stage, resolves the version, reads the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#scope-revision-version-or-lifetime"&gt;ledgers&lt;/a&gt;
+, and
+applies the same scope rules the controller gates on — so the preview agrees with
+what the controller will do.&lt;/p&gt;
+&lt;p&gt;It reads the cluster (ledgers, &lt;code&gt;completionAnchor&lt;/code&gt; witnesses) but changes nothing,
+and it predicts what will be &lt;strong&gt;attempted&lt;/strong&gt;, in what order, under which scope —
+never whether an action will succeed.&lt;/p&gt;</description></item><item><title>stagesetctl reset-ledger</title><link>https://stageset.projects.metio.wtf/cli/reset-ledger/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/reset-ledger/</guid><description>&lt;p&gt;Removes a recorded completion from a
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#run-once-ever-scope-lifetime"&gt;StageLedger&lt;/a&gt;
+ so its
+&lt;code&gt;scope: Lifetime&lt;/code&gt; action is no longer suppressed and runs on the next reconcile.
+The matching &lt;code&gt;spec.baseline&lt;/code&gt; assertion is removed first, so a &lt;code&gt;Baselined&lt;/code&gt;
+completion is not immediately re-promoted.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl reset-ledger NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required unless &lt;code&gt;--all&lt;/code&gt;)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Stage of the completion to forget.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--action&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required unless &lt;code&gt;--all&lt;/code&gt;)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Action of the completion to forget.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--all&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Forget every completion in the ledger. Mutually exclusive with &lt;code&gt;--stage&lt;/code&gt;/&lt;code&gt;--action&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;This re-runs a once-ever bootstrap, so use it when the underlying state was
+actually reset, or to repurpose a leftover ledger&amp;rsquo;s name after a delete and
+recreate signalled &lt;code&gt;LedgerAdopted&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Versioned migrations</title><link>https://stageset.projects.metio.wtf/gating/versioned-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/versioned-migrations/</guid><description>&lt;p&gt;Some changes only need to happen once, when you cross a release boundary — a
+one-time data backfill on the way to 2.0, a schema conversion between 1.x and 2.x.
+Versioned migrations run a ladder of &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ exactly when the
+deployed version steps over the boundary, and never again.&lt;/p&gt;
+&lt;p&gt;Versioning is off until you set &lt;code&gt;spec.version&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="declaring-the-version"&gt;Declaring the version&lt;/h2&gt;
+&lt;p&gt;The controller needs to know &lt;em&gt;what version is currently being deployed&lt;/em&gt;. There are
+three ways to declare it; pick by &lt;strong&gt;where the version lives&lt;/strong&gt;.&lt;/p&gt;</description></item></channel></rss>

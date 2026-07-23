@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Error-Budget on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/error-budget/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/error-budget/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/error-budget/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/error-budget/</id><entry><title type="html">BudgetExhausted</title><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/updatedeferred/?utm_source=atom_feed" rel="related" type="text/html" title="UpdateDeferred"/><link href="https://stageset.projects.metio.wtf/runbooks/actiondirty/?utm_source=atom_feed" rel="related" type="text/html" title="ActionDirty"/><id>https://stageset.projects.metio.wtf/runbooks/budgetexhausted/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A rollout is frozen because the service is out of its SLO error budget.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=BudgetExhausted</code> (or, for an already-deployed StageSet, <code>READY=True</code> with a <code>status.budgetFreeze</code> and the message prefixed <code>Deployed;</code>). <code>status.budgetFreeze</code> records the last observed remaining budget, the freeze and resume thresholds, and when the freeze began.</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is the <a href="/gating/error-budget/">error-budget freeze</a>
+ working as configured. The metric source named in <code>spec.errorBudget.source</code> returned a remaining-budget value below <code>freezeThreshold</code>, so new-revision rollouts are held until the budget recovers. This is the Google SRE error-budget policy: when the budget is spent, stop shipping feature changes until reliability recovers.</p>
+<p>The freeze holds only new-revision rollouts. Drift on the current revision keeps being corrected — a frozen service still has its declared state enforced — and the freeze self-resumes once the remaining budget reaches <code>resumeThreshold</code>.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.budgetFreeze}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.errorBudget}&#39;</span>
+</span></span></code></pre></div><p>Compare <code>status.budgetFreeze.remaining</code> against <code>freezeThreshold</code> / <code>resumeThreshold</code>. Confirm the source query returns what you expect — a value that never matches reality points at a wrong query (the <code>stageset_budget_remaining</code> metric carries the same number). A <em>calendar</em> budget source snaps back to full at the period boundary and unfreezes instantly; a <em>rolling</em> source recovers gradually.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Usually none — the rollout resumes on its own once the budget recovers. To ship a reliability or security fix while still out of budget (the policy&rsquo;s explicit exemption), break the glass once:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile &lt;name&gt; --namespace &lt;namespace&gt; --budget-override
+</span></span></code></pre></div><p>That applies the held rollout a single time without disabling the gate. To change the policy, adjust <code>freezeThreshold</code> / <code>resumeThreshold</code>, or set <code>spec.errorBudget.dryRun: true</code> to observe what <em>would</em> freeze without holding anything while you tune the query.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/error-budget" term="error-budget" label="error-budget"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">BudgetSourceUnavailable</title><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A metric source for an error-budget freeze or a promotion analysis could not be read.</blockquote><h2 id="symptom">Symptom</h2>
+<p>A <code>BudgetSourceUnavailable</code> Warning event, the <code>stageset_metric_source_errors_total</code> counter rising, and — when a gate&rsquo;s <code>onSourceError</code> is <code>Hold</code> — <code>READY=False</code>, <code>REASON=BudgetSourceUnavailable</code>. With <code>onSourceError: Allow</code> the rollout proceeds and only the event and metric fire, so the condition may not show the reason.</p>
+<h2 id="cause">Cause</h2>
+<p>A metric source (the <a href="/gating/error-budget/">error-budget freeze</a>
+ or a <a href="/gating/stage-promotion/">promotion analysis</a>
+ check) was unreachable or returned no usable scalar: the Prometheus endpoint was down or returned a non-2xx, the query evaluated to an error, an empty or multi-sample vector, or <code>NaN</code> (the shape a wrong query takes). This is treated as <em>transient</em> — the controller keeps retrying.</p>
+<p>What happens to the rollout depends on the gate&rsquo;s <code>onSourceError</code>:</p>
+<ul>
+<li>The <strong>error-budget freeze</strong> defaults to <code>Allow</code> (fail-open): blocking it would stop every deploy, including the hotfix you need during the very outage that took the source down.</li>
+<li>A <strong>promotion analysis</strong> defaults to <code>Hold</code> (fail-closed): holding only parks the rollout at the current healthy stage, so it is safe to refuse to advance while behavior can&rsquo;t be verified.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;   <span class="c1"># the event names the source error</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages[*].promotionState.lastAnalysis}&#39;</span>
+</span></span></code></pre></div><p>Check the address and query in <code>spec.errorBudget.source</code> / <code>spec.stages[].promotion.analysis.checks[].source</code>. From a pod in the namespace, confirm the Prometheus endpoint is reachable and the query returns a single scalar:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">curl -s <span class="s1">&#39;&lt;address&gt;/api/v1/query?query=&lt;query&gt;&#39;</span>
+</span></span></code></pre></div><p>A <code>NaN</code>/empty result means the query&rsquo;s labels match nothing — fix the query, not the gate. A connection failure points at NetworkPolicy or a wrong address. If a bearer token is configured, confirm the referenced Secret has a non-empty <code>token</code> key.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Fix the source so the query returns a single numeric scalar. While debugging a freeze, <code>spec.errorBudget.dryRun: true</code> records what would happen without holding anything. If a service is genuinely safety-critical and you want it to stop deploying when its SLO source is down, set <code>spec.errorBudget.onSourceError: Hold</code> (accepting that a source outage then blocks its deploys).</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/error-budget" term="error-budget" label="error-budget"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Error-budget freeze</title><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/observability/slos/?utm_source=atom_feed" rel="related" type="text/html" title="Service level objectives"/><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="related" type="text/html" title="Dashboard"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><id>https://stageset.projects.metio.wtf/gating/error-budget/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-16T20:55:59+02:00</updated><content type="html"><![CDATA[<blockquote>Freeze new-revision rollouts while a service is out of its SLO error budget, resuming on its own when it recovers.</blockquote><p>An error-budget freeze holds new-revision rollouts while a service is out of its
+SLO error budget, and resumes them on its own once the budget recovers — the
+Google SRE error-budget policy: when the budget is spent, stop shipping feature
+changes until reliability is back. The controller does no SLO math; it reads one
+number (the remaining budget) from a metric source you already run and compares
+it to a threshold.</p>
+<h2 id="freeze-on-a-prometheus-query">Freeze on a Prometheus query</h2>
+<p>Point <code>spec.errorBudget</code> at an instant query that returns the remaining budget as
+a scalar — every SLO tool exposes this (Sloth records
+<code>slo:period_error_budget_remaining:ratio</code> directly; Pyrra, Grafana SLO, and
+Nobl9&rsquo;s Prometheus API yield it in one line):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">checkout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">errorBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">http://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="l">slo:period_error_budget_remaining:ratio{sloth_service=&#34;checkout&#34;,sloth_slo=&#34;availability&#34;}</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">freezeThreshold</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">      </span><span class="c"># freeze when remaining &lt; this; &#34;0&#34; = only when overspent</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resumeThreshold</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.05&#34;</span><span class="w">   </span><span class="c"># resume only once it recovers to here (hysteresis)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">5m             </span><span class="w"> </span><span class="c"># re-check cadence while frozen; defaults to spec.interval</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">checkout-prod</span><span class="w">
+</span></span></span></code></pre></div><p>While the remaining budget is below <code>freezeThreshold</code>, the StageSet reports
+<code>Ready=False</code> with reason <code>BudgetExhausted</code> (an already-deployed StageSet stays
+<code>Ready=True</code> and records the freeze on <code>status.budgetFreeze</code>). The current
+revision keeps having its drift corrected — a frozen service still gets its
+declared state enforced — and only new-revision rollouts wait. The controller
+re-checks every <code>interval</code> and advances on its own once the budget reaches
+<code>resumeThreshold</code>.</p>
+<p><code>freezeThreshold</code> is required and has no default. <code>resumeThreshold</code> defaults to
+<code>freezeThreshold</code> (no hysteresis); set it higher to stop a budget hovering at the
+line from flapping the freeze. <code>interval</code> defaults to the StageSet&rsquo;s reconcile
+interval.</p>
+<h2 id="it-composes-with-update-windows">It composes with update windows</h2>
+<p><code>spec.errorBudget</code> and <a href="/gating/update-windows/"><code>spec.updateWindows</code></a>
+ are combined
+under a logical AND: a new revision rolls out only if the update window is open <strong>and</strong> the budget is
+healthy. A closed window holds the rollout even when the budget is fine (and the
+budget source isn&rsquo;t even queried), and an exhausted budget holds it even inside
+an open window. Use both to deploy only during a maintenance window <em>and</em> only
+while in budget.</p>
+<h2 id="authenticating-the-query">Authenticating the query</h2>
+<p>When Prometheus needs a bearer token, reference a Secret in the StageSet&rsquo;s
+namespace with the token under the <code>token</code> key:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">errorBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">https://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="l">slo:period_error_budget_remaining:ratio{sloth_service=&#34;checkout&#34;}</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prometheus-auth</span><span class="w">
+</span></span></span></code></pre></div><p>A metric source is an outbound call to an address the StageSet names, so it
+carries the same two guards an HTTP action does. Every resolved address is
+pinned through the SSRF guard: loopback, link-local, cloud-metadata, multicast,
+and unspecified addresses are refused, while in-cluster private addresses (where
+Prometheus usually lives) are allowed. And when the controller runs with
+<code>--allowed-action-hosts</code>, the source&rsquo;s host must match one of its patterns —
+leave the flag unset to reach any host the SSRF guard permits.</p>
+<p>The <code>secretRef</code> bearer token is read as the StageSet&rsquo;s <code>spec.serviceAccountName</code>,
+in the StageSet&rsquo;s own namespace, so grant that ServiceAccount <code>get</code> on the Secret
+you reference. The token reaches only endpoints your ServiceAccount&rsquo;s own
+credentials could already reach.</p>
+<h2 id="reading-from-a-saas-slo-api-webhook">Reading from a SaaS SLO API (webhook)</h2>
+<p>When the budget lives in a SaaS SLO platform with no Prometheus endpoint (Nobl9,
+Grafana Cloud), use a <code>webhook</code> source instead: the controller GETs a JSON
+document and extracts the scalar with a kubectl-style JSONPath.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">errorBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://nobl9.example/api/v2/slos/shop/checkout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">jsonPath</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;{.objectives[0].errorBudgetRemaining}&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">nobl9-token       </span><span class="w"> </span><span class="c"># optional bearer token, under the &#34;token&#34; key</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">freezeThreshold</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span></code></pre></div><p>A source is exactly one of <code>prometheus</code> or <code>webhook</code>. The <code>jsonPath</code> must resolve
+to a single numeric (or numeric-string) value; anything else (no match, multiple
+matches, an object, <code>NaN</code>) is treated as an unreadable source and routed through
+<code>onSourceError</code>. The webhook URL is dialed through the same SSRF guard.</p>
+<h2 id="freezing-a-single-stage">Freezing a single stage</h2>
+<p><code>spec.errorBudget</code> freezes the whole rollout. To freeze only one stage on its own
+SLO — e.g. hold <code>prod</code> while <code>prod</code>&rsquo;s budget is spent, but let <code>staging</code> keep
+rolling — put an <code>errorBudget</code> on that stage:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">errorBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">http://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="l">slo:period_error_budget_remaining:ratio{sloth_service=&#34;checkout-prod&#34;}</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">freezeThreshold</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.1&#34;</span><span class="w">
+</span></span></span></code></pre></div><p>A per-stage budget gates <strong>entry</strong> to the stage: while it is exhausted, a new
+revision is held from rolling into that stage (earlier stages keep rolling, and
+the stage&rsquo;s currently-applied revision keeps having its drift corrected). It takes
+the same fields as the rollout-wide budget (<code>freezeThreshold</code>/<code>resumeThreshold</code>
+hysteresis, <code>interval</code>, <code>onSourceError</code>, <code>dryRun</code>) and the same
+<a href="#shipping-a-reliability-fix-while-frozen"><code>budget-override</code></a>
+ break-glass clears
+both. This complements a <a href="/gating/stage-promotion/">promotion analysis</a>
+, which
+gates <em>exit</em> (advancing past a stage once it has applied).</p>
+<h2 id="when-the-source-is-unreachable">When the source is unreachable</h2>
+<p><code>onSourceError</code> decides what happens when the query can&rsquo;t be read (Prometheus
+down, a non-2xx, an empty result, <code>NaN</code>):</p>
+<ul>
+<li><code>Allow</code> (default) — proceed. Blocking a rollout-wide freeze would stop <em>every</em>
+deploy, including the hotfix you need during the very outage that took the
+source down, so the freeze fails open. The error is still loud: a
+<code>BudgetSourceUnavailable</code> Warning event and the <code>stageset_metric_source_errors_total</code>
+metric. See the <a href="/runbooks/budgetsourceunavailable/">BudgetSourceUnavailable runbook</a>
+.</li>
+<li><code>Hold</code> — block. Set this for a service that must stop deploying when its SLO
+source is down, accepting that a source outage then blocks its rollouts.</li>
+</ul>
+<p>A misconfigured query that always returns <code>NaN</code> would silently fail open, so set
+<code>dryRun: true</code> to prove a freeze rule fires before it gates — it records what
+<em>would</em> freeze on <code>status.budgetFreeze</code> and the metrics, without holding
+anything.</p>
+<h2 id="shipping-a-reliability-fix-while-frozen">Shipping a reliability fix while frozen</h2>
+<p>The error-budget policy explicitly exempts reliability and security fixes. Break
+the glass to apply a held rollout once, without disabling the gate:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile checkout --namespace apps --budget-override
+</span></span></code></pre></div><h2 id="what-it-observes">What it observes</h2>
+<p>The freeze reads <em>remaining budget</em>, not <em>burn rate</em> — a fast-burning but
+not-yet-exhausted service still rolls out. Multi-window burn-rate alerting is the
+SLO tool&rsquo;s job. To gate on observed behavior per stage (error rate, latency,
+burn rate) rather than rollout-wide, use a
+<a href="/gating/stage-promotion/">promotion analysis</a>
+, which shares this same metric
+source contract.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/error-budget" term="error-budget" label="error-budget"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/></entry></feed>

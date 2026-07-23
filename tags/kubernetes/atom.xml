@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Kubernetes on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/kubernetes/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/kubernetes/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/kubernetes/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/kubernetes/</id><entry><title type="html">Install on Kubernetes</title><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Kustomize"/><link href="https://stageset.projects.metio.wtf/reference/upgrading/?utm_source=atom_feed" rel="related" type="text/html" title="Upgrading"/><id>https://stageset.projects.metio.wtf/get-started/kubernetes/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Prerequisites, the idempotent Helm deploy, how upgrades treat the CRDs, where to customize, and how to verify the controller is healthy.</blockquote><p>The controller is distributed as a container image at
+<code>ghcr.io/metio/stageset-controller</code> and as an OCI <a href="https://helm.sh/">Helm</a>
+ chart
+at <code>oci://ghcr.io/metio/helm-charts/stageset-controller</code>. The deployment
+manifests live in the chart, not in the controller repository.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>A <a href="https://kubernetes.io/">Kubernetes</a>
+ cluster with <code>kubectl</code> and
+<a href="https://helm.sh/"><code>helm</code></a>
+ <strong>v3.14 or later</strong> (OCI chart support) configured
+against it.</li>
+<li><a href="https://fluxcd.io/">Flux</a>
+ <code>source-controller</code>, specifically the
+<code>ExternalArtifact</code> API (<code>source.toolkit.fluxcd.io</code>). A <code>StageSet</code> stage always
+resolves to an <code>ExternalArtifact</code>, so the CRD must exist. <code>ExternalArtifact</code>
+lands in Flux <strong>v2.7.0</strong>; install at least that version. The controller also
+watches <code>GitRepository</code>, <code>OCIRepository</code>, and <code>Bucket</code> sources for
+producer-aware resolution.</li>
+<li><a href="https://cert-manager.io/">cert-manager</a>
+ — <strong>only</strong> if you choose the
+<code>cert-manager</code> webhook certificate mode. The chart defaults to <code>self-signed</code>,
+which provisions and rotates the admission webhook&rsquo;s TLS in-process and needs
+no cert-manager. See <a href="/running/production/#admission-webhook-tls">Production</a>
+
+for the trade-off.</li>
+</ul>
+<p><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+, JOI, or any particular artifact
+producer are <strong>not</strong> required to install the controller — those are sources of
+<code>ExternalArtifact</code>s, wired up per <code>StageSet</code>.</p>
+<h2 id="install-and-update">Install and update</h2>
+<p><code>helm upgrade --install</code> is idempotent: the same command installs the chart the
+first time and applies your changes on every subsequent run, so it&rsquo;s the only
+deploy command you need. To update later, re-run it with an updated <code>--values</code>
+file or <code>--set</code> flags.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">helm upgrade --install stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://ghcr.io/metio/helm-charts/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace stageset-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --values my-values.yaml <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --wait
+</span></span></code></pre></div><p>The chart pins the image tag to its own <code>appVersion</code> by default. The chart is
+also listed on <a href="https://artifacthub.io/packages/helm/stageset-controller/stageset-controller">ArtifactHub</a>
+,
+where you can browse its versions, values, and changelog.</p>
+<h3 id="install-with-flux-gitops">Install with Flux (GitOps)</h3>
+<p>To manage the controller from a Flux GitOps repository instead of <code>helm</code> on the
+command line, point an <code>OCIRepository</code> at the chart and install it with a
+<code>HelmRelease</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">oci://ghcr.io/metio/helm-charts/stageset-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Latest released chart; pin to a tag for production (Renovate can bump it).</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">semver</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&gt;=0.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">helm.toolkit.fluxcd.io/v2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">HelmRelease</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">chartRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller</span><span class="w">
+</span></span></span></code></pre></div><p>The chart&rsquo;s defaults are a sensible single-replica install, so this needs no
+<code>values:</code> block; add one (the same keys as the <code>--values</code> file) to enable HA, the
+rollback-store PVC, NetworkPolicy, and the rest — see the
+<a href="/reference/helm-values/">values reference</a>
+. Both resources live in
+<code>stageset-system</code>, so create that namespace first
+(<code>kubectl create namespace stageset-system</code>, or include a <code>Namespace</code> manifest
+alongside them). The source- and helm-controllers reconcile an <code>OCIRepository</code>
+and <code>HelmRelease</code> directly, so no wrapping <code>Kustomization</code> is required — apply the
+two with <code>kubectl apply -f</code>, or commit them to whatever source your Flux setup
+already syncs. <code>HelmRelease</code> gives you upgrades, rollbacks, and drift correction;
+pull the chart version forward by bumping the <code>OCIRepository</code> <code>ref</code>.</p>
+<h3 id="what-the-chart-installs">What the chart installs</h3>
+<ul>
+<li>The <strong>controller <code>Deployment</code></strong>, its <code>ServiceAccount</code>, and the cluster RBAC it
+needs (a <code>ClusterRole</code> + <code>ClusterRoleBinding</code>, plus a namespaced leader-election
+<code>Role</code>/<code>RoleBinding</code>).</li>
+<li>The <strong>CRDs</strong> — <code>StageSet</code> and <code>StageInventory</code>.</li>
+<li>The <strong>validating admission webhook</strong> (<code>ValidatingWebhookConfiguration</code> + a
+webhook <code>Service</code>).</li>
+<li>A <strong>metrics <code>Service</code></strong> (and an opt-in <code>ServiceMonitor</code>).</li>
+<li>The <strong>Flagger gate <code>Service</code></strong> for the read-only gate endpoint.</li>
+<li>Opt-in extras: <code>NetworkPolicy</code>, <code>PodDisruptionBudget</code>,
+<code>HorizontalPodAutoscaler</code>, a rollback-store <code>PersistentVolumeClaim</code>, and a
+managed <code>Namespace</code>.</li>
+</ul>
+<h3 id="how-crds-are-handled">How CRDs are handled</h3>
+<p>The CRDs ship inside the chart&rsquo;s regular templates (not Helm&rsquo;s special <code>crds/</code>
+directory), so a <code>helm upgrade --install</code> applies schema changes like any other
+resource. This is governed by <code>crds.create</code> (default <code>true</code>). The CRDs carry
+<code>helm.sh/resource-policy: keep</code>, so a <code>helm uninstall</code> leaves them — and your
+StageSets — in place; remove them by hand only if you really mean to.</p>
+<p>If you manage CRDs out of band, the raw definitions are also published in the
+controller repository under <code>config/crd/</code> and can be applied with
+<code>kubectl apply --server-side -f</code>.</p>
+<h2 id="customize">Customize</h2>
+<p>Every setting referenced across these docs — HA replicas, the rollback store,
+webhook mode, NetworkPolicy, service mesh, the ServiceMonitor, and the rest — is
+a Helm value. Two references cover them:</p>
+<ul>
+<li><a href="/reference/helm-values/">Helm chart values</a>
+ — the full values reference,
+generated from the chart&rsquo;s own schema.</li>
+<li><a href="/reference/configuration/">Configuration reference</a>
+ — every controller flag
+and the chart value that drives it.</li>
+</ul>
+<p>For production sizing — the rollback store, multi-replica HA, observability, and
+webhook hardening — see the <a href="/running/production/">Production guide</a>
+.</p>
+<h2 id="verify">Verify</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system rollout status deploy/stageset-controller
+</span></span><span class="line"><span class="cl">kubectl get crd stagesets.stages.metio.wtf stageinventories.stages.metio.wtf
+</span></span></code></pre></div><p>Once the controller is <code>Available</code>, create your first
+<a href="/defining-a-release/stages-and-sources/">StageSet</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/installation" term="installation" label="installation"/><category scheme="https://stageset.projects.metio.wtf/tags/helm" term="helm" label="helm"/><category scheme="https://stageset.projects.metio.wtf/tags/kubernetes" term="kubernetes" label="kubernetes"/></entry><entry><title type="html">StageSet vs Kustomize</title><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Tanka and kubecfg"/><id>https://stageset.projects.metio.wtf/comparisons/kustomize/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Why StageSet delivers what Kustomize only builds.</blockquote><p><a href="https://kustomize.io/">Kustomize</a>
+ (the <code>kustomize</code> CLI / <code>kubectl kustomize</code>) is a
+manifest <em>builder</em>: it composes bases and overlays, applies patches, and emits YAML.
+It does not apply anything, and it has no notion of ordering, readiness, or
+reconciliation — that&rsquo;s <code>kubectl apply</code>&rsquo;s job, and <code>kubectl</code> applies everything at
+once.</p>
+<h2 id="what-kustomize-gives-you">What Kustomize gives you</h2>
+<ul>
+<li>Overlay composition, strategic-merge and JSON6902 patches, variable replacement,
+generators.</li>
+<li>A pure transformation: in goes a kustomization, out come manifests.</li>
+</ul>
+<h2 id="where-stageset-differs">Where StageSet differs</h2>
+<ul>
+<li><strong>It delivers, not just builds.</strong> Kustomize stops at YAML. <code>StageSet</code> applies it,
+waits for health, prunes what&rsquo;s gone, and keeps doing so.</li>
+<li><strong>Ordering and gates.</strong> <code>kubectl apply -k</code> has no stages and no gates. <code>StageSet</code>
+sequences stages and runs <a href="/defining-a-release/actions/">actions</a>
+ between them.</li>
+<li><strong>Continuous reconciliation and drift correction</strong>, versus a one-shot <code>apply</code>.</li>
+</ul>
+<h2 id="using-them-together">Using them together</h2>
+<p><code>StageSet</code> <em>includes</em> the parts of Kustomize you reach for at delivery time: a stage
+has <code>path</code>, <code>patches</code>, and <code>postBuild</code> substitution
+(<a href="/defining-a-release/stages-and-sources/">stages and sources</a>
+). So you can keep authoring with
+Kustomize overlays and let a stage apply the right overlay, patched and
+substituted — then add the ordering, gating, and reconciliation Kustomize alone
+doesn&rsquo;t offer.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/kubernetes" term="kubernetes" label="kubernetes"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

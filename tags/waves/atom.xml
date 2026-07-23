@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Waves on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/waves/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/waves/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/waves/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/waves/</id><entry><title type="html">Fleet rollout</title><link href="https://stageset.projects.metio.wtf/gating/fleet-rollout/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/gating/rollback/?utm_source=atom_feed" rel="related" type="text/html" title="Rollback"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingapproval/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingApproval"/><link href="https://stageset.projects.metio.wtf/runbooks/downgradenotallowed/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeNotAllowed"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidversion/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidVersion"/><id>https://stageset.projects.metio.wtf/gating/fleet-rollout/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-19T02:34:43+02:00</updated><content type="html"><![CDATA[<blockquote>Roll one version across a fleet of StageSets in ordered waves — canary a few tenants, soak, health-check, then widen, and halt the whole fleet on regression.</blockquote><p>When you run one product across many StageSets — one per tenant, often one per
+namespace — a new version reaches every tenant at once. A <code>FleetRollout</code> paces that:
+it rolls a version across a selected set of StageSets in <strong>ordered waves</strong>, opening
+the next wave only after the current one reaches the version, stays healthy through a
+soak and a metric gate, and <strong>halts the whole fleet</strong> the moment a wave regresses.</p>
+<p>A <code>FleetRollout</code> is cluster-scoped — a fleet spans namespaces. It <strong>approves</strong> the
+version each member&rsquo;s own source already offers; it does not push versions, so it
+composes with GitOps rather than bypassing it. By default it does not even name the
+version — it <strong>derives</strong> each member&rsquo;s target from the advance that member is already
+holding, so one <code>FleetRollout</code> becomes a standing wave policy that paces every future
+version its members&rsquo; sources publish, with nothing to keep in sync.</p>
+<h2 id="make-members-fleet-managed">Make members fleet-managed</h2>
+<p>A member holds each version advance for the fleet to approve. Set
+<a href="/gating/versioned-migrations/#holding-a-transition-for-approval"><code>approvalMode: Always</code></a>
+
+on every StageSet in the fleet:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">moodle-acme</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">moodle         </span><span class="w"> </span><span class="c"># the fleet selects on this</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ring</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">            </span><span class="c"># the wave this tenant belongs to</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">approvalMode</span><span class="p">:</span><span class="w"> </span><span class="l">Always</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">allowDowngrade</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="c"># only needed if the fleet may roll back (see below)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># …</span><span class="w">
+</span></span></span></code></pre></div><p>Without <code>approvalMode: Always</code> a member advances on its own and the fleet cannot
+pace it.</p>
+<h2 id="define-the-rollout">Define the rollout</h2>
+<p>Label your tenants into rings, then roll wave by wave:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">FleetRollout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">moodle</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># No targetVersion: the fleet derives it from each member&#39;s own held advance.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">selector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">moodle }         </span><span class="w"> </span><span class="c"># the whole fleet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespaceSelector</span><span class="p">:</span><span class="w">                       </span><span class="c"># optional; omit to span every namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w"> </span>}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">waves</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">canary</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">ring</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w"> </span>}<span class="w"> </span>}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">30m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">gate</span><span class="p">:</span><span class="w">                                </span><span class="c"># health check before the next wave opens</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">http://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;sum(rate(http_requests_total{app=&#34;moodle&#34;,code=~&#34;5..&#34;}[5m]))&#39;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">threshold</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.01&#34;</span><span class="w"> </span>}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">broad</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">ring</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w"> </span>}<span class="w"> </span>}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rest</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">ring</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w"> </span>}<span class="w"> </span>}<span class="w">
+</span></span></span></code></pre></div><p>Each wave is a label selector over the members. A member that matches <code>selector</code> but
+no wave fails the rollout closed (<code>MembersUnassigned</code>) rather than being silently
+skipped.</p>
+<p><strong>Deriving vs. pinning the version.</strong> With no <code>targetVersion</code> (above), the fleet reads
+each held member&rsquo;s <code>status.pendingVersion</code> — the advance its own source is offering —
+and approves <em>that</em>, so you never restate a version the source already declares and
+the two can&rsquo;t drift. Set <code>targetVersion: &quot;2.0.0&quot;</code> only to pin a specific, bounded
+rollout of exactly that version; a member whose source does not offer the pinned
+version waits until it does.</p>
+<h2 id="how-a-rollout-progresses">How a rollout progresses</h2>
+<p>The controller opens one wave at a time:</p>
+<ol>
+<li><strong>Open</strong> the wave — stamp the version onto each member&rsquo;s approval, releasing its
+held advance. Members reach the version when their own source offers it.</li>
+<li><strong>Settle</strong> — wait until every member of the wave has adopted its version and is
+Ready.</li>
+<li><strong>Soak</strong> — hold the wave&rsquo;s <code>soak</code> after it settles.</li>
+<li><strong>Gate</strong> — evaluate the wave&rsquo;s <code>gate</code> metric. A scalar within the threshold passes;
+one outside it halts the fleet.</li>
+<li><strong>Advance</strong> — open the next wave. When every wave passes, the rollout is <code>Completed</code>.</li>
+</ol>
+<p><code>stagesetctl fleet &lt;name&gt;</code> shows exactly where the rollout is — see
+<a href="/cli/fleet/"><code>fleet</code></a>
+.</p>
+<h2 id="pin-a-pilot-instance-first">Pin a pilot instance first</h2>
+<p>To require one specific &ldquo;smoke-test&rdquo; tenant to update before anything else, give it
+its own ring and make it wave 0:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">waves</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">pilot</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">ring</span><span class="p">:</span><span class="w"> </span><span class="l">canary } }  </span><span class="w"> </span><span class="c"># only the test tenant carries this</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">15m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">gate</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="l">… }                                   </span><span class="w"> </span><span class="c"># only proceed if it&#39;s healthy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">fleet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">ring</span><span class="p">:</span><span class="w"> </span><span class="l">prod } }</span><span class="w">
+</span></span></span></code></pre></div><p>The pilot is the sole member of wave 0, so the rest of the fleet waits until it
+reaches the version, soaks, and passes its gate.</p>
+<h2 id="halt-on-regression">Halt on regression</h2>
+<p>A wave <strong>halts the whole fleet</strong> — no further waves open — when either its <code>gate</code>
+metric falls outside the threshold, or a member that had reached the version goes
+not-Ready (a regression). The rollout reports <code>phase: Halted</code> and <code>Ready=False</code> with
+reason <code>Halted</code>, and emits a Warning event naming the cause. A halt is re-derived
+each reconcile, so it clears on its own once the cause does — a member recovers, or
+the gate passes again. A metric the controller cannot read holds the wave (neither
+advancing nor halting) rather than guessing.</p>
+<h2 id="roll-back-a-regressed-wave">Roll back a regressed wave</h2>
+<p>By default a regression only halts. Set <code>onRegression: Rollback</code> with a
+<code>previousVersion</code> to also <strong>revert</strong> the affected wave:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetVersion</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">previousVersion</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1.0.0&#34;</span><span class="w">     </span><span class="c"># required for Rollback</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">onRegression</span><span class="p">:</span><span class="w"> </span><span class="l">Rollback</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># …</span><span class="w">
+</span></span></span></code></pre></div><p>On a regression the fleet directs the halted wave&rsquo;s members back to <code>previousVersion</code>
+— it stamps a <code>rollback-to</code> annotation that overrides each member&rsquo;s source-resolved
+version with the lower one, unwinding it through the migration
+<a href="/gating/versioned-migrations/#rolling-back"><code>down</code> actions</a>
+. A member only actually
+reverts if it permits downgrades (<code>spec.version.allowDowngrade</code>) and the crossed
+migrations declare <code>down</code> actions; otherwise it refuses, and the fleet stays halted
+and says so. Unlike a manifest-only rollback, a member either unwinds its schema
+cleanly or refuses — never leaves the schema ahead of the code.</p>
+<h2 id="one-rollout-per-stageset">One rollout per StageSet</h2>
+<p>A StageSet must be governed by at most one <code>FleetRollout</code> — two would both stamp its
+approval and fight over it. When a member is selected by more than one rollout, the
+rollout fails closed with <code>Ready=False</code>, reason <code>MembersContested</code>, naming the other
+rollout, and stamps nothing until the overlap is resolved.</p>
+<h2 id="status-reasons">Status reasons</h2>
+<p>The rollout&rsquo;s <code>Ready</code> condition carries one of:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Reason</th>
+					<th>Meaning</th>
+					<th>What to do</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Progressing</code></td>
+					<td>A wave is open and advancing.</td>
+					<td>Nothing — watch with <code>stagesetctl fleet</code>.</td>
+			</tr>
+			<tr>
+					<td><code>Completed</code></td>
+					<td>Every wave reached the target version.</td>
+					<td>Nothing.</td>
+			</tr>
+			<tr>
+					<td><code>Halted</code></td>
+					<td>A gate failed or a member regressed.</td>
+					<td>Investigate the named wave; the halt clears when the cause does.</td>
+			</tr>
+			<tr>
+					<td><code>MembersUnassigned</code></td>
+					<td>A selected StageSet matches no wave.</td>
+					<td>Add the missing ring label, or a wave that selects it.</td>
+			</tr>
+			<tr>
+					<td><code>MembersContested</code></td>
+					<td>A member is also in another rollout.</td>
+					<td>Narrow one rollout&rsquo;s selector so each member has one owner.</td>
+			</tr>
+			<tr>
+					<td><code>InvalidSelector</code></td>
+					<td>A selector is malformed.</td>
+					<td>Fix the selector.</td>
+			</tr>
+	</tbody>
+</table>
+<p>A member held awaiting its wave reports its own <code>Ready=False</code> with reason
+<a href="/runbooks/awaitingapproval/"><code>AwaitingApproval</code></a>
+ — that is the normal held state, not
+an error.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/fleet" term="fleet" label="fleet"/><category scheme="https://stageset.projects.metio.wtf/tags/progressive-delivery" term="progressive-delivery" label="progressive-delivery"/><category scheme="https://stageset.projects.metio.wtf/tags/waves" term="waves" label="waves"/><category scheme="https://stageset.projects.metio.wtf/tags/versioning" term="versioning" label="versioning"/><category scheme="https://stageset.projects.metio.wtf/tags/rollback" term="rollback" label="rollback"/><category scheme="https://stageset.projects.metio.wtf/tags/multi-tenancy" term="multi-tenancy" label="multi-tenancy"/></entry></feed>

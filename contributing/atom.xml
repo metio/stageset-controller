@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Contributing on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/contributing/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/contributing/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/contributing/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/contributing/</id><entry><title type="html">Building and testing</title><link href="https://stageset.projects.metio.wtf/contributing/building/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/contributing/ci-and-release/?utm_source=atom_feed" rel="related" type="text/html" title="CI and releases"/><link href="https://stageset.projects.metio.wtf/integrations/claude-code/?utm_source=atom_feed" rel="related" type="text/html" title="Claude Code skill"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><id>https://stageset.projects.metio.wtf/contributing/building/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-16T23:05:30+02:00</updated><content type="html"><![CDATA[<blockquote>Build the controller, run the test suite, and pass the static-analysis gate.</blockquote><p>The host needs no Go toolchain. Every command runs through the development shell
+that <code>flake.nix</code> defines, with <code>flake.lock</code> pinning each tool to an exact
+version:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">nix develop --command go build ./...
+</span></span><span class="line"><span class="cl">nix develop --command go <span class="nb">test</span> -race -cover ./...
+</span></span></code></pre></div><p>CI runs the same shell, so a gate that is green locally is green there by
+construction. Run <code>nix develop</code> on its own to drop into an interactive shell and
+call the tools bare.</p>
+<h2 id="test-layers">Test layers</h2>
+<ul>
+<li>
+<p><strong>Unit tests</strong> sit next to the code across <code>internal/...</code> and <code>api/v1/</code>. Several
+are drift gates — e.g. <code>conditions_test.go</code> asserts every Ready <code>Reason</code> has a
+matching runbook page under <code>docs/content/runbooks/</code>.</p>
+</li>
+<li>
+<p><strong>envtest-backed tests</strong> (<code>envtest_*_test.go</code>) boot a real kube-apiserver + etcd
+via controller-runtime&rsquo;s <code>envtest</code>. The shell exports <code>KUBEBUILDER_ASSETS</code>
+pointing at an <code>etcd</code> + <code>kube-apiserver</code> + <code>kubectl</code> bundle assembled from
+nixpkgs, so they run offline with nothing to install; they <code>t.Skip</code> when it is
+unset.</p>
+</li>
+<li>
+<p><strong>Fuzz tests</strong> (<code>FuzzXxx</code>) harden the parsing-heavy paths; their seed corpus runs
+as ordinary unit tests, and <code>-fuzz</code> fuzzes for real:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">nix develop --command go <span class="nb">test</span> -run<span class="o">=</span>^$ -fuzz<span class="o">=</span>^FuzzName$ -fuzztime<span class="o">=</span>30s ./internal/&lt;pkg&gt;/
+</span></span></code></pre></div></li>
+<li>
+<p><strong>Kind smoke</strong> scenarios under <code>hack/smoke/</code> run the controller end to end
+against a real kind cluster.</p>
+</li>
+</ul>
+<h2 id="regenerating-generated-code">Regenerating generated code</h2>
+<p>The CRDs under <code>config/crd/</code>, <code>config/rbac/role.yaml</code> (rendered from the
+<code>+kubebuilder:rbac</code> markers), <code>config/webhook/manifests.yaml</code>, and
+<code>api/v1/zz_generated.deepcopy.go</code> are produced by <code>controller-gen</code>. Regenerate
+them after touching <code>api/</code> or a marker, and commit the result:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">nix develop --command generate
+</span></span></code></pre></div><p><code>verify.yml</code>&rsquo;s <code>generated</code> job runs that same command and fails on any diff, so
+stale manifests cannot ship.</p>
+<h2 id="building-the-site">Building the site</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">nix develop --command website   <span class="c1"># one-shot build into docs/public/</span>
+</span></span><span class="line"><span class="cl">nix develop --command serve     <span class="c1"># live server on :1313</span>
+</span></span><span class="line"><span class="cl">nix develop --command htmltest  <span class="c1"># lint the rendered HTML (needs a build first)</span>
+</span></span></code></pre></div><h2 id="static-analysis">Static analysis</h2>
+<p>A pull request must be clean under each of these — run them locally before
+pushing:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">nix develop --command go vet ./...
+</span></span><span class="line"><span class="cl">nix develop --command staticcheck ./...      <span class="c1"># config: staticcheck.conf, checks = [&#34;all&#34;]</span>
+</span></span><span class="line"><span class="cl">nix develop --command gosec ./...
+</span></span><span class="line"><span class="cl">nix develop --command govulncheck ./...
+</span></span><span class="line"><span class="cl">nix develop --command gofumpt -l .           <span class="c1"># empty output == formatted</span>
+</span></span><span class="line"><span class="cl">nix develop --command arch-go                <span class="c1"># architecture rules (arch-go.yml)</span>
+</span></span><span class="line"><span class="cl">nix develop --command modernize ./...        <span class="c1"># newer-Go idiom check</span>
+</span></span></code></pre></div>]]></content><category scheme="https://stageset.projects.metio.wtf/tags/contributing" term="contributing" label="contributing"/><category scheme="https://stageset.projects.metio.wtf/tags/ci" term="ci" label="ci"/></entry><entry><title type="html">CI and releases</title><link href="https://stageset.projects.metio.wtf/contributing/ci-and-release/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/contributing/building/?utm_source=atom_feed" rel="related" type="text/html" title="Building and testing"/><link href="https://stageset.projects.metio.wtf/integrations/claude-code/?utm_source=atom_feed" rel="related" type="text/html" title="Claude Code skill"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><id>https://stageset.projects.metio.wtf/contributing/ci-and-release/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-18T20:07:19+02:00</updated><content type="html"><![CDATA[<blockquote>The pull-request gates and the automated calendar-based release process.</blockquote><h2 id="continuous-integration">Continuous integration</h2>
+<p>Every pull request runs <code>verify.yml</code>, which fans out into one job per concern so a
+failure points straight at the cause:</p>
+<ul>
+<li><strong>test</strong> — <code>go build</code> then the full <code>go test</code> suite.</li>
+<li><strong>lint-go</strong> — <code>go vet</code>, <code>staticcheck</code>, <code>gosec</code>, and a <code>gofumpt</code> formatting check.</li>
+<li><strong>vulnerabilities</strong> — <code>govulncheck</code> (a reachable advisory is a hard gate).</li>
+<li><strong>architecture</strong> — <code>arch-go</code> against <code>arch-go.yml</code>.</li>
+<li><strong>reuse</strong> — SPDX/REUSE compliance on every file.</li>
+<li><strong>text linters</strong> — <code>yamllint</code>, <code>actionlint</code>, <code>markdownlint</code>, <code>typos</code>, and Vale
+prose linting.</li>
+<li><strong>docs-lint</strong> — builds the Hugo site and lints the rendered output.</li>
+<li><strong>container-image</strong> — a buildx image build plus a Trivy scan.</li>
+<li><strong>dco</strong> — every non-bot commit carries a <code>Signed-off-by</code> trailer.</li>
+</ul>
+<p>A single <strong>all-green</strong> job depends on every other job and is the only required
+check, so new jobs are covered automatically. A separate <code>kind-smoke.yml</code> runs the
+operator end to end against a real kind cluster, and <code>fuzz.yml</code> exercises the fuzz
+targets.</p>
+<h2 id="releases">Releases</h2>
+<p>Releases are <strong>calendar-based and fully automated</strong> — there is no semver tag to
+bump by hand. <code>release.yml</code> runs on a Monday cron (and on manual dispatch), and the
+version is the run date (<code>date +'%Y.%-m.%-d'</code>, e.g. <code>2026.6.15</code>). A prepare job
+counts commits since the last release; an empty week publishes nothing.</p>
+<p>The pipeline is hand-rolled — no goreleaser, no GPG:</p>
+<ul>
+<li>Binaries are cross-compiled with <code>go build</code> (<code>CGO_ENABLED=0</code>, <code>-trimpath</code>,
+<code>-ldflags</code>) and archived per platform.</li>
+<li>A multi-arch image is pushed to <code>ghcr.io/metio/stageset-controller</code> and signed
+with <strong>cosign keyless</strong> (Fulcio OIDC) by digest.</li>
+<li>The GitHub Release attaches the archives, a <code>SHA256SUMS</code> file, and its cosign
+signature; identity is proven by the workflow&rsquo;s OIDC certificate, so there is no
+key to distribute.</li>
+</ul>
+<p>The Helm chart lives in the <a href="https://github.com/metio/helm-charts">metio/helm-charts</a>
+
+repository and vendors this repo&rsquo;s CRDs at each release; its <code>appVersion</code> tracks the
+binary&rsquo;s releases.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/contributing" term="contributing" label="contributing"/><category scheme="https://stageset.projects.metio.wtf/tags/ci" term="ci" label="ci"/><category scheme="https://stageset.projects.metio.wtf/tags/release" term="release" label="release"/></entry></feed>

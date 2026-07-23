@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Sizing on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/sizing/</link><description>Recent content in Sizing on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/sizing/index.xml" rel="self" type="application/rss+xml"/><item><title>Scale and capacity</title><link>https://stageset.projects.metio.wtf/running/scale-and-capacity/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/scale-and-capacity/</guid><description>&lt;p&gt;Size the controller for the number and size of the &lt;code&gt;StageSet&lt;/code&gt;s it manages, then
+tune its cadence and inventory knobs to fit. Start from the chart&amp;rsquo;s defaults,
+raise resources only where a driver below applies to your release sizes, and watch
+the saturation signals so you scale on evidence rather than guesswork.&lt;/p&gt;
+&lt;h2 id="sizing-a-replica"&gt;Sizing a replica&lt;/h2&gt;
+&lt;p&gt;A reconcile fetches each stage&amp;rsquo;s artifact, decrypts and builds it, applies the
+rendered objects server-side, and polls readiness until the stage&amp;rsquo;s gates pass.
+CPU and memory scale with different parts of that pipeline.&lt;/p&gt;</description></item></channel></rss>

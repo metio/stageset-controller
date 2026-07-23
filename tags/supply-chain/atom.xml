@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Supply-Chain on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/supply-chain/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/supply-chain/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/supply-chain/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/supply-chain/</id><entry><title type="html">Image verification</title><link href="https://stageset.projects.metio.wtf/security/image-verification/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/imageunverified/?utm_source=atom_feed" rel="related" type="text/html" title="ImageUnverified"/><link href="https://stageset.projects.metio.wtf/reference/verifying-releases/?utm_source=atom_feed" rel="related" type="text/html" title="Verifying releases"/><link href="https://stageset.projects.metio.wtf/security/admission-webhook/?utm_source=atom_feed" rel="related" type="text/html" title="Admission webhook"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><id>https://stageset.projects.metio.wtf/security/image-verification/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-19T11:01:24+02:00</updated><content type="html"><![CDATA[<blockquote>Gate a rollout on container image signatures — cluster ImageVerificationPolicies verify each image with cosign keyless identity and pin it to its digest before a stage applies it.</blockquote><p>Require every container image a rollout deploys to be signed before it reaches the
+cluster. You write a cluster-scoped <code>ImageVerificationPolicy</code> that names the images it
+governs and the identities allowed to sign them; the controller verifies each image a
+stage renders and holds the stage if any image fails — nothing unverified is applied.</p>
+<p>Verification is owned by the platform, not the tenant: a <code>StageSet</code> author deploys
+without declaring any signing configuration, and the policies that gate their images
+live in one cluster-scoped resource an administrator controls.</p>
+<h2 id="write-a-policy">Write a policy</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ImageVerificationPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">acme-images</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">images</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;ghcr.io/acme/**&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">authorities</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">keyless</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subjectRegExp</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github\.com/acme/.+/\.github/workflows/release\.yml@refs/heads/main$</span><span class="w">
+</span></span></span></code></pre></div><p>Every image whose repository matches an <code>images</code> glob is governed by the policy. A
+governed image must carry a Sigstore signature from <strong>at least one</strong> listed authority.
+The globs match the ref without its tag or digest: <code>*</code> spans one path segment, <code>**</code>
+spans any number, so <code>ghcr.io/acme/**</code> covers <code>ghcr.io/acme/api</code> and
+<code>ghcr.io/acme/team/worker</code> alike.</p>
+<p>An authority is one accepted signer — set exactly one of <code>keyless</code> or <code>key</code>:</p>
+<ul>
+<li>
+<p><strong>keyless</strong> — the Fulcio certificate a <a href="https://docs.sigstore.dev/">cosign</a>
+ keyless
+signature carries. Match the OIDC issuer with <code>issuer</code> (exact) or <code>issuerRegExp</code>, and
+the certificate subject with <code>subject</code> (exact) or <code>subjectRegExp</code>; set exactly one
+form of each.</p>
+</li>
+<li>
+<p><strong>key</strong> — a cosign public key, carried inline. The key is public, so it lives in the
+policy itself — no Secret, and the controller needs no secret-read privilege:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">images</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;registry.internal/**&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">authorities</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">key</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">publicKey</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">          -----BEGIN PUBLIC KEY-----
+</span></span></span><span class="line"><span class="cl"><span class="sd">          MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE…
+</span></span></span><span class="line"><span class="cl"><span class="sd">          -----END PUBLIC KEY-----</span><span class="w">
+</span></span></span></code></pre></div><p>Paste the contents of the <code>cosign.pub</code> produced by <code>cosign generate-key-pair</code>. A
+key signature is verified against the current time — the key does not expire, so
+trust rests on the signature over the digest, as with <code>cosign verify --key</code>.</p>
+</li>
+</ul>
+<h2 id="how-a-stage-is-gated">How a stage is gated</h2>
+<p>Between rendering a stage&rsquo;s objects and applying them, the controller:</p>
+<ol>
+<li>Extracts every container image from the rendered pod specs (<code>Pod</code>, <code>Deployment</code>,
+<code>StatefulSet</code>, <code>DaemonSet</code>, <code>ReplicaSet</code>, <code>Job</code>, <code>CronJob</code>).</li>
+<li>Selects the policies whose globs match each image.</li>
+<li>Resolves the image to its digest, fetches the Sigstore bundle cosign attaches as an
+OCI referrer, and verifies the signature against the policy&rsquo;s authorities and the
+resolved digest.</li>
+<li>Rewrites the image in the manifest to <code>repository@sha256:…</code> — the exact digest it
+verified — so a tag cannot be swapped between the check and the apply.</li>
+</ol>
+<p>If any governed image fails, the stage is held with <code>Ready=False</code> and reason
+<code>ImageUnverified</code>, and later stages never run. See the
+<a href="/runbooks/imageunverified/">ImageUnverified runbook</a>
+ for the remediation steps.</p>
+<h2 id="sign-images-so-they-verify">Sign images so they verify</h2>
+<p>Images must carry a <strong>new-format</strong> Sigstore bundle, which cosign attaches to the image
+as an OCI referrer:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">cosign sign --new-bundle-format ghcr.io/acme/api@sha256:…
+</span></span></code></pre></div><p>An image without a bundle cannot be verified. Mirror and re-sign a third-party image
+into your own registry, or exempt it with a <code>skip</code> glob:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">images</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;ghcr.io/acme/**&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">skip</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;ghcr.io/acme/vendored/**&#34;</span><span class="w">   </span><span class="c"># audited: a base image that cannot carry a bundle</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">authorities</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">keyless</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">issuer</span><span class="p">:</span><span class="w"> </span><span class="l">https://token.actions.githubusercontent.com</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">subjectRegExp</span><span class="p">:</span><span class="w"> </span><span class="l">^https://github\.com/acme/.+$</span><span class="w">
+</span></span></span></code></pre></div><p>A skipped image is recorded, never silently passed.</p>
+<h2 id="deny-images-no-policy-governs">Deny images no policy governs</h2>
+<p>By default an image that matches no policy applies unchanged — verification covers
+only what a policy names. Pass <code>--require-image-verification</code> to the controller to flip
+that to deny-by-default: an image no policy governs holds its stage under
+<code>ImageUnverified</code>, so a new registry cannot ship unverified because a policy for it was
+forgotten.</p>
+<h2 id="break-glass">Break glass</h2>
+<p>A genuine emergency — a broken signing pipeline blocking a critical fix — can bypass
+the gate for one reconcile by annotating the <code>StageSet</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset acme stages.metio.wtf/skip-image-verification<span class="o">=</span><span class="s2">&#34;pipeline outage, INC-1234&#34;</span>
+</span></span></code></pre></div><p>The bypass records a <code>Warning</code> event naming the reason. It is an operator action; a
+tenant editing their own <code>StageSet</code> should not hold this power.</p>
+<h2 id="air-gapped-clusters">Air-gapped clusters</h2>
+<p>The controller loads the public Sigstore trusted root over TUF on first use. In a
+cluster without egress, point it at an offline trusted-root bundle:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">--image-verification-trusted-root=/etc/sigstore/trusted_root.json
+</span></span></code></pre></div><p>An on-prem registry served over plain HTTP (no TLS) is fetched over HTTPS by default
+and fails the handshake. List each such registry so its verification fetches use HTTP;
+repeat the flag per registry:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">--image-verification-insecure-registry=registry.internal:5000
+</span></span></code></pre></div><p>This governs only the verifier&rsquo;s bundle fetch, not the kubelet&rsquo;s image pulls.</p>
+<h2 id="constraints">Constraints</h2>
+<p>A <code>requireAttestations</code> entry is rejected by the <a href="/security/admission-webhook/">admission webhook</a>
+:
+signature verification is enforced, attestation-predicate verification is not, so a
+policy never advertises a guarantee the controller does not keep.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/supply-chain" term="supply-chain" label="supply-chain"/><category scheme="https://stageset.projects.metio.wtf/tags/images" term="images" label="images"/><category scheme="https://stageset.projects.metio.wtf/tags/cosign" term="cosign" label="cosign"/><category scheme="https://stageset.projects.metio.wtf/tags/sigstore" term="sigstore" label="sigstore"/></entry><entry><title type="html">ImageUnverified</title><link href="https://stageset.projects.metio.wtf/runbooks/imageunverified/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/security/image-verification/?utm_source=atom_feed" rel="related" type="text/html" title="Image verification"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/actiondirty/?utm_source=atom_feed" rel="related" type="text/html" title="ActionDirty"/><id>https://stageset.projects.metio.wtf/runbooks/imageunverified/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-19T04:46:54+02:00</updated><content type="html"><![CDATA[<blockquote>A stage referenced an image that fails an ImageVerificationPolicy; the stage is held before apply.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=ImageUnverified</code>. The run halts at the stage before it applies
+anything. The Message names the failing image and the policy that rejected it.</p>
+<h2 id="cause">Cause</h2>
+<p>Before a stage applies its objects, the controller verifies every container image they
+reference against the cluster <a href="/security/image-verification/"><code>ImageVerificationPolicy</code></a>
+
+resources — signature (cosign keyless identity or public key) and any required
+attestations (SLSA provenance, SBOM, a fresh scan). The stage is held because an image:</p>
+<ul>
+<li>is not signed, or is signed by an identity no policy authority accepts;</li>
+<li>is missing a required attestation, or one is stale (past <code>maxAge</code>); or</li>
+<li>(under <code>--require-image-verification</code>) matches no policy at all — deny-by-default.</li>
+</ul>
+<p>Nothing unverified is deployed — the gate runs <em>before</em> apply.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;   <span class="c1"># the message names the image + policy</span>
+</span></span><span class="line"><span class="cl">kubectl get imageverificationpolicies                      <span class="c1"># the governing policies</span>
+</span></span></code></pre></div><p>Verify the image out of band with the same identity the policy expects:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">cosign verify --certificate-identity-regexp &lt;subject&gt; --certificate-oidc-issuer &lt;issuer&gt; &lt;image&gt;
+</span></span></code></pre></div><h2 id="remediation">Remediation</h2>
+<ul>
+<li><strong>The image should be trusted but isn&rsquo;t signed/attested:</strong> fix the build pipeline to
+sign it (<code>cosign sign --new-bundle-format</code>) and attach the required attestations,
+then re-publish. The stage clears on the next reconcile.</li>
+<li><strong>A third-party image can&rsquo;t carry a bundle:</strong> mirror and re-sign it into your own
+registry, or add its ref to a policy&rsquo;s <code>skip</code> list (an audited exemption).</li>
+<li><strong>The policy is wrong</strong> (an identity/attestation it shouldn&rsquo;t require): correct the
+<code>ImageVerificationPolicy</code>.</li>
+<li><strong>A genuine emergency:</strong> the break-glass annotation
+<code>stages.metio.wtf/skip-image-verification=&lt;reason&gt;</code> bypasses the gate for one
+reconcile and records a Warning event — an operator action, never a tenant&rsquo;s.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/security" term="security" label="security"/><category scheme="https://stageset.projects.metio.wtf/tags/supply-chain" term="supply-chain" label="supply-chain"/><category scheme="https://stageset.projects.metio.wtf/tags/images" term="images" label="images"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Verifying releases</title><link href="https://stageset.projects.metio.wtf/reference/verifying-releases/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/security/image-verification/?utm_source=atom_feed" rel="related" type="text/html" title="Image verification"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/runbooks/imageunverified/?utm_source=atom_feed" rel="related" type="text/html" title="ImageUnverified"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><id>https://stageset.projects.metio.wtf/reference/verifying-releases/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Verify the signed container image, release archives, and stagesetctl CLI before you run them.</blockquote><p>Every release is signed with <a href="https://github.com/sigstore/cosign">cosign</a>
+ keyless
+signing. There is no GPG key to import and no public key to distribute — the
+signature&rsquo;s trust comes from the GitHub Actions workflow&rsquo;s OIDC identity, proven by
+a <a href="https://docs.sigstore.dev/">Fulcio</a>
+ certificate and logged in
+<a href="https://docs.sigstore.dev/logging/overview/">Rekor</a>
+. Verify the artifacts you pull
+before you run them.</p>
+<p>Install cosign from <a href="https://github.com/sigstore/cosign/releases">its releases</a>
+, or
+on most systems:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">go install github.com/sigstore/cosign/v2/cmd/cosign@latest
+</span></span></code></pre></div><p>Two values appear in every command below — the workflow identity and the OIDC
+issuer. They are the same for the image and the blobs:</p>
+<ul>
+<li><code>--certificate-identity-regexp '^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/'</code></li>
+<li><code>--certificate-oidc-issuer https://token.actions.githubusercontent.com</code></li>
+</ul>
+<h2 id="verify-the-container-image">Verify the container image</h2>
+<p>Verify by digest for an exact, immutable match. Resolve the digest first, then
+verify it:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="nv">VERSION</span><span class="o">=</span>2026.6.15   <span class="c1"># the release you are installing</span>
+</span></span><span class="line"><span class="cl"><span class="nv">DIGEST</span><span class="o">=</span><span class="k">$(</span>cosign verify ghcr.io/metio/stageset-controller:<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --output json <span class="p">|</span> jq -r <span class="s1">&#39;.[0].critical.image.&#34;docker-manifest-digest&#34;&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">cosign verify ghcr.io/metio/stageset-controller@<span class="s2">&#34;</span><span class="si">${</span><span class="nv">DIGEST</span><span class="si">}</span><span class="s2">&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+</span></span></code></pre></div><p>A successful verification prints the certificate&rsquo;s subject and issuer and confirms
+the signature is recorded in the transparency log. A failure exits non-zero — do not
+run an image that fails to verify.</p>
+<h2 id="inspect-the-sbom-and-provenance">Inspect the SBOM and provenance</h2>
+<p>Each image ships an SBOM and SLSA provenance attestation, attached at build time.
+Read them with cosign:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># Software bill of materials</span>
+</span></span><span class="line"><span class="cl">cosign download sbom ghcr.io/metio/stageset-controller@<span class="s2">&#34;</span><span class="si">${</span><span class="nv">DIGEST</span><span class="si">}</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Build provenance (who built it, from which commit, in which workflow)</span>
+</span></span><span class="line"><span class="cl">cosign verify-attestation ghcr.io/metio/stageset-controller@<span class="s2">&#34;</span><span class="si">${</span><span class="nv">DIGEST</span><span class="si">}</span><span class="s2">&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --type slsaprovenance <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+</span></span></code></pre></div><h2 id="verify-the-release-archives-and-cli">Verify the release archives and CLI</h2>
+<p>The GitHub release attaches one archive per platform for both binaries — the
+<code>stageset-controller</code> daemon and the <code>stagesetctl</code> CLI — plus a single
+<code>stageset-controller_&lt;version&gt;_SHA256SUMS</code> file covering every archive and a cosign
+bundle signing that checksum file. Verify the checksum file&rsquo;s signature, then check
+your downloads against it.</p>
+<p>Download the archive(s) you need, the <code>SHA256SUMS</code> file, and its <code>.bundle</code> from the
+<a href="https://github.com/metio/stageset-controller/releases">release page</a>
+, then:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="nv">VERSION</span><span class="o">=</span>2026.6.15
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 1. Verify the checksum file&#39;s signature. The newer cosign bundle format carries</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#    the signature, certificate, and Rekor proof in one file.</span>
+</span></span><span class="line"><span class="cl">cosign verify-blob stageset-controller_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_SHA256SUMS <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --bundle stageset-controller_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_SHA256SUMS.bundle <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-identity-regexp <span class="s1">&#39;^https://github.com/metio/stageset-controller/\.github/workflows/release\.yml@refs/&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 2. Check your downloaded archives against the verified checksums.</span>
+</span></span><span class="line"><span class="cl">sha256sum -c stageset-controller_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_SHA256SUMS
+</span></span></code></pre></div><p><code>sha256sum -c</code> reports <code>OK</code> for every archive listed in the file that is present in
+the current directory and skips the rest, so you only need to download the platforms
+you use. Once an archive verifies, unpack it and run the binary:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">tar xf stagesetctl_<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span>_linux_amd64.tar.gz
+</span></span><span class="line"><span class="cl">./stagesetctl_v<span class="s2">&#34;</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">&#34;</span> version
+</span></span></code></pre></div><p>The CLI doubles as a <code>kubectl</code> plugin: rename it to <code>kubectl-stageset</code> on your
+<code>PATH</code> and call it as <code>kubectl stageset …</code>.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/installation" term="installation" label="installation"/><category scheme="https://stageset.projects.metio.wtf/tags/supply-chain" term="supply-chain" label="supply-chain"/><category scheme="https://stageset.projects.metio.wtf/tags/cosign" term="cosign" label="cosign"/><category scheme="https://stageset.projects.metio.wtf/tags/sigstore" term="sigstore" label="sigstore"/><category scheme="https://stageset.projects.metio.wtf/tags/signing" term="signing" label="signing"/><category scheme="https://stageset.projects.metio.wtf/tags/verification" term="verification" label="verification"/></entry></feed>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Grafonnet on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/grafonnet/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/grafonnet/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/grafonnet/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/grafonnet/</id><entry><title type="html">Dashboard</title><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/slos/?utm_source=atom_feed" rel="related" type="text/html" title="Service level objectives"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><id>https://stageset.projects.metio.wtf/observability/dashboard/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-19T09:16:22+02:00</updated><content type="html"><![CDATA[<blockquote>The StageSet controller ships a maintained Grafana dashboard as a single-layer OCI image — render it through JaaS and hand it to the grafana-operator.</blockquote><p>The StageSet controller publishes a maintained Grafana dashboard as a single-layer
+OCI image at <code>ghcr.io/metio/stageset-controller-dashboard</code>. The dashboard is
+grafonnet <em>source</em>, not pre-rendered JSON, and the controller is not a Jsonnet
+renderer — so you render it through <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+, which
+publishes the rendered JSON as a Flux <code>ExternalArtifact</code> the grafana-operator picks
+up. The two projects are intentionally tightly coupled; JaaS is the renderer.</p>
+<p>The dashboard opens with an <a href="/observability/slos/">SLO</a>
+ band — reconcile
+availability against its objective, error budget remaining, reconcile-latency p95
+against its objective, and an availability-versus-objective trend — over a band of
+controller internals that explain any movement: reconciles by reason, stages
+applied, drift corrected, deferred updates, stage readiness, watch-engagement
+failures, and the controller-runtime workqueue. The series are the
+<a href="/observability/metrics/">metrics</a>
+ the controller exports.</p>
+<p>This page needs JaaS running in the cluster. If you don&rsquo;t run JaaS, fetch the
+source from the OCI image yourself, render it with <code>jsonnet -J vendor</code> against
+grafonnet, and import the resulting JSON like any hand-built dashboard.</p>
+<h2 id="1-point-a-flux-source-at-the-image">1. Point a Flux source at the image</h2>
+<p>It&rsquo;s an OCI artifact, so use an <code>OCIRepository</code>. The dashboard imports grafonnet,
+so also install the grafonnet <code>JsonnetLibrary</code> (the
+<a href="https://github.com/metio/helm-charts/tree/main/charts/joi"><code>joi</code> chart</a>
+,
+<code>--set libraries.grafonnet.enabled=true</code>).</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">oci://ghcr.io/metio/stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l">latest       </span><span class="w"> </span><span class="c"># or a dated tag like 2026.6.22 to pin</span><span class="w">
+</span></span></span></code></pre></div><p>The dashboard source also lives in this repository under <code>dashboards/</code>; if you
+mirror it into Git, a <code>GitRepository</code> pointing there works identically.</p>
+<h2 id="2-render-it-with-a-jaas-jsonnetsnippet-passing-the-dashboards-tlas">2. Render it with a JaaS JsonnetSnippet, passing the dashboard&rsquo;s TLAs</h2>
+<p>The dashboard is a function of top-level arguments — <code>datasource</code> (the Prometheus
+datasource UID, default <code>prometheus</code>), <code>title</code> (default <code>StageSet controller</code>), a
+<code>selector</code> label matcher folded into every query (default empty), and the SLO knobs
+<code>window</code> (default <code>28d</code>), <code>availabilityTarget</code> (default <code>0.99</code>), and <code>latencyTarget</code>
+seconds (default <code>30</code>) — supplied through JaaS&rsquo;s <code>spec.tlas</code>.</p>
+<p><code>selector</code> is how you adapt to your Prometheus: scope the dashboard to one scrape
+job or cluster, e.g. <code>selector: ['job=&quot;stageset&quot;']</code> or <code>['cluster=&quot;prod&quot;']</code>. The
+queries never touch the <code>namespace</code> label, so a Prometheus that relabels it to
+<code>exported_namespace</code> doesn&rsquo;t affect them; <code>selector</code> pins anything else.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">jaas.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetSnippet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">dashboards-tenant</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># The OCI image&#39;s only file is main.jsonnet, which is spec.entryFile&#39;s default,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># so no entryFile is needed.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># grafonnet, which the dashboard imports by its full jb-vendor path, is served</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># by the JOI library installed above.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">libraries</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">JsonnetLibrary</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">grafonnet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># The dashboard&#39;s top-level arguments. Each value is a list; a single element</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># becomes a string TLA.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tlas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">datasource</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;prometheus&#34;</span><span class="p">]</span><span class="w">              </span><span class="c"># your Prometheus datasource UID</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;StageSet controller — prod&#34;</span><span class="p">]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;job=&#34;stageset&#34;&#39;</span><span class="p">]</span><span class="w">            </span><span class="c"># scope every query to your scrape job/cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">window</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;28d&#34;</span><span class="p">]</span><span class="w">                         </span><span class="c"># SLO window</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">availabilityTarget</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;0.99&#34;</span><span class="p">]</span><span class="w">            </span><span class="c"># reconcile-availability objective (99%)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">latencyTarget</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;30&#34;</span><span class="p">]</span><span class="w">                   </span><span class="c"># reconcile-latency p95 objective (seconds)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l">rendered</span><span class="w">
+</span></span></span></code></pre></div><p>This is zero-maintenance: the <code>OCIRepository</code> polls
+<code>ghcr.io/metio/stageset-controller-dashboard</code>, so when a new dashboard is published
+JaaS re-renders, the <code>ExternalArtifact</code> digest changes, and the grafana-operator
+pushes the new JSON to Grafana — you reference the upstream image once and get every
+update automatically. Pin <code>ref.tag</code> to a dated tag instead of <code>latest</code> if you&rsquo;d
+rather adopt updates deliberately.</p>
+<p>JaaS renders the dashboard JSON and publishes it as an <code>ExternalArtifact</code> named
+after the snippet — <code>stageset-controller-dashboard</code>.</p>
+<h2 id="3-hand-the-artifact-to-the-grafana-operator">3. Hand the artifact to the grafana-operator</h2>
+<p>A <code>GrafanaDashboard</code> that references the published <code>ExternalArtifact</code> reconciles it
+into Grafana:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">grafana.integreatly.org/v1beta1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">GrafanaDashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">instanceSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">dashboards</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;grafana&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resyncPeriod</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ExternalArtifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">stageset-controller-dashboard</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span><span class="w">
+</span></span></span></code></pre></div><p>When the published image updates (or you change the TLAs), JaaS re-renders, the
+<code>ExternalArtifact</code> digest changes, and the grafana-operator pushes the new JSON to
+Grafana — no manual export step.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/controller" term="controller" label="controller"/><category scheme="https://stageset.projects.metio.wtf/tags/grafana" term="grafana" label="grafana"/><category scheme="https://stageset.projects.metio.wtf/tags/grafonnet" term="grafonnet" label="grafonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/dashboard" term="dashboard" label="dashboard"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/></entry></feed>

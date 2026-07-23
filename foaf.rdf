@@ -1,0 +1,13 @@
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:foaf="http://xmlns.com/foaf/0.1/">
+  <foaf:PersonalProfileDocument rdf:about="">
+    <foaf:maker rdf:resource="#sebhoss" />
+    <foaf:primaryTopic rdf:resource="StageSet Controller" />
+  </foaf:PersonalProfileDocument>
+
+  <foaf:Project rdf:ID="StageSet Controller">
+    <foaf:name>StageSet Controller</foaf:name>
+    <foaf:homepage rdf:resource="https://stageset.projects.metio.wtf/" />
+  </foaf:Project>
+
+  
+</rdf:RDF>

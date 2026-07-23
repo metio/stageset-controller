@@ -1,0 +1,555 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Api on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/api/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/api/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/api/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/api/</id><entry><title type="html">API reference</title><link href="https://stageset.projects.metio.wtf/api/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/api/stageinventory/?utm_source=atom_feed" rel="related" type="text/html" title="StageInventory"/><link href="https://stageset.projects.metio.wtf/api/stageset/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidspec/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidSpec"/><id>https://stageset.projects.metio.wtf/api/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Field-by-field reference for the StageSet and StageInventory custom resources in the stages.metio.wtf/v1 API group.</blockquote><p>The controller serves two custom resources in the <code>stages.metio.wtf/v1</code> API
+group.</p>
+<ul>
+<li><a href="/api/stageset/"><code>StageSet</code></a>
+ — the resource you author: an ordered set of
+stages, with scheduling, security, gating, versioning, and rollback.</li>
+<li><a href="/api/stageinventory/"><code>StageInventory</code></a>
+ — controller-managed; it records the
+objects each stage applied so the controller can prune precisely.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/api" term="api" label="api"/><category scheme="https://stageset.projects.metio.wtf/tags/reference" term="reference" label="reference"/><category scheme="https://stageset.projects.metio.wtf/tags/crd" term="crd" label="crd"/></entry><entry><title type="html">InvalidSpec</title><link href="https://stageset.projects.metio.wtf/runbooks/invalidspec/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/actiondirty/?utm_source=atom_feed" rel="related" type="text/html" title="ActionDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/?utm_source=atom_feed" rel="related" type="text/html" title="ArtifactNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><id>https://stageset.projects.metio.wtf/runbooks/invalidspec/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The StageSet spec is invalid; the Message names the offending field or action.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=InvalidSpec</code>. The Message names the offending field or action. Terminal: the controller does not requeue until the spec changes.</p>
+<h2 id="cause">Cause</h2>
+<p>The spec failed validation that the CRD schema cannot express cheaply, normally one of:</p>
+<ul>
+<li>an <strong>action sets zero or more than one verb</strong> — each action must set exactly one of <code>patch</code>, <code>http</code>, <code>wait</code>, <code>job</code>, <code>delete</code>, <code>apply</code> (see <a href="/defining-a-release/actions/">actions</a>
+);</li>
+<li><strong><code>spec.migrations</code> without <code>spec.version</code></strong>, or a migration anchored to a stage name that does not exist (see <a href="/gating/versioned-migrations/">versioned migrations</a>
+);</li>
+<li><strong><code>spec.version</code> does not name exactly one source</strong> — set one of <code>value</code>, <code>fromObject</code>, or <code>fromArtifact</code>;</li>
+<li><strong><code>spec.decryption.provider</code> is not <code>sops</code></strong>, or a <code>secretRef</code> is given without a <code>name</code> (see <a href="/security/encryption/">encryption</a>
+);</li>
+<li>an <strong>invalid update window</strong> — a malformed <code>schedule</code>, <code>duration</code>, or <code>timeZone</code> (see <a href="/gating/update-windows/">update windows</a>
+).</li>
+</ul>
+<p>The admission webhook normally rejects these at write time; seeing this on the object means the webhook was bypassed or disabled and the reconciler caught it.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; describe stageset &lt;name&gt;
+</span></span></code></pre></div><p>Read the Message — it names the stage, action, or field.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Fix the spec per the Message:</p>
+<ul>
+<li>give each action exactly one verb;</li>
+<li>set <code>spec.version</code> (to one of <code>value</code>/<code>fromObject</code>/<code>fromArtifact</code>) whenever <code>spec.migrations</code> is present, and anchor each migration to a real stage;</li>
+<li>set exactly one <code>spec.version</code> source;</li>
+<li>use <code>provider: sops</code> for <code>spec.decryption</code>, with a named <code>secretRef</code> when one is given;</li>
+<li>correct any malformed update window (<code>schedule</code>, <code>duration</code>, <code>timeZone</code>).</li>
+</ul>
+<p>If the webhook should have caught this, confirm the <code>ValidatingWebhookConfiguration</code> is installed and its service is reachable.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/><category scheme="https://stageset.projects.metio.wtf/tags/api" term="api" label="api"/></entry><entry><title type="html">StageInventory</title><link href="https://stageset.projects.metio.wtf/api/stageinventory/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/api/stageset/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/invalidspec/?utm_source=atom_feed" rel="related" type="text/html" title="InvalidSpec"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><id>https://stageset.projects.metio.wtf/api/stageinventory/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-18T21:33:26+02:00</updated><content type="html"><![CDATA[<blockquote>The controller-managed inventory of objects each stage applied.</blockquote><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageInventory</span><span class="w">
+</span></span></span></code></pre></div><p>A <code>StageInventory</code> records the set of objects a single stage has applied, so the
+controller can prune precisely and tear stages down in reverse order. <strong>You do not
+author these</strong> — the controller creates, updates, and deletes them. The fields
+below let you read inventory state when debugging and back it up.</p>
+<p>One stage may be backed by several <code>StageInventory</code> shards once it exceeds
+<code>--inventory-shard-cap</code> entries (default 5000), so a single object never grows
+unbounded.</p>
+<h2 id="spec">spec</h2>
+<p>A <code>StageInventory</code> as the controller writes it (read-only — never hand-author one):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageInventory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">payments-application-0         </span><span class="w"> </span><span class="c"># &lt;stageset&gt;-&lt;stage&gt;-&lt;shard&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">stages.metio.wtf/stage-set</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">stages.metio.wtf/stage</span><span class="p">:</span><span class="w"> </span><span class="l">application</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">stages.metio.wtf/shard</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stagePosition</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">                       </span><span class="c"># the stage&#39;s index in spec.stages</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">entries</span><span class="p">:</span><span class="w">                               </span><span class="c"># identifiers only — never object contents</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">payments_web_apps_Deployment  </span><span class="w"> </span><span class="c"># namespace_name_group_kind</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">v</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1                        </span><span class="w"> </span><span class="c"># the applied API version</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">payments_web__Service         </span><span class="w"> </span><span class="c"># empty group → core/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">v</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span></code></pre></div><p>The inventory is stored in <code>spec</code> (not <code>status</code>) on purpose: backup tooling that
+restores <code>spec</code> preserves the prune history, so a restored controller does not
+orphan or wrongly prune objects.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Field</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stagePosition</code></td>
+					<td>The stage&rsquo;s index in <code>spec.stages</code> at write time. Teardown walks inventories in reverse position order.</td>
+			</tr>
+			<tr>
+					<td><code>entries[].id</code></td>
+					<td>An applied object&rsquo;s identifier, form <code>namespace_name_group_kind</code> (empty group for core).</td>
+			</tr>
+			<tr>
+					<td><code>entries[].v</code></td>
+					<td>The API version the object was applied at.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="well-known-labels-and-annotations">Well-known labels and annotations</h2>
+<p>The controller stamps these onto inventories and managed objects:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Key</th>
+					<th>On</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stages.metio.wtf/stage-set</code></td>
+					<td>inventory</td>
+					<td>Owning StageSet name.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/stage</code></td>
+					<td>inventory</td>
+					<td>Stage name.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/shard</code></td>
+					<td>inventory</td>
+					<td>Shard index.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/name</code></td>
+					<td>managed object</td>
+					<td>Owning StageSet name — <code>kubectl get -l stages.metio.wtf/name=&lt;stageset&gt;</code>.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/namespace</code></td>
+					<td>managed object</td>
+					<td>Owning StageSet namespace.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/stage</code></td>
+					<td>managed object</td>
+					<td>Stage that applied the object — <code>kubectl get -l stages.metio.wtf/stage=&lt;stage&gt;</code> for per-stage discovery.</td>
+			</tr>
+			<tr>
+					<td><code>stages.metio.wtf/prune</code></td>
+					<td>managed object</td>
+					<td>Set to <code>disabled</code> to opt an object out of pruning.</td>
+			</tr>
+	</tbody>
+</table>
+<p>Other annotations the controller honors on a StageSet or its objects. Each has a
+<a href="/cli/reconcile/"><code>stagesetctl reconcile</code></a>
+ equivalent:</p>
+<ul>
+<li><code>reconcile.fluxcd.io/requestedAt</code> — request an out-of-band reconcile.</li>
+<li><code>stages.metio.wtf/reconcile-stage</code> — force a single stage to re-run.</li>
+<li><code>stages.metio.wtf/update-now</code> — push a window-held rollout through immediately.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/api" term="api" label="api"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/crd" term="crd" label="crd"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">StageSet</title><link href="https://stageset.projects.metio.wtf/api/stageset/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/api/stageinventory/?utm_source=atom_feed" rel="related" type="text/html" title="StageInventory"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><link href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stages and sources"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><id>https://stageset.projects.metio.wtf/api/stageset/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-19T03:22:53+02:00</updated><content type="html"><![CDATA[<blockquote>Every field of the StageSet resource — the one you author.</blockquote><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span></code></pre></div><p>A <code>StageSet</code> is a namespaced <a href="https://kubernetes.io/docs/">Kubernetes</a>
+ resource
+describing an ordered set of stages. Only <code>spec.stages</code> is required; everything else
+refines scheduling, security, gating, versioning, and rollback. Every field below is
+shown in YAML at least once.</p>
+<p>The smallest valid StageSet:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span></code></pre></div><hr>
+<h2 id="scheduling">Scheduling</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interval: 5m                  # optional: reconcile cadence (default</span><span class="p">:</span><span class="w"> </span>--<span class="l">default-interval)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">retryInterval: 1m             # cadence after a failed run (default</span><span class="p">:</span><span class="w"> </span><span class="l">interval)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">driftDetectionInterval</span><span class="p">:</span><span class="w"> </span><span class="l">2m   </span><span class="w"> </span><span class="c"># faster drift correction than interval (optional)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">5m                  </span><span class="w"> </span><span class="c"># default per-stage timeout (optional)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">                </span><span class="c"># pause reconciliation without deleting (default false)</span><span class="w">
+</span></span></span></code></pre></div><ul>
+<li><strong><code>interval</code></strong> (optional) — steady-state reconcile cadence; each reconcile
+re-resolves sources, re-asserts desired state (correcting drift), and prunes.
+<strong>When omitted, the controller&rsquo;s <code>--default-interval</code> is used</strong> (the chart&rsquo;s
+<code>controller.defaultInterval</code>, default <code>10m</code>), so most StageSets can leave it out.</li>
+<li><strong><code>retryInterval</code></strong> — retry cadence after a failure; falls back to <code>interval</code>.</li>
+<li><strong><code>driftDetectionInterval</code></strong> — a shorter cadence dedicated to healing out-of-band
+drift when you need it tighter than <code>interval</code>.</li>
+<li><strong><code>timeout</code></strong> — how long any one stage may take before it fails; override per
+stage with <code>stages[].timeout</code>.</li>
+<li><strong><code>suspend</code></strong> — short-circuits to <code>Ready=False / Suspended</code>, leaving applied state
+running. Use <a href="/cli/reconcile/"><code>stagesetctl reconcile --force</code></a>
+ to run once while
+suspended. See the <a href="/runbooks/suspended/"><code>Suspended</code> runbook</a>
+.</li>
+</ul>
+<h2 id="ordering-between-stagesets">Ordering between StageSets</h2>
+<p><code>dependsOn</code> gates this StageSet on others being Ready at their observed generation
+with no new revision held back — cross-release ordering. (Ordering <em>within</em> a
+StageSet is the order of <code>stages</code>.) A dependency may also carry a <code>minVersion</code>: the
+dependent then waits not just for the dependency to be Ready, but for it to be
+deployed <strong>at or above</strong> that version — so an app that needs its database migrated
+to 5.2 first waits for exactly that, not merely for the database to be up.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">dependsOn</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">platform</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">platform-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">db</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minVersion</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;5.2.0&#34;</span><span class="w">     </span><span class="c"># wait until the database is deployed at ≥ 5.2.0</span><span class="w">
+</span></span></span></code></pre></div><p>The dependent holds under the <code>DependencyNotReady</code> reason until every dependency is
+Ready and at its <code>minVersion</code>; a <code>minVersion</code> that is not a semver is rejected at
+admission.</p>
+<h2 id="security-and-targeting">Security and targeting</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">payments-deployer  </span><span class="w"> </span><span class="c"># impersonated for every cluster operation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kubeConfig</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eu-kubeconfig           </span><span class="w"> </span><span class="c"># apply to a remote cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">decryption</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">provider</span><span class="p">:</span><span class="w"> </span><span class="l">sops                       </span><span class="w"> </span><span class="c"># decrypt SOPS files in stage sources</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sops-age                     </span><span class="w"> </span><span class="c"># holds an age key under *.agekey</span><span class="w">
+</span></span></span></code></pre></div><ul>
+<li><strong><code>serviceAccountName</code></strong> — the ServiceAccount the controller applies as (via a
+minted TokenRequest token on the local cluster); the StageSet can do exactly what
+its RBAC allows. A stage can override it with its own
+<a href="#serviceaccountname"><code>serviceAccountName</code></a>
+ to target a different tenant. See
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+.</li>
+<li><strong><code>kubeConfig</code></strong> — apply to a remote cluster. Set exactly one of:
+<ul>
+<li><strong><code>secretRef</code></strong> — a Secret holding a self-contained kubeconfig (with its own
+embedded credentials).</li>
+<li><strong><code>configMapRef</code></strong> — a ConfigMap selecting cloud-provider workload-identity
+auth (<code>aws</code>, <code>azure</code>, <code>gcp</code>, or <code>generic</code>); the cluster bearer token is
+minted by the cloud&rsquo;s IAM/STS. See
+<a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+.</li>
+</ul>
+</li>
+<li><strong><code>decryption</code></strong> — decrypt SOPS-encrypted files (<code>age</code>) in every stage&rsquo;s source
+before they are built. <code>provider</code> is <code>sops</code>; <code>secretRef</code> names the key Secret,
+read under <code>serviceAccountName</code>. See <a href="/security/encryption/">secrets encryption</a>
+.</li>
+</ul>
+<h2 id="versioning-and-migrations">Versioning and migrations</h2>
+<p>Versioning is off unless <code>spec.version</code> is set. Set <strong>exactly one</strong> of
+<code>value</code> / <code>fromObject</code> / <code>fromArtifact</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># A StageSet has ONE version that all its stages converge on. fromObject reads</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># it from a rendered object — by default the app.kubernetes.io/version label,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># so it travels in the manifests (works for every source kind, including</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># JaaS). The recommended default.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fromObject</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># stage: app                     # optional; which stage&#39;s output to read the version from — defaults to the first stage (the leading stage carries the new version first)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># apiVersion: apps/v1            # optional; narrows an ambiguous Kind+Name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># fieldPath: &#34;{.data.version}&#34;   # optional JSONPath; defaults to the version label</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># value: &#34;2.1.0&#34;                   # …or pin it inline</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># fromArtifact: { stage: app, path: VERSION }   # …or read a VERSION file (Git/OCI/Bucket)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">migrations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill-ledger-2-0</span><span class="w"> </span><span class="c"># idempotency-ledger / Events name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&gt;=1.0.0, &lt;2.0.0&#34;</span><span class="w">   </span><span class="c"># optional: a semver CONSTRAINT on the current version</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w">   </span><span class="s2">&#34;2.0.0&#34;</span><span class="w">             </span><span class="c"># required: the EXACT boundary this migration crosses</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">app               </span><span class="w"> </span><span class="c"># runs before this stage&#39;s pre-actions</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">                  </span><span class="c"># the same Action shape used by stages (see below)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">backfill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ledger-backfill-job</span><span class="w">
+</span></span></span></code></pre></div><p><code>to</code> is an exact version (like <code>version.value</code>). <code>from</code> is a semver
+<strong>constraint</strong>, not an exact version — it accepts ranges such as
+<code>&gt;=1.0.0, &lt;2.0.0</code>, <code>1.x</code>, or <code>^1.2</code>, matched against the currently deployed
+version. The migration fires only when the deployed version satisfies <code>from</code>
+<em>and</em> the run crosses up to <code>to</code>. See
+<a href="/gating/versioned-migrations/">versioned migrations</a>
+.</p>
+<h2 id="rollback">Rollback</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rollbackOnFailure</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">       </span><span class="c"># restore last-good revisions on a failed run</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">onRollback</span><span class="p">:</span><span class="w">                   </span><span class="c"># best-effort cleanup after the restore</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">disable-maintenance-mode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">moodle-maintenance-off</span><span class="w">
+</span></span></span></code></pre></div><p>Needs a rollback store configured; see <a href="/gating/rollback/">rollback</a>
+.</p>
+<ul>
+<li><strong><code>onRollback</code></strong> — StageSet-level actions run best-effort <strong>after</strong> a rollback
+restores the previous manifests (both <code>rollbackOnFailure</code> and a promotion gate&rsquo;s
+<code>onFailure: Rollback</code> revert). They run against the restored state under
+<a href="#serviceaccountname"><code>serviceAccountName</code></a>
+, are <strong>not</strong> gated by the
+per-revision action ledger (so they fire on every rollback), and take the same
+operation types as stage <a href="#actions">actions</a>
+. Names must be unique within the
+list. Use it for cleanup that only makes sense once the old version is back —
+e.g. lifting an application maintenance mode a failed upgrade enabled. See
+<a href="/defining-a-release/actions/#post-rollback-cleanup-onrollback">post-rollback cleanup</a>
+.</li>
+</ul>
+<h2 id="update-windows">Update windows</h2>
+<p>Gate <em>when</em> new revisions roll out. Each window is <code>Allow</code> or <code>Deny</code>, recurring
+(cron) <strong>or</strong> absolute (from/to). <code>windowScope</code> controls how strict a closed window
+is.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">windowScope: Updates          # Updates (default)</span><span class="p">:</span><span class="w"> </span><span class="l">hold rollouts, keep correcting</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                                </span><span class="c"># drift. All: a hard freeze — no applies at all.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">updateWindows</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Deny               </span><span class="w"> </span><span class="c"># Deny always wins over Allow</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0 9 * * MON-FRI&#34;</span><span class="w">   </span><span class="c"># 5-field cron: window start</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">duration</span><span class="p">:</span><span class="w"> </span><span class="l">8h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">timeZone</span><span class="p">:</span><span class="w"> </span><span class="l">Europe/Berlin  </span><span class="w"> </span><span class="c"># IANA tz (default UTC)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Deny               </span><span class="w"> </span><span class="c"># an absolute one-off freeze</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="ld">2026-12-24T00:00:00Z</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">to</span><span class="p">:</span><span class="w">   </span><span class="ld">2026-12-27T00:00:00Z</span><span class="w">
+</span></span></span></code></pre></div><p>A recurring window uses <code>schedule</code> + <code>duration</code>; an absolute window uses
+<code>from</code> + <code>to</code>. See <a href="/gating/update-windows/">update windows</a>
+.</p>
+<hr>
+<h2 id="stages">Stages</h2>
+<p><code>stages</code> (required, min 1) is the ordered list. A stage with every field set:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app                </span><span class="w"> </span><span class="c"># required; DNS-label, unique in the StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app           </span><span class="w"> </span><span class="c"># required</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ExternalArtifact </span><span class="w"> </span><span class="c"># default; also GitRepository/OCIRepository/Bucket</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                                </span><span class="c"># directly, or a producer (e.g. JsonnetSnippet)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1  </span><span class="w"> </span><span class="c"># required for a producer kind</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace: other-ns     # default</span><span class="p">:</span><span class="w"> </span><span class="l">the StageSet&#39;s namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./overlays/prod    </span><span class="w"> </span><span class="c"># path inside the artifact (default ./)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">serviceAccountName: payments-eu-deployer  # per-stage identity (default</span><span class="p">:</span><span class="w"> </span><span class="l">spec.serviceAccountName)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prune</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">               </span><span class="c"># GC objects that leave the stage (default true)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">timeout: 3m               # per-stage timeout (default</span><span class="p">:</span><span class="w"> </span><span class="l">spec.timeout)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">force: false              # sugar for conflictPolicy.default</span><span class="p">:</span><span class="w"> </span><span class="l">Recreate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">applyHelmHookResources</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># apply helm.sh/hook objects as ordinary ones</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">patches</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">               </span><span class="c"># Kustomize patches applied after build</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">conflictPolicy</span><span class="p">:</span><span class="w"> </span>{}<span class="w">        </span><span class="c"># see below</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w"> </span>{}<span class="w">             </span><span class="c"># see below</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w"> </span>{}<span class="w">               </span><span class="c"># see below</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readyChecks</span><span class="p">:</span><span class="w"> </span>{}<span class="w">           </span><span class="c"># see below</span><span class="w">
+</span></span></span></code></pre></div><p><code>sourceRef.kind</code> defaults to <code>ExternalArtifact</code>, so the common case is just
+<code>sourceRef: { name: … }</code>. A <code>sourceRef</code> resolves to a <a href="https://fluxcd.io/">Flux</a>
+
+artifact in one of three ways: an <code>ExternalArtifact</code>
+(<a href="https://github.com/fluxcd/flux2/tree/main/rfcs">RFC-0012</a>
+, the default), a classic
+Flux source — <code>GitRepository</code>, <code>OCIRepository</code>, or <code>Bucket</code> — consumed <strong>directly</strong>,
+or any other kind treated as a <em>producer</em> and resolved to its <code>ExternalArtifact</code> via
+the back-pointer index. See
+<a href="/defining-a-release/stages-and-sources/#source-kinds">stages and sources</a>
+ and
+<a href="/integrations/producer-aware-sources/">producer-aware sources</a>
+.</p>
+<p><code>sourceRef.kind</code> is intentionally <strong>open</strong>: it defaults to <code>ExternalArtifact</code> but
+accepts any producer kind, because a producer reference is resolved through the
+<code>ExternalArtifact</code>&rsquo;s RFC-0012 <code>spec.sourceRef</code> back-pointer rather than matched
+against a fixed set. This is a deliberate divergence from a source consumer that
+restricts its source kinds to a closed enum — here the resolution is
+producer-aware, so a new producer kind works without a schema change.</p>
+<h3 id="serviceaccountname">serviceAccountName</h3>
+<p>The ServiceAccount this stage&rsquo;s cluster operations run as — apply, prune,
+readiness verification, and <a href="#actions">actions</a>
+ — overriding the StageSet-level
+<code>spec.serviceAccountName</code>. Empty inherits the StageSet default. Each stage&rsquo;s
+writes are bounded by its own ServiceAccount&rsquo;s RBAC, so a single StageSet can
+roll a change through environments that live under different identities:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">staging-deployer     </span><span class="w"> </span><span class="c"># default for stages that omit it</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app }          </span><span class="w"> </span><span class="c"># runs as staging-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">production</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">prod-deployer     </span><span class="w"> </span><span class="c"># runs as prod-deployer instead</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app }</span><span class="w">
+</span></span></span></code></pre></div><p>The same identity that applies a stage also prunes and tears it down, so a
+per-stage ServiceAccount with create rights can garbage-collect its own objects.
+On the local cluster the identity is assumed by minting a short-lived TokenRequest
+token; a remote <a href="#security-and-targeting"><code>kubeConfig</code></a>
+ instead impersonates the
+ServiceAccount against that cluster&rsquo;s credentials. SOPS decryption keys are read
+under the StageSet-level identity, since <code>spec.decryption</code> is a StageSet field.
+See <a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+.</p>
+<h3 id="patches">patches</h3>
+<p><a href="https://kubectl.docs.kubernetes.io/">kustomize</a>
+ strategic-merge or JSON6902
+patches, applied after the build:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">patches</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">patch</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">            - op: replace
+</span></span></span><span class="line"><span class="cl"><span class="sd">              path: /spec/replicas
+</span></span></span><span class="line"><span class="cl"><span class="sd">              value: 6</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span></code></pre></div><h3 id="postbuild">postBuild</h3>
+<p>Variable substitution after build and patching:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">postBuild</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substitute</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">cluster_name</span><span class="p">:</span><span class="w"> </span><span class="l">prod-eu       </span><span class="w"> </span><span class="c"># inline key/value</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">substituteFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind: ConfigMap            # required</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap or Secret</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-vars</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Secret</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cluster-secrets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">optional</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">             </span><span class="c"># tolerate a missing source</span><span class="w">
+</span></span></span></code></pre></div><h3 id="conflictpolicy">conflictPolicy</h3>
+<p>Per-resource answers to apply conflicts (immutable fields, ownership):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">conflictPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l">Fail                 </span><span class="w"> </span><span class="c"># Fail (default) | Recreate | KeepExisting</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">target</span><span class="p">:</span><span class="w">                    </span><span class="c"># partial selector; unset fields match all</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">batch/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Job</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l">Recreate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">PersistentVolumeClaim</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">scratch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l">Recreate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">allowDataLoss</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">        </span><span class="c"># required to Recreate a PVC/PV</span><span class="w">
+</span></span></span></code></pre></div><p>See <a href="/defining-a-release/conflict-policies/">conflict policies</a>
+.</p>
+<h3 id="readychecks">readyChecks</h3>
+<p>Gate when the stage counts as complete:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readyChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">5m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">disableWait</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">             </span><span class="c"># true = apply without waiting for readiness</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">checks</span><span class="p">:</span><span class="w">                        </span><span class="c"># explicit objects, evaluated with kstatus</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apiextensions.k8s.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">CustomResourceDefinition</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ledgers.example</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">exprs</span><span class="p">:</span><span class="w">                         </span><span class="c"># custom health via CEL expressions (healthCheckExprs shape)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">db.example/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Database</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">current</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.phase == &#39;Running&#39;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">inProgress</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.phase in [&#39;Pending&#39;,&#39;Provisioning&#39;]&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.phase == &#39;Failed&#39;&#34;</span><span class="w">
+</span></span></span></code></pre></div><p>Health expressions use <a href="https://github.com/google/cel-spec">CEL</a>
+. See
+<a href="/defining-a-release/ready-checks/">ready checks</a>
+.</p>
+<hr>
+<h2 id="actions">Actions</h2>
+<p><code>stages[].actions</code> (and <code>migrations[].actions</code>) carry typed steps. Each <code>Action</code>
+has a <code>name</code>, optional <code>timeout</code>/<code>retries</code>, an optional <code>scope</code> (pre/post only),
+and <strong>exactly one</strong> operation block.</p>
+<p><code>scope</code> selects how often a pre/post action runs: <code>Revision</code> (default) once per
+pinned artifact revision, <code>Version</code> once per resolved <code>spec.version</code> episode — so
+revision churn at a fixed version stops re-running upgrade choreography — or
+<code>Lifetime</code> once ever, for a durable bootstrap. <code>Version</code> requires <code>spec.version</code>;
+<code>Lifetime</code> records its completion in a <code>StageLedger</code>. See
+<a href="/defining-a-release/actions/#scope-revision-version-or-lifetime">action scope</a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">pre</span><span class="p">:</span><span class="w">        </span><span class="c"># before apply; failure aborts the stage with nothing applied</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">db-migrate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-migrations }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./jobs</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">post</span><span class="p">:</span><span class="w">       </span><span class="c"># after verify; the stage is Ready only if these pass</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">smoke-test</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">http</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://my-app.internal/healthz</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">method</span><span class="p">:</span><span class="w"> </span><span class="l">GET                   </span><span class="w"> </span><span class="c"># default POST</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">expectedStatus: [200]          # default</span><span class="p">:</span><span class="w"> </span><span class="l">any 2xx</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">headersFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gate-token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">onFailure</span><span class="p">:</span><span class="w">  </span><span class="c"># best-effort on any failure from apply onward</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">page-oncall</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">http</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://alerts.internal/stageset-failed</span><span class="w">
+</span></span></span></code></pre></div><p>The six operation types — one per Action:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># patch — patch an existing object</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">enable-traffic</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">patch</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">apiVersion: v1, kind: Service, name</span><span class="p">:</span><span class="w"> </span><span class="l">web }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">merge               </span><span class="w"> </span><span class="c"># merge (default) | json6902</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">patch</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;{ &#34;spec&#34;: { &#34;selector&#34;: { &#34;release&#34;: &#34;green&#34; } } }&#39;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># http — call an endpoint (hosts gated by --allowed-action-hosts)</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">approve</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">http</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://gate.internal/approve</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bodyFrom</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name: approve-secret, key</span><span class="p">:</span><span class="w"> </span><span class="l">body }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># wait — block for a duration or until a CEL expr holds</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">settle</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">wait</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">duration</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">until-available</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">wait</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">apiVersion: apps/v1, kind: Deployment, name</span><span class="p">:</span><span class="w"> </span><span class="l">web }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;status.availableReplicas &gt;= 3&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">5m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># job — render and await Jobs from an artifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">migrate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">job</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-migrations }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./jobs</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># delete — remove an existing object (missing = success)</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">drop-legacy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">delete</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">apiVersion: batch/v1, kind: Job, name</span><span class="p">:</span><span class="w"> </span><span class="l">legacy-migration }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c"># apply — transient, rollout-scoped manifests (NOT inventory-tracked, never pruned)</span><span class="w">
+</span></span></span><span class="line"><span class="cl">- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">canary</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">apply</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-canary }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">wait</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">                 </span><span class="c"># block until applied objects report Ready</span><span class="w">
+</span></span></span></code></pre></div><p>See <a href="/defining-a-release/actions/">actions</a>
+.</p>
+<hr>
+<h2 id="status">status</h2>
+<p><code>status</code> is controller-owned and read-only. A representative snapshot:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">7</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">conditions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;True&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Succeeded</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">message</span><span class="p">:</span><span class="w"> </span><span class="l">All 2 stages applied</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">lastHandledReconcileAt</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-06-15T09:21:04Z&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">lastAttemptedRevisions</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">payments/payments-app</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:1a2b }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">lastAppliedRevisions</span><span class="p">:</span><span class="w">   </span>{<span class="w"> </span><span class="nt">payments/payments-app</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:1a2b }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2.1.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pendingMigrations</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">executedMigrations</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">infrastructure</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">phase</span><span class="p">:</span><span class="w"> </span><span class="l">Ready            </span><span class="w"> </span><span class="c"># Pending|Applying|Pruning|Verifying|Ready|Failed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">appliedRevision</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:9f3c</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">entriesCount</span><span class="p">:</span><span class="w"> </span><span class="m">12</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">shards</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">message</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">executedActions</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ledgerRevision</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:9f3c</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">lastAppliedSnapshot</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l">infrastructure</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">http://source-controller.../infra.tar.gz</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">digest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:9f3c</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pendingUpdate</span><span class="p">:</span><span class="w">               </span><span class="c"># set only when a window holds a rollout</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">revisions</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">payments/payments-app</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:cafe }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nextWindowOpens</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-06-16T08:00:00Z&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">lastHandledUpdateOverride</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-06-15T09:30:00Z&#34;</span><span class="w">
+</span></span></span></code></pre></div><p>The <code>Ready</code> condition&rsquo;s reason is one of the wire-stable values documented in the
+<a href="/runbooks/">runbooks</a>
+. The happy-state reason is <code>Succeeded</code>, matching the
+apply-style success reason kustomize-controller writes, so existing Flux tooling
+and alert routing recognize it unchanged.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/api" term="api" label="api"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/crd" term="crd" label="crd"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry></feed>

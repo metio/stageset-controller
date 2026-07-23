@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Otlp on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/otlp/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/otlp/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/otlp/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/otlp/</id><entry><title type="html">Tracing</title><link href="https://stageset.projects.metio.wtf/observability/tracing/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><id>https://stageset.projects.metio.wtf/observability/tracing/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>OpenTelemetry tracing for the controller — the &ndash;tracing-endpoint, &ndash;tracing-insecure, and &ndash;tracing-sample-ratio flags, pointing at an OTLP collector, and the chart values that drive them.</blockquote><p>The controller integrates with OpenTelemetry and exports spans over OTLP gRPC.
+Tracing is <strong>off until you set an endpoint</strong> — with no endpoint the OTel SDK
+installs a no-op tracer provider, so the instrumentation costs a function
+indirection and nothing ships off the pod. The controller takes no opinion on
+whether you run a collector.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<p>Three flags govern tracing:</p>
+<ul>
+<li><code>--tracing-endpoint</code> — the OTLP gRPC collector as <code>host:port</code>, e.g.
+<code>otel-collector.observability.svc:4317</code>. Empty (the default) disables tracing
+entirely.</li>
+<li><code>--tracing-insecure</code> — skip TLS when dialing the collector. Use only for
+in-cluster collectors that do not terminate TLS themselves. Defaults to <code>false</code>,
+so the dial uses TLS against the system trust store.</li>
+<li><code>--tracing-sample-ratio</code> — TraceID-ratio sampling between <code>0.0</code> and <code>1.0</code>.
+Defaults to <code>1.0</code>, which samples every trace. Lower it on a busy controller to
+cap exporter and collector load.</li>
+</ul>
+<p>Every span carries a <code>service.name</code> of <code>stageset-controller</code> and a
+<code>service.version</code> resource attribute filled from the controller&rsquo;s build version,
+so the collector can group spans by release.</p>
+<blockquote>
+<p><strong>Status Conditions and Kubernetes Events stay the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. Traces are additive operator-side detail
+for understanding <em>where</em> a reconcile spent its time, not a replacement for the
+condition that tells you <em>whether</em> a StageSet is Ready.</p>
+</blockquote>
+<h3 id="the-span-tree">The span tree</h3>
+<p>A single reconcile produces one trace rooted at <strong><code>StageSet.Reconcile</code></strong>, with a
+child span per phase nested underneath. The root carries <code>stageset.namespace</code>,
+<code>stageset.name</code>, and <code>stageset.generation</code> attributes; the per-stage spans carry
+a <code>stage</code> attribute naming the stage. A failure on any phase records the error on
+its span and marks the span&rsquo;s status as an error before it ends, so a failed
+reconcile shows you the exact phase that broke.</p>
+<ul>
+<li><strong><code>StageSet.Reconcile</code></strong> — the root span, open for the whole reconcile.</li>
+<li><strong><code>stageset.gateWindows</code></strong> — evaluating update windows to decide whether the
+rollout may proceed now.</li>
+<li><strong><code>stageset.planMigrations</code></strong> — planning version migrations across stages.</li>
+<li><strong><code>stageset.buildDecryptor</code></strong> — constructing the SOPS decryptor for the run.</li>
+<li><strong><code>stage.fetch</code></strong> — fetching the artifact for a stage; also carries
+<code>stage.revision</code> and <code>stage.digest</code> attributes pinning the exact source the
+stage applied.</li>
+<li><strong><code>stage.decrypt</code></strong> — decrypting the fetched files for a stage.</li>
+<li><strong><code>stage.build</code></strong> — building the stage&rsquo;s objects from the decrypted files.</li>
+<li><strong><code>stage.apply</code></strong> — applying the built objects; also carries a
+<code>stage.objectCount</code> attribute.</li>
+<li><strong><code>stageset.rollback</code></strong> — attempting a rollback to the last-applied revisions
+after a failed run.</li>
+</ul>
+<p>The four <code>stage.*</code> spans repeat once per stage, so a multi-stage StageSet shows
+several <code>stage.fetch</code> → <code>stage.decrypt</code> → <code>stage.build</code> → <code>stage.apply</code> groups in
+order under the root.</p>
+<h3 id="pointing-at-a-collector-and-viewing-spans">Pointing at a collector and viewing spans</h3>
+<p>Set the endpoint to an OTLP gRPC receiver — an OpenTelemetry Collector, or any
+backend that speaks OTLP (Jaeger, Tempo, Grafana Cloud). A typical in-cluster
+collector exposes gRPC on port <code>4317</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">--tracing-endpoint<span class="o">=</span>otel-collector.observability.svc:4317
+</span></span><span class="line"><span class="cl">--tracing-insecure   <span class="c1"># in-cluster collector with no TLS</span>
+</span></span></code></pre></div><p>Once spans flow into the collector, open its UI (Jaeger, Grafana Tempo&rsquo;s trace
+explorer, etc.) and filter by <code>service.name = stageset-controller</code> to see the
+controller&rsquo;s traces. Spans propagate W3C trace context, so a collector that also
+receives spans from your apiserver or source-controller can stitch a reconcile to
+its upstream cause.</p>
+<p>When the controller runs under a NetworkPolicy, the OTLP collector egress must be
+allowed; see the <a href="/security/network-policy/">network policy page</a>
+ for the egress row.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>The tracing flags are driven by <code>controller.tracing</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tracing</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># OTLP gRPC collector host:port. Empty (default) disables tracing entirely.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l">otel-collector.observability.svc:4317</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Skip TLS for an in-cluster collector that doesn&#39;t terminate TLS itself.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">insecure</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sampleRatio</span><span class="p">:</span><span class="w"> </span><span class="m">1.0</span><span class="w">
+</span></span></span></code></pre></div><p>The chart threads these into the deployment only when <code>endpoint</code> is non-empty, so
+leaving the default empty endpoint renders no tracing flags at all and the
+controller stays in no-op mode. <code>sampleRatio</code> is schema-bounded to the <code>0.0..1.0</code>
+range. For the full flag list with defaults, see the
+<a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/tracing" term="tracing" label="tracing"/><category scheme="https://stageset.projects.metio.wtf/tags/opentelemetry" term="opentelemetry" label="opentelemetry"/><category scheme="https://stageset.projects.metio.wtf/tags/otlp" term="otlp" label="otlp"/></entry></feed>

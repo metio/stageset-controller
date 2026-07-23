@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Tanka on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/tanka/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/tanka/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/tanka/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/tanka/</id><entry><title type="html">StageSet vs Tanka and kubecfg</title><link href="https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs jsonnet-controller"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><id>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-17T22:52:43+02:00</updated><content type="html"><![CDATA[<blockquote>Reconciled, gated delivery versus CLI-driven Jsonnet apply.</blockquote><p><a href="https://tanka.dev/">Tanka</a>
+ and <a href="https://github.com/kubecfg/kubecfg">kubecfg</a>
+ are
+Jsonnet-based config tools: you express your resources in Jsonnet, the tool renders
+them, diffs against the cluster, and applies. They generate configuration and run a
+CLI-driven apply, but they are imperative tools you run, not controllers that
+reconcile.</p>
+<h2 id="what-tanka--kubecfg-give-you">What Tanka / kubecfg give you</h2>
+<ul>
+<li>Jsonnet-powered, DRY manifest generation (libraries, abstractions, environments).</li>
+<li>A <code>diff</code>/<code>apply</code> workflow with dependency-aware ordering of a single apply.</li>
+</ul>
+<h2 id="where-stageset-differs">Where StageSet differs</h2>
+<ul>
+<li><strong>Reconciliation, not invocation.</strong> Tanka/kubecfg apply when <em>you</em> run them.
+<code>StageSet</code> runs in-cluster and continuously reconciles, corrects drift, and
+prunes.</li>
+<li><strong>Staged, gated delivery.</strong> They apply a rendered set (in dependency order);
+they don&rsquo;t model multi-stage rollouts with readiness gates, update windows, or
+versioned migrations between stages.</li>
+<li><strong>GitOps identity and tenancy.</strong> <code>StageSet</code> applies under a per-tenant
+<code>ServiceAccount</code> inside the cluster; Tanka/kubecfg use your local credentials.</li>
+</ul>
+<h2 id="using-them-together">Using them together</h2>
+<p>The Jsonnet <em>generation</em> that Tanka and kubecfg do so well has a GitOps-native
+equivalent in two related projects:</p>
+<ul>
+<li><strong><a href="https://github.com/metio/jsonnet-oci-images">JOI</a>
+</strong> ships the Jsonnet
+libraries as OCI images.</li>
+<li><strong><a href="https://jaas.projects.metio.wtf/">JaaS</a>
+</strong> evaluates the Jsonnet in-cluster
+and publishes the rendered result as an <code>ExternalArtifact</code> — the rendering step,
+as a service.</li>
+<li><strong><code>StageSet</code></strong> delivers that artifact in ordered, gated stages — the apply step,
+as a controller.</li>
+</ul>
+<p>So where you might run <code>tk apply</code> or <code>kubecfg update</code> from a laptop or CI, this
+approach splits the same job into a producer (<code>JaaS</code>, importing <code>JOI</code> libraries) and
+a delivery controller (<code>StageSet</code>), both reconciled by Flux. You can also keep using
+Tanka/kubecfg to author and publish artifacts, and let <code>StageSet</code> handle delivery.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/tanka" term="tanka" label="tanka"/><category scheme="https://stageset.projects.metio.wtf/tags/jsonnet" term="jsonnet" label="jsonnet"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

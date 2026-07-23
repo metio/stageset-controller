@@ -1,0 +1,697 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">CLI on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/cli/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/cli/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/cli/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/cli/</id><entry><title type="html">stagesetctl apply</title><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><id>https://stageset.projects.metio.wtf/cli/apply/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-04T22:10:59+02:00</updated><content type="html"><![CDATA[<blockquote>Server-side-apply a StageSet&rsquo;s rendered manifests to the cluster, in stage order, under the controller&rsquo;s field manager.</blockquote><p><code>apply</code> renders a StageSet&rsquo;s stages with the controller&rsquo;s resolve→fetch→build path
+and <a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/">server-side-applies</a>
+
+the resulting objects in stage order, under the controller&rsquo;s field manager and owner
+labels — so a later reconcile sees no drift. Preview first with <a href="/cli/diff/"><code>diff</code></a>
+.</p>
+<p><code>apply</code> materializes the manifests only. It does <strong>not</strong> run stage
+<a href="/defining-a-release/actions/">actions</a>
+, <a href="/gating/versioned-migrations/">migrations</a>
+,
+<a href="/gating/update-windows/">update-window</a>
+ gating, ready checks (beyond <code>--wait</code>), or
+<a href="/defining-a-release/inventory/">pruning</a>
+ — those belong to the controller&rsquo;s reconcile loop. When
+a controller manages this StageSet it stays the source of truth and reconciles on its
+own schedule; reach for <code>apply</code> in cluster-free workflows (no controller installed)
+and break-glass.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl apply NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(all)</em></td>
+					<td>Apply only the named stage(s); repeatable.</td>
+			</tr>
+			<tr>
+					<td><code>--source-dir</code></td>
+					<td><em>(none)</em></td>
+					<td>Use a local artifact tree as <code>[STAGE=]PATH</code>; repeatable. Skips the cluster fetch.</td>
+			</tr>
+			<tr>
+					<td><code>--as-tenant</code></td>
+					<td><code>false</code></td>
+					<td>Apply each stage as its effective <code>serviceAccountName</code> — the identity the controller applies with (the stage&rsquo;s own, else <code>spec.serviceAccountName</code>). Reads (source resolve, <code>substituteFrom</code>) always use your credentials, mirroring the controller, which reads as itself (see <a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+).</td>
+			</tr>
+			<tr>
+					<td><code>--no-cross-namespace-refs</code></td>
+					<td><code>false</code></td>
+					<td>Reject a stage <code>sourceRef</code> that targets another namespace, matching a controller run with <code>--no-cross-namespace-refs</code>, so the preview fails the way the controller would.</td>
+			</tr>
+			<tr>
+					<td><code>--wait</code></td>
+					<td><code>false</code></td>
+					<td>Wait for each stage&rsquo;s objects to become ready before applying the next stage.</td>
+			</tr>
+			<tr>
+					<td><code>--timeout</code></td>
+					<td><code>5m</code></td>
+					<td>Per-stage readiness timeout with <code>--wait</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<p><code>apply</code> needs apply/patch RBAC for every object it writes. With <code>--as-tenant</code> that
+RBAC is the tenant ServiceAccount&rsquo;s, exactly as a reconcile applies — each stage
+under its own effective <code>serviceAccountName</code>.</p>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl diff payments      <span class="c1"># preview</span>
+</span></span><span class="line"><span class="cl">stagesetctl apply payments     <span class="c1"># then apply</span>
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stage &#34;infrastructure&#34;:
+</span></span><span class="line"><span class="cl">  created ConfigMap/payments/db-config
+</span></span><span class="line"><span class="cl">  configured Deployment/payments/postgres
+</span></span><span class="line"><span class="cl">stage &#34;application&#34;:
+</span></span><span class="line"><span class="cl">  unchanged ConfigMap/payments/web-config
+</span></span><span class="line"><span class="cl">  configured Deployment/payments/web
+</span></span><span class="line"><span class="cl">applied 4 object(s) across 2 stage(s)
+</span></span></code></pre></div><p>Because <code>apply</code> does not prune, removing an object from a stage&rsquo;s source does not
+delete it from the cluster — only the controller&rsquo;s <a href="/api/stageinventory/">inventory</a>
+
+prune does that. Every applied object carries the <code>stages.metio.wtf/stage</code> label, so
+without a controller you can find and remove a stage&rsquo;s objects yourself:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace payments get all,configmap,secret --selector stages.metio.wtf/stage<span class="o">=</span>application
+</span></span></code></pre></div>]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">stagesetctl baseline</title><link href="https://stageset.projects.metio.wtf/cli/baseline/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/plan/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl plan"/><link href="https://stageset.projects.metio.wtf/cli/reset-ledger/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reset-ledger"/><link href="https://stageset.projects.metio.wtf/cli/fleet/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl fleet"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><id>https://stageset.projects.metio.wtf/cli/baseline/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-17T12:11:47+02:00</updated><content type="html"><![CDATA[<blockquote>Assert a once-per-lifetime action already completed (adoption), or export a ledger&rsquo;s completions as a committable baseline.</blockquote><p>Adopts a system whose once-per-lifetime bootstrap already ran by asserting an
+action complete in the
+<a href="/defining-a-release/actions/#run-once-ever-scope-lifetime">StageLedger</a>
+&rsquo;s
+<code>spec.baseline</code> — the controller promotes it to a recorded completion without
+running the action. <code>--export</code> instead prints the ledger&rsquo;s current completions as
+a committable <code>spec.baseline</code> snippet, for disaster recovery or renaming a ledger.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl baseline NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(required)</em></td>
+					<td>Stage the action belongs to.</td>
+			</tr>
+			<tr>
+					<td><code>--action</code></td>
+					<td><em>(required)</em></td>
+					<td>Name of the <code>scope: Lifetime</code> action to baseline.</td>
+			</tr>
+			<tr>
+					<td><code>--export</code></td>
+					<td><code>false</code></td>
+					<td>Print the ledger&rsquo;s current completions as a <code>spec.baseline</code> snippet instead of adding one. Mutually exclusive with <code>--stage</code>/<code>--action</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<p>When the StageSet exists, the named action must be a <code>scope: Lifetime</code> action or
+the command fails (a typo guard). When it does not exist yet, the command
+proceeds — applying the ledger before the StageSet is the race-free adoption
+order — and the controller validates the entry once the StageSet is applied.</p>
+<h2 id="examples">Examples</h2>
+<p>Adopt a running system without re-running its bootstrap:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl baseline moodle --stage app --action install-database
+</span></span></code></pre></div><p>Export completions to commit for disaster recovery:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl baseline moodle --export &gt; moodle-ledger.yaml
+</span></span></code></pre></div>]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">stagesetctl build</title><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><link href="https://stageset.projects.metio.wtf/api/stageset/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet"/><link href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stages and sources"/><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl apply"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><id>https://stageset.projects.metio.wtf/cli/build/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-04T22:10:59+02:00</updated><content type="html"><![CDATA[<blockquote>Render a StageSet&rsquo;s manifests to stdout, exactly as the controller would.</blockquote><p>Runs the same resolve → fetch → build pipeline the controller uses and writes the
+result — a multi-document YAML stream — to stdout. This is what would be applied,
+before it is applied. To preview the change against live cluster state instead, use
+<a href="/cli/diff/"><code>diff</code></a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl build NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(all)</em></td>
+					<td>Render only the named stage(s); repeatable.</td>
+			</tr>
+			<tr>
+					<td><code>--source-dir</code></td>
+					<td><em>(none)</em></td>
+					<td>Use a local artifact tree as <code>[STAGE=]PATH</code> instead of fetching from the cluster; repeatable.</td>
+			</tr>
+			<tr>
+					<td><code>--show-secrets</code></td>
+					<td><code>false</code></td>
+					<td>Reveal Secret values instead of masking them.</td>
+			</tr>
+			<tr>
+					<td><code>--as-tenant</code></td>
+					<td><code>false</code></td>
+					<td>Read the SOPS decryption key Secret as <code>spec.serviceAccountName</code>, the identity the controller uses for it. Rendering itself always uses your credentials — the controller resolves sources and <code>substituteFrom</code> as itself (see <a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+).</td>
+			</tr>
+			<tr>
+					<td><code>--no-cross-namespace-refs</code></td>
+					<td><code>false</code></td>
+					<td>Reject a stage <code>sourceRef</code> that targets another namespace, matching a controller run with <code>--no-cross-namespace-refs</code>, so the preview fails the way the controller would.</td>
+			</tr>
+	</tbody>
+</table>
+<p>Secret values are masked by default, so the output is safe to paste into a review.
+<code>build</code> writes YAML unconditionally — there is no output-format flag.</p>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl build payments --stage application
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">6</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">selector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span>{<span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">web}</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">template</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span>{<span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">web}</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">registry.internal/web:2.1.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Secret</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-config</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">payments</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Opaque</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">data</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">token</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;***&#39;</span><span class="w">          </span><span class="c"># masked; pass --show-secrets to reveal</span><span class="w">
+</span></span></span></code></pre></div><p><code>--source-dir</code> makes <code>build</code> work offline — point it at the directory an artifact
+would have unpacked to and it skips the cluster fetch, for authoring and CI. The
+value is <code>[STAGE=]PATH</code>: prefix a stage name to target one stage, or give a bare
+path to feed every stage that has no entry of its own. Repeat the flag to map
+each stage to its own tree:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># one stage from a local tree</span>
+</span></span><span class="line"><span class="cl">stagesetctl build payments --stage application --source-dir <span class="nv">application</span><span class="o">=</span>./out
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># every stage from one tree (bare path), overriding just infrastructure</span>
+</span></span><span class="line"><span class="cl">stagesetctl build payments <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --source-dir ./checkout <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --source-dir <span class="nv">infrastructure</span><span class="o">=</span>./infra-checkout
+</span></span></code></pre></div>]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry><entry><title type="html">stagesetctl diff</title><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl apply"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><id>https://stageset.projects.metio.wtf/cli/diff/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-18T10:06:13+02:00</updated><content type="html"><![CDATA[<blockquote>Preview what a StageSet would change in the cluster — usable as a CI gate.</blockquote><p>By default <code>diff</code> performs a
+<a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/">server-side</a>
+
+dry-run apply and exits <code>1</code> when there are changes, so it works as a CI gate. It
+shows, per object, what a reconcile would create, configure, or delete, plus the
+<a href="/defining-a-release/actions/">actions</a>
+ a rollout would run. To see the full rendered manifests
+without comparing against the cluster, use <a href="/cli/build/"><code>build</code></a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl diff NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(all)</em></td>
+					<td>Diff only the named stage(s); repeatable.</td>
+			</tr>
+			<tr>
+					<td><code>--source-dir</code></td>
+					<td><em>(none)</em></td>
+					<td>Use a local artifact tree as <code>[STAGE=]PATH</code>; repeatable. Skips the cluster fetch.</td>
+			</tr>
+			<tr>
+					<td><code>--server-side</code></td>
+					<td><code>true</code></td>
+					<td>Server-side dry-run apply diff (needs update/patch RBAC). <code>false</code> renders client-side against live objects.</td>
+			</tr>
+			<tr>
+					<td><code>--as-tenant</code></td>
+					<td><code>false</code></td>
+					<td>Server-side dry-run each stage as its effective <code>serviceAccountName</code> — the identity the controller <em>applies</em> with (the stage&rsquo;s own, else <code>spec.serviceAccountName</code>). Reads (source resolve, <code>substituteFrom</code>, inventory) always use your credentials, mirroring the controller, which reads as itself (see <a href="/security/multi-cluster/">multi-cluster and tenancy</a>
+).</td>
+			</tr>
+			<tr>
+					<td><code>--no-cross-namespace-refs</code></td>
+					<td><code>false</code></td>
+					<td>Reject a stage <code>sourceRef</code> that targets another namespace, matching a controller run with <code>--no-cross-namespace-refs</code>, so the preview fails the way the controller would.</td>
+			</tr>
+			<tr>
+					<td><code>--show-secrets</code></td>
+					<td><code>false</code></td>
+					<td>Reveal Secret values instead of masking.</td>
+			</tr>
+			<tr>
+					<td><code>--show-unchanged</code></td>
+					<td><code>false</code></td>
+					<td>Include objects with no change.</td>
+			</tr>
+			<tr>
+					<td><code>--prune</code></td>
+					<td><code>true</code></td>
+					<td>Show resources that would be deleted (fell out of inventory).</td>
+			</tr>
+			<tr>
+					<td><code>--color</code></td>
+					<td><code>auto</code></td>
+					<td>Colorize output: <code>auto</code>, <code>always</code>, or <code>never</code>.</td>
+			</tr>
+			<tr>
+					<td><code>--exit-code</code></td>
+					<td><code>true</code></td>
+					<td>Exit <code>1</code> when changes are found. <code>false</code> always exits <code>0</code> on a clean run.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl diff payments
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">--- live
+</span></span><span class="line"><span class="cl">+++ merged
+</span></span><span class="line"><span class="cl">@@ Deployment payments/web @@
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">-  replicas: 3
+</span></span><span class="line"><span class="cl">+  replicas: 6
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">- ConfigMap payments/old-feature-flags (pruned: fell out of inventory)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Actions to run:
+</span></span><span class="line"><span class="cl">  application:
+</span></span><span class="line"><span class="cl">    pre   db-migrate   job ledger-migrations
+</span></span><span class="line"><span class="cl">    post  smoke-test   http https://payments.internal/healthz
+</span></span></code></pre></div><p>Objects that left the stage&rsquo;s <a href="/api/stageinventory/">inventory</a>
+ show as deletions
+(<code>pruned: …</code>); pass <code>--prune=false</code> to hide them. The trailing <code>Actions to run</code>
+block lists the <a href="/defining-a-release/actions/">pre/post actions</a>
+ a real reconcile
+would run, honoring the
+<a href="/defining-a-release/actions/#scope-revision-version-or-lifetime">action scopes</a>
+:
+an action already satisfied for its scope — a <code>Revision</code> action recorded at this
+revision, a <code>Version</code> action held at a fixed version, a completed once-ever
+<code>Lifetime</code> action — is omitted, plus the stage&rsquo;s <code>onFailure</code> actions. <code>diff</code> never
+runs them, it only reports them. For the full behavioral preview — <em>why</em> each
+action runs, skips, or re-runs — see <a href="/cli/plan/"><code>plan</code></a>
+.</p>
+<p>A clean run prints nothing and exits <code>0</code>; pending changes exit <code>1</code>. To inspect
+without failing the shell:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl diff payments --color<span class="o">=</span>never --exit-code<span class="o">=</span><span class="nb">false</span>
+</span></span></code></pre></div><p>Use <code>--server-side=false</code> when you lack apply RBAC and only need a textual
+render-versus-live comparison.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/ci" term="ci" label="ci"/></entry><entry><title type="html">stagesetctl fleet</title><link href="https://stageset.projects.metio.wtf/cli/fleet/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/baseline/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl baseline"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/plan/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl plan"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><link href="https://stageset.projects.metio.wtf/cli/reset-ledger/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reset-ledger"/><id>https://stageset.projects.metio.wtf/cli/fleet/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-19T02:34:43+02:00</updated><content type="html"><![CDATA[<blockquote>Show a FleetRollout&rsquo;s wave-by-wave progress — which members are at the target, held, or regressed.</blockquote><p><code>stagesetctl fleet NAME</code> shows where a <a href="/gating/fleet-rollout/"><code>FleetRollout</code></a>
+ is,
+the way <a href="/cli/plan/"><code>plan</code></a>
+ shows a StageSet: its overall phase and target version,
+each wave&rsquo;s progress, and — per member — whether it has reached the version, is still
+held awaiting its wave, or has regressed. Read-only.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl fleet NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--output</code>, <code>-o</code></td>
+					<td><em>(human view)</em></td>
+					<td><code>yaml</code> or <code>json</code> to emit the FleetRollout object.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">$ stagesetctl fleet moodle-2-0
+</span></span><span class="line"><span class="cl">FleetRollout moodle-2-0  →  version 2.0.0
+</span></span><span class="line"><span class="cl">  phase: InProgress   wave: broad
+</span></span><span class="line"><span class="cl">  wave canary   2/2 at 2.0.0, 2 ready   settled, health: Passing
+</span></span><span class="line"><span class="cl">    ✓ moodle-acme/app             2.0.0  Ready
+</span></span><span class="line"><span class="cl">    ✓ moodle-beta/app             2.0.0  Ready
+</span></span><span class="line"><span class="cl">  wave broad    1/3 at 2.0.0, 3 ready
+</span></span><span class="line"><span class="cl">    ✓ moodle-x/app                2.0.0  Ready
+</span></span><span class="line"><span class="cl">    … moodle-y/app                1.0.0  held → awaiting 2.0.0
+</span></span><span class="line"><span class="cl">    … moodle-z/app                1.0.0  held → awaiting 2.0.0
+</span></span><span class="line"><span class="cl">  wave rest
+</span></span><span class="line"><span class="cl">    … moodle-old/app              1.0.0  held → awaiting 2.0.0
+</span></span></code></pre></div><p>The header shows the version being rolled out — the pinned <code>spec.targetVersion</code>, or
+the version members are advancing to when it is <a href="/gating/fleet-rollout/">derived</a>
+.</p>
+<p>Each member carries a mark: <strong>✓</strong> at the target version and Ready, <strong>⚠</strong> at the
+target but not Ready (regressed), <strong>…</strong> still on the old version and held awaiting its
+wave. When the rollout is halted, the halt reason and message print under the phase.</p>
+<p>Membership is resolved the same way the controller resolves it (<code>selector</code> bounded by
+<code>namespaceSelector</code>), so the view matches what the rollout acts on.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/fleet" term="fleet" label="fleet"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">stagesetctl get</title><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl apply"/><link href="https://stageset.projects.metio.wtf/cli/baseline/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl baseline"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><id>https://stageset.projects.metio.wtf/cli/get/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Print human-readable StageSet status, or list StageSets.</blockquote><p>With no <code>NAME</code>, lists StageSets in the current namespace. With a <code>NAME</code>, prints that
+StageSet&rsquo;s detail (Ready reason, per-stage phase, revisions, version) — a readable
+view of <a href="/api/stageset/#status"><code>StageSet.status</code></a>
+.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl get [NAME] [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>-A</code>, <code>--all-namespaces</code></td>
+					<td><code>false</code></td>
+					<td>List StageSets across all namespaces.</td>
+			</tr>
+			<tr>
+					<td><code>-o</code>, <code>--output</code></td>
+					<td><em>(table)</em></td>
+					<td>Output format: empty for the human table, or <code>yaml</code> / <code>json</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="listing">Listing</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl get -A
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAMESPACE   NAME       READY   REASON       STAGES   VERSION   PENDING
+</span></span><span class="line"><span class="cl">payments    payments   True    Succeeded    2/2      2.1.0     -
+</span></span><span class="line"><span class="cl">platform    platform   True    Succeeded    3/3      -         -
+</span></span><span class="line"><span class="cl">staging     web        False   StageFailed  1/2      -         -
+</span></span></code></pre></div><p><code>STAGES</code> is <code>ready/total</code>; <code>PENDING</code> shows <code>held until &lt;time&gt;</code> when an
+<a href="/gating/update-windows/">update window</a>
+ is holding a rollout. A <code>False</code> <code>READY</code>
+maps to a <a href="/runbooks/">runbook</a>
+ by its <code>REASON</code>.</p>
+<h2 id="detail">Detail</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl --namespace payments get payments
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Name:       payments
+</span></span><span class="line"><span class="cl">Namespace:  payments
+</span></span><span class="line"><span class="cl">Ready:      True (Succeeded)
+</span></span><span class="line"><span class="cl">Message:    All 2 stages applied
+</span></span><span class="line"><span class="cl">Version:    2.1.0
+</span></span><span class="line"><span class="cl">Last handled reconcile: 2026-06-15T09:21:04Z
+</span></span><span class="line"><span class="cl">Stages:
+</span></span><span class="line"><span class="cl">  NAME            PHASE   REVISION        ENTRIES
+</span></span><span class="line"><span class="cl">  infrastructure  Ready   sha256:9f3c1a   12
+</span></span><span class="line"><span class="cl">  application     Ready   sha256:1a2b3c   8
+</span></span></code></pre></div><p>Conditional lines fill in when the StageSet is in that state: <code>Suspended: true</code>
+when <a href="/api/stageset/#scheduling"><code>spec.suspend</code></a>
+ is set, <code>Pending migrations:</code>
+when a <a href="/gating/versioned-migrations/">version boundary</a>
+ is queued, and a
+<code>Pending update:</code> block (next-window time plus the held revisions) when an
+<a href="/gating/update-windows/">update window</a>
+ is holding a rollout — for example:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Ready:      False (UpdateDeferred)
+</span></span><span class="line"><span class="cl">Pending update:
+</span></span><span class="line"><span class="cl">  Next window opens: 2026-06-16T08:00:00Z
+</span></span><span class="line"><span class="cl">  Held: payments/payments-app -&gt; sha256:cafe
+</span></span></code></pre></div><p>Add <code>-o yaml</code> (or <code>-o json</code>) to print the full object instead of the summary — the
+machine-readable form for scripting or piping into <code>jq</code>/<code>yq</code>.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">stagesetctl lint-migrations</title><link href="https://stageset.projects.metio.wtf/cli/lint-migrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotpinned/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotPinned"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationsourcenotverified/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationSourceNotVerified"/><link href="https://stageset.projects.metio.wtf/gating/versioned-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Versioned migrations"/><id>https://stageset.projects.metio.wtf/cli/lint-migrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Validate a migration ladder file or directory before publishing it to a source.</blockquote><p>Validate a <a href="/gating/versioned-migrations/">migration ladder</a>
+ — a single file, or a
+directory of <code>.yaml</code>/<code>.yml</code>/<code>.json</code> files — before publishing it to a source the
+controller will fetch. It runs the <strong>exact checks the controller runs</strong> at
+admission and at sourced-artifact fetch time, so a ladder that lints clean here
+won&rsquo;t fail closed later in the cluster.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl lint-migrations PATH
+</span></span></code></pre></div><p>It checks:</p>
+<ul>
+<li>strict parsing — a misspelled field (<code>acions:</code> for <code>actions:</code>) is rejected, not
+silently dropped;</li>
+<li>each migration has a name, a <code>to</code> that parses as a concrete semver, and an
+optional <code>from</code> that parses as a semver constraint;</li>
+<li>each action sets exactly one verb, with a unique, non-empty name;</li>
+<li>migration names are unique across the ladder.</li>
+</ul>
+<p>On success it prints the parsed ladder — each migration&rsquo;s boundary, anchor stage,
+and action verbs — so you can eyeball what will run:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">✓ 1 migration(s) valid
+</span></span><span class="line"><span class="cl">  drop-legacy  1.x → 2.0.0  before db-pre  delete
+</span></span></code></pre></div><h2 id="simulating-a-transition">Simulating a transition</h2>
+<p>The <code>from</code>/<code>to</code> selection math (<code>current &lt; to &lt;= desired</code> and the <code>from</code>
+constraint matching <code>current</code>) is otherwise invisible until a reconcile runs.
+Pass <code>--from</code> and <code>--to</code> to simulate a transition and see, using the controller&rsquo;s
+own selection logic, which migrations fire and why the rest are excluded:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">$ stagesetctl lint-migrations migrations/ --from 1.2.0 --to 2.0.0
+</span></span><span class="line"><span class="cl">✓ 3 migration(s) valid
+</span></span><span class="line"><span class="cl">  …
+</span></span><span class="line"><span class="cl">transition 1.2.0 → 2.0.0:
+</span></span><span class="line"><span class="cl">  drop-legacy     FIRES     delete
+</span></span><span class="line"><span class="cl">  add-2-1         excluded  to 2.1.0 is not in the crossed range (1.2.0, 2.0.0]
+</span></span><span class="line"><span class="cl">  backfill        excluded  from &#34;&gt;=1.5.0&#34; does not match current 1.2.0
+</span></span></code></pre></div><p>This is the quickest way to catch a migration that silently won&rsquo;t fire — for
+example a <code>from</code> constraint that excludes the version you&rsquo;re upgrading from.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Code</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>0</code></td>
+					<td>the ladder is valid</td>
+			</tr>
+			<tr>
+					<td><code>1</code></td>
+					<td>a validation problem was found (printed to stdout)</td>
+			</tr>
+			<tr>
+					<td><code>3</code></td>
+					<td>the path could not be read</td>
+			</tr>
+	</tbody>
+</table>
+<p>Wire it into CI on the repository that holds the ladder, before the artifact is
+published, so authoring problems surface in review rather than as a
+<code>MigrationArtifactInvalid</code> status across every consuming StageSet. This command
+needs no cluster connection.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry><entry><title type="html">stagesetctl plan</title><link href="https://stageset.projects.metio.wtf/cli/plan/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/baseline/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl baseline"/><link href="https://stageset.projects.metio.wtf/cli/reset-ledger/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reset-ledger"/><link href="https://stageset.projects.metio.wtf/cli/fleet/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl fleet"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><id>https://stageset.projects.metio.wtf/cli/plan/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-18T17:20:20+02:00</updated><content type="html"><![CDATA[<blockquote>Preview what the next reconcile will do — which actions run, skip, or re-run, and why.</blockquote><p>Where <a href="/cli/diff/"><code>diff</code></a>
+ shows which objects a reconcile would change, <code>plan</code>
+shows what it would <strong>do</strong>: per stage, which <code>pre</code>/<code>post</code>
+<a href="/defining-a-release/actions/">actions</a>
+ will run, skip, or re-run on the next
+reconcile, and why. It renders each stage, resolves the version, reads the
+<a href="/defining-a-release/actions/#scope-revision-version-or-lifetime">ledgers</a>
+, and
+applies the same scope rules the controller gates on — so the preview agrees with
+what the controller will do.</p>
+<p>It reads the cluster (ledgers, <code>completionAnchor</code> witnesses) but changes nothing,
+and it predicts what will be <strong>attempted</strong>, in what order, under which scope —
+never whether an action will succeed.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl plan [NAME...] [flags]
+</span></span></code></pre></div><p>Plan one StageSet by name, several by name, or a whole fleet with
+<code>--all-namespaces</code> / <code>--selector</code>; <code>-o json|yaml</code> emits the plan as data for a
+CI step or a PR comment.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(all)</em></td>
+					<td>Limit the plan to these stages (repeatable).</td>
+			</tr>
+			<tr>
+					<td><code>--source-dir</code></td>
+					<td><em>(none)</em></td>
+					<td><code>stage=DIR</code> to render a stage from a local directory instead of its source (repeatable).</td>
+			</tr>
+			<tr>
+					<td><code>--output</code>, <code>-o</code></td>
+					<td><code>text</code></td>
+					<td>Output format: <code>text</code>, <code>json</code>, or <code>yaml</code>.</td>
+			</tr>
+			<tr>
+					<td><code>--all-namespaces</code>, <code>-A</code></td>
+					<td><code>false</code></td>
+					<td>Plan every StageSet across all namespaces.</td>
+			</tr>
+			<tr>
+					<td><code>--selector</code>, <code>-l</code></td>
+					<td><em>(none)</em></td>
+					<td>Plan StageSets matching a label selector.</td>
+			</tr>
+	</tbody>
+</table>
+<p>Name arguments select those StageSets by name; with no name, <code>--all-namespaces</code>
+and <code>--selector</code> choose the set to plan (a bare <code>plan</code> plans every StageSet in the
+namespace). Combining a name with either flag is a usage error.</p>
+<p><code>plan</code> follows the <a href="/cli/diff/"><code>diff</code></a>
+ exit-code convention, so it works as a
+merge gate: <strong>0</strong> when the reconcile would run nothing, <strong>1</strong> when at least one
+action would run, <strong>2</strong> for a usage error, <strong>3</strong> for a runtime failure.</p>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">$ stagesetctl plan moodle -n moodle-acme
+</span></span><span class="line"><span class="cl">StageSet moodle-acme/moodle  (version 1.0.0 → 1.1.0)
+</span></span><span class="line"><span class="cl">  stage app  (revision sha256:abc123…)
+</span></span><span class="line"><span class="cl">    pre  maintenance-on     WILL RUN (scope: Version — new version episode 1.0.0 → 1.1.0)
+</span></span><span class="line"><span class="cl">    pre  db-upgrade         WILL RUN (scope: Version — new version episode 1.0.0 → 1.1.0)
+</span></span><span class="line"><span class="cl">    post install-database   SKIP     (scope: Lifetime — completed once, ever)
+</span></span><span class="line"><span class="cl">  migrations:
+</span></span><span class="line"><span class="cl">    schema-1-1               1.0.x → 1.1.0  before app  [job]
+</span></span><span class="line"><span class="cl">  gates:
+</span></span><span class="line"><span class="cl">    update window  HOLD  (closed; opens 2026-06-16T02:00:00Z) [live: now]
+</span></span><span class="line"><span class="cl">  prunes:
+</span></span><span class="line"><span class="cl">    ⚠ PersistentVolumeClaim/moodle-cache  (stage app) — deleting this destroys its data
+</span></span><span class="line"><span class="cl">  note: scope: Lifetime results reflect the current cluster (completionAnchor witnesses are read live).
+</span></span></code></pre></div><p>The <code>migrations</code> block lists the version-boundary migrations the controller has
+queued; the <code>gates</code> block lists what would hold the rollout — a closed update
+window (recomputed now, a pure function of the schedule and the clock), an
+<a href="/gating/error-budget/">error-budget</a>
+ freeze, or a stage
+<a href="/gating/stage-promotion/">awaiting promotion</a>
+ — each tagged <code>[live: now]</code> or
+<code>[live: status]</code> to say whether it was recomputed or read from status. The
+<code>prunes</code> block lists objects a stage would delete — in its
+<a href="/api/stageinventory/">inventory</a>
+ but no longer in its render — and flags a
+state-bearing one (a PVC, a StatefulSet) with <code>⚠</code>, so a prune that would destroy
+data is a red line in the plan rather than an incident after the fact.</p>
+<h2 id="previewing-a-rollback">Previewing a rollback</h2>
+<p>When the desired version is below the deployed version, the plan is a rollback
+safety check: a <code>rollback</code> block replaces <code>migrations</code>, listing which
+<a href="/gating/versioned-migrations/#rolling-back">migration</a>
+ boundaries the downgrade
+would reverse and flagging any that cannot be reversed.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">$ stagesetctl plan moodle -n moodle-acme
+</span></span><span class="line"><span class="cl">StageSet moodle-acme/moodle  (version 1.2.0 → 1.0.0, downgrade)
+</span></span><span class="line"><span class="cl">  stage app  (revision sha256:abc123…)
+</span></span><span class="line"><span class="cl">  rollback:
+</span></span><span class="line"><span class="cl">    reverse  schema-1-1           (to 1.1.0)  [job]
+</span></span><span class="line"><span class="cl">    ⚠ irreversible  schema-1-2    (to 1.2.0) — no down actions; downgrade refused
+</span></span></code></pre></div><p>For an inline ladder the steps are computed the same way the controller selects
+them, so the preview is reproducible from the spec. An irreversible boundary — one
+that declares no <code>down</code> actions — is the red line: a downgrade that cannot be done
+safely is caught before merge, not after. A downgrade with <code>spec.version.allowDowngrade</code>
+unset is noted as not enabled.</p>
+<p>The version is resolved from the source the same way the controller resolves it:
+an inline <code>spec.version.value</code>, a field of a rendered object
+(<code>spec.version.fromObject</code>), or a version file in a stage&rsquo;s artifact
+(<code>spec.version.fromArtifact</code>) — each reproducible from the source, so
+version-scoped verdicts are exact.</p>
+<h2 id="planning-a-fleet">Planning a fleet</h2>
+<p>With <code>--all-namespaces</code> or <code>--selector</code>, <code>plan</code> covers many StageSets at once and
+<code>-o json</code> turns the result into data — one array element per StageSet, each with
+its stages, action verdicts, migrations, gates, and prunes — for a CI gate or a
+PR comment across the fleet:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl plan --all-namespaces -o json
+</span></span></code></pre></div><p>The exit code aggregates: <strong>3</strong> if any StageSet could not be planned, otherwise
+<strong>1</strong> if any would run something, <strong>0</strong> if none would. A StageSet that fails to
+plan — an unreadable decryption key, a source that will not render — reports its
+<code>error</code> and the rest are still planned, so one broken tenant never hides the fleet.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">stagesetctl reconcile</title><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/apply/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl apply"/><link href="https://stageset.projects.metio.wtf/cli/baseline/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl baseline"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/cli/diff/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl diff"/><id>https://stageset.projects.metio.wtf/cli/reconcile/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-04T20:43:14+02:00</updated><content type="html"><![CDATA[<blockquote>Force an out-of-band reconcile, optionally waiting for it to be handled.</blockquote><p>Stamps the <code>reconcile.fluxcd.io/requestedAt</code>
+<a href="/api/stageinventory/#well-known-labels-and-annotations">annotation</a>
+ to trigger a
+reconcile now, optionally waiting for the controller to report it handled.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl reconcile NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(all)</em></td>
+					<td>Force only this stage to re-run its actions (single-stage reconcile).</td>
+			</tr>
+			<tr>
+					<td><code>--with-source</code></td>
+					<td><code>false</code></td>
+					<td>Also re-request each stage source before reconciling. For an <code>ExternalArtifact</code> source this stamps the <em>producer</em> behind it (via the artifact&rsquo;s back-pointer); an artifact with no producer back-pointer is a no-op and warns.</td>
+			</tr>
+			<tr>
+					<td><code>--update-now</code></td>
+					<td><code>false</code></td>
+					<td>Apply a window-held rollout immediately, bypassing update windows.</td>
+			</tr>
+			<tr>
+					<td><code>--force</code></td>
+					<td><code>false</code></td>
+					<td>Proceed even when the StageSet is suspended.</td>
+			</tr>
+			<tr>
+					<td><code>--wait</code></td>
+					<td><code>false</code></td>
+					<td>Block until the controller reports the request handled.</td>
+			</tr>
+			<tr>
+					<td><code>--timeout</code></td>
+					<td><code>5m</code></td>
+					<td>How long to wait with <code>--wait</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl --namespace payments reconcile payments
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Reconcile requested for StageSet payments (token 2026-06-15T09:30:00Z)
+</span></span></code></pre></div><p>Force just one stage to re-run its actions:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile payments --stage application
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Reconcile requested for stage &#34;application&#34; of StageSet payments (token 2026-06-15T09:31:12Z)
+</span></span></code></pre></div><p>Re-pull sources, push a window-held rollout through, and wait for it:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reconcile payments --with-source --update-now --wait --timeout 10m
+</span></span></code></pre></div><p><code>--update-now</code> is the CLI equivalent of the <code>stages.metio.wtf/update-now</code>
+annotation — the supported escape hatch when an <a href="/gating/update-windows/">update
+window</a>
+ is holding a rollout you need to ship now.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry><entry><title type="html">stagesetctl reset-ledger</title><link href="https://stageset.projects.metio.wtf/cli/reset-ledger/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/cli/baseline/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl baseline"/><link href="https://stageset.projects.metio.wtf/cli/plan/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl plan"/><link href="https://stageset.projects.metio.wtf/cli/fleet/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl fleet"/><link href="https://stageset.projects.metio.wtf/cli/get/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl get"/><link href="https://stageset.projects.metio.wtf/cli/reconcile/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl reconcile"/><id>https://stageset.projects.metio.wtf/cli/reset-ledger/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-17T12:11:47+02:00</updated><content type="html"><![CDATA[<blockquote>Forget a StageLedger completion so its once-per-lifetime action runs again.</blockquote><p>Removes a recorded completion from a
+<a href="/defining-a-release/actions/#run-once-ever-scope-lifetime">StageLedger</a>
+ so its
+<code>scope: Lifetime</code> action is no longer suppressed and runs on the next reconcile.
+The matching <code>spec.baseline</code> assertion is removed first, so a <code>Baselined</code>
+completion is not immediately re-promoted.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stagesetctl reset-ledger NAME [flags]
+</span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--stage</code></td>
+					<td><em>(required unless <code>--all</code>)</em></td>
+					<td>Stage of the completion to forget.</td>
+			</tr>
+			<tr>
+					<td><code>--action</code></td>
+					<td><em>(required unless <code>--all</code>)</em></td>
+					<td>Action of the completion to forget.</td>
+			</tr>
+			<tr>
+					<td><code>--all</code></td>
+					<td><code>false</code></td>
+					<td>Forget every completion in the ledger. Mutually exclusive with <code>--stage</code>/<code>--action</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<p>This re-runs a once-ever bootstrap, so use it when the underlying state was
+actually reset, or to repurpose a leftover ledger&rsquo;s name after a delete and
+recreate signalled <code>LedgerAdopted</code>.</p>
+<h2 id="example">Example</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl reset-ledger moodle --stage app --action install-database
+</span></span></code></pre></div>]]></content><category scheme="https://stageset.projects.metio.wtf/tags/cli" term="cli" label="cli"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/></entry></feed>

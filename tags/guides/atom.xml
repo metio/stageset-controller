@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Guides on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/guides/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/guides/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/guides/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/guides/</id><entry><title type="html">Best practices</title><link href="https://stageset.projects.metio.wtf/guides/best-practices/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="related" type="text/html" title="StageFailed"/><link href="https://stageset.projects.metio.wtf/runbooks/actiondirty/?utm_source=atom_feed" rel="related" type="text/html" title="ActionDirty"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/?utm_source=atom_feed" rel="related" type="text/html" title="Conflict policies"/><id>https://stageset.projects.metio.wtf/guides/best-practices/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-17T13:50:56+02:00</updated><content type="html"><![CDATA[<blockquote>How to get the most out of StageSet — keep the render pure, model the release as gated stages, choose action scopes deliberately — and the anti-patterns that bite.</blockquote><p>StageSet works best when you lean into what it is: a delivery controller that
+keeps the <em>render</em> pure and owns <em>ordering, gating, and execution memory</em>. Almost
+every practice below — good or bad — follows from respecting or fighting that
+split. The one-line test for a decision is: <strong>does this belong in what should
+exist (the render) or in when and whether it runs (StageSet)?</strong></p>
+<p>For a single application, a small team, or a chart you distribute to others,
+Helm&rsquo;s simplicity and ecosystem may serve you better; see
+<a href="#when-helm-is-the-better-choice">when Helm is the better choice</a>
+. These practices
+assume the case StageSet is built for — a multi-component, multi-tenant, stateful,
+policy-gated release.</p>
+<h2 id="practices-that-make-stageset-shine">Practices that make StageSet shine</h2>
+<h3 id="keep-manifest-generation-a-pure-function">Keep manifest generation a pure function</h3>
+<p>Let your renderer — Jsonnet, Helm, Kustomize — answer only <em>what should exist</em>,
+and keep it free of lookups, side effects, or &ldquo;if already installed then…&rdquo; logic.
+Delivery order, health gating, and &ldquo;have I done this before?&rdquo; belong in the
+StageSet, where the controller can see and gate them. A template that reads
+cluster state or branches on it relocates execution memory into a place StageSet
+can neither observe nor sequence.</p>
+<h3 id="model-the-release-as-staged-gated-steps">Model the release as staged, gated steps</h3>
+<p>Split a release into ordered <a href="/defining-a-release/stages-and-sources/">stages</a>
+ —
+CRDs, then the operator that needs them, then the app — rather than one artifact
+whose internal ordering you have to reconstruct later. Hold each stage with a
+<a href="/defining-a-release/ready-checks/">ready check</a>
+ that proves it is genuinely
+<em>healthy</em> (kstatus, or a CEL expression on the object&rsquo;s status), not merely
+<em>applied</em>. &ldquo;Applied&rdquo; is not &ldquo;ready&rdquo;: a stage that reports done the moment its
+manifests land lets the next stage start against a dependency that isn&rsquo;t up yet.</p>
+<h3 id="choose-the-action-scope-that-matches-its-lifetime">Choose the action scope that matches its lifetime</h3>
+<p>An action&rsquo;s <a href="/defining-a-release/actions/#scope-revision-version-or-lifetime"><code>scope</code></a>
+
+declares how often it should run. Pick the <em>lightest</em> one that fits:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># on a stage of a versioned StageSet (spec.version is set)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">actions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pre</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">render-check        </span><span class="w"> </span><span class="c"># idempotent and cheap — safe to re-run</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l">Revision</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">job</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-check } }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">db-upgrade          </span><span class="w"> </span><span class="c"># upgrade choreography — once per version</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l">Version</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">job</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-migrate } }</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">post</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">provision-object-store </span><span class="w"> </span><span class="c"># once ever; external effect, so no anchor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l">Lifetime</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">job</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-provision-store } }</span><span class="w">
+</span></span></span></code></pre></div><p>An action whose effect lives <em>in</em> the cluster — a database on a bundled PVC —
+takes a <a href="#anchor-a-once-ever-action-to-the-state-it-creates"><code>completionAnchor</code></a>
+
+instead, covered next.</p>
+<ul>
+<li><strong><code>Revision</code></strong> (the default) for idempotent, per-config work — a render check, a
+cache warm. It re-runs on any new revision, which is fine when the action is cheap
+and safe.</li>
+<li><strong><code>Version</code></strong> for upgrade choreography — a schema migration, a maintenance-mode
+toggle. Keyed to the resolved <code>spec.version</code>, so a config-only change at a fixed
+version stops re-firing the whole ladder. (<code>Version</code> requires <code>spec.version</code>.)</li>
+<li><strong><code>Lifetime</code></strong> only for genuinely once-ever bootstraps — an install, a seed. It
+is the heaviest tool: its completion lives in a durable
+<a href="/defining-a-release/actions/#run-once-ever-scope-lifetime"><code>StageLedger</code></a>
+ that
+survives a delete-and-recreate. Most &ldquo;run once&rdquo; needs are really <code>Version</code> or a
+<a href="/gating/versioned-migrations/">versioned migration</a>
+; reach for <code>Lifetime</code> last.</li>
+</ul>
+<h3 id="anchor-a-once-ever-action-to-the-state-it-creates">Anchor a once-ever action to the state it creates</h3>
+<p>When a <code>Lifetime</code> action&rsquo;s effect lives in an object the stage manages — a
+database PVC, a <code>Database</code> CR — name it as a
+<a href="/defining-a-release/actions/#tie-a-completion-to-a-witness-with-completionanchor"><code>completionAnchor</code></a>
+
+on a <strong><code>post</code></strong> action:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">post</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">install-database</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l">Lifetime</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">completionAnchor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">PersistentVolumeClaim</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-db</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">job</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app-install } }</span><span class="w">
+</span></span></span></code></pre></div><p>The completion is then valid only while that object exists with the UID recorded
+at completion, so pruning the PVC (or recreating it empty) re-runs the bootstrap —
+no coordination code. Leave an action <em>un</em>-anchored only when its effect is
+genuinely external and permanent: a schema in an external database, an object-store
+bucket.</p>
+<h3 id="make-actions-idempotent-anyway">Make actions idempotent anyway</h3>
+<p>The ledger is the primary guard against a double-run; write actions so a <em>retry</em>
+is still safe — <code>CREATE TABLE IF NOT EXISTS</code>, an installer that checks for its own
+prior state. A <code>Lifetime</code> action can still be retried on failure, or deliberately
+re-run with <a href="/cli/reset-ledger/"><code>reset-ledger</code></a>
+; the scope reduces re-runs, it
+does not make a destructive action safe on its own.</p>
+<h3 id="track-the-version-from-what-is-deployed">Track the version from what is deployed</h3>
+<p>Derive <code>spec.version</code> from the running object with <code>version.fromObject</code> rather than
+hand-maintaining a field, so <code>scope: Version</code> and
+<a href="/gating/versioned-migrations/">versioned migrations</a>
+ key off what is actually
+deployed instead of drifting from it.</p>
+<h3 id="gate-with-the-built-in-controls">Gate with the built-in controls</h3>
+<p>Reach for the release-level gates instead of pausing by hand or bolting on external
+orchestration: <a href="/gating/update-windows/">update windows</a>
+ for change freezes,
+<a href="/gating/error-budget/">error-budget freeze</a>
+ to hold rollouts while a service is
+out of SLO, and <a href="/gating/stage-promotion/">promotion gates</a>
+ (soak, manual approval,
+metric analysis) between stages.</p>
+<h3 id="keep-the-controller-least-privileged">Keep the controller least-privileged</h3>
+<p>Run every apply as a per-tenant <code>ServiceAccount</code>
+(<a href="/security/multi-cluster/">multi-tenancy</a>
+) so a StageSet can only touch what its
+tenant&rsquo;s RBAC allows, and keep the controller&rsquo;s own grants minimal — <code>cluster-admin</code>
+is for single-tenant installs only.</p>
+<h3 id="keep-the-ledger-honest-adopt-and-back-it-up">Keep the ledger honest: adopt, and back it up</h3>
+<p>To bring a running system under StageSet without re-running its bootstrap, assert
+the completion with <a href="/cli/baseline/"><code>stagesetctl baseline</code></a>
+ — a committable
+<code>spec.baseline</code> entry. And because controller-run completions live only in etcd,
+export them as part of your backup routine so a
+<a href="/running/disaster-recovery/">disaster-recovery</a>
+ rebuild from Git does not re-seed
+a database that survived the outage.</p>
+<h2 id="practices-that-hurt-users">Practices that hurt users</h2>
+<ul>
+<li><strong>Imperative logic in the renderer.</strong> A &ldquo;does the world look done?&rdquo; probe in a
+template lies to you: a restored backup or a half-crashed install reads as
+<em>not done</em> and diverges on re-run. &ldquo;Did I do X&rdquo; beats &ldquo;does X look done&rdquo;.</li>
+<li><strong>The wrong scope.</strong> <code>Lifetime</code> on a per-upgrade action means it never re-runs at
+the next version; <code>Version</code> or <code>Lifetime</code> on a per-config check means it stops
+validating after the first run. A mismatched scope fails <em>silently</em> — the action
+runs the wrong number of times, with nothing to flag it.</li>
+<li><strong>Anchoring a routinely-recreated object.</strong> A <code>completionAnchor</code> on a Deployment
+or Pod flaps every rollout, re-running the bootstrap each time. Anchor only
+state-bearing objects (a PVC, a database CR).</li>
+<li><strong>Anchoring a stage-applied object on a <code>pre</code> action.</strong> Pre-actions run before the
+apply, so the anchor does not exist yet and the action fails at completion. Put it
+on a <code>post</code> action.</li>
+<li><strong>Deleting a StageSet to &ldquo;reset&rdquo; a system.</strong> Expecting a clean reinstall (the Helm
+reflex) backfires: the ledger is retained, the <code>Lifetime</code> bootstrap is skipped,
+and the app comes up against stale or empty state. Watch for the <code>LedgerAdopted</code>
+event, and use <a href="/cli/reset-ledger/"><code>reset-ledger</code></a>
+ when you <em>mean</em> to forget.</li>
+<li><strong><code>prune: false</code> as a habit.</strong> Disabling pruning to &ldquo;protect&rdquo; objects leaves
+silent orphans and breaks the <a href="/defining-a-release/inventory/">inventory</a>
+ diff.
+Use it only for the deliberate orphan-on-purpose case, knowing the trade-off.</li>
+<li><strong>Cramming a release into one stage.</strong> A single stage with a wall of manifests is
+back to hook-style opacity — you lose the ordering and gating that are the reason
+to use StageSet at all.</li>
+<li><strong>A broad controller ClusterRole in multi-tenant clusters.</strong> Granting the
+controller <code>cluster-admin</code> defeats the per-tenant <code>ServiceAccount</code> isolation; let
+each tenant&rsquo;s RBAC bound what its StageSets can touch.</li>
+<li><strong>Skipping the ledger backup.</strong> Not committing <code>spec.baseline</code> and not exporting
+completions turns a Git-based disaster recovery into a bootstrap re-run against
+live state.</li>
+</ul>
+<h2 id="when-helm-is-the-better-choice">When Helm is the better choice</h2>
+<p>None of this makes StageSet the right tool everywhere. For a single application, a
+small team, or a chart you package and distribute to others, Helm&rsquo;s ubiquity,
+ecosystem, and operational minimalism win — and the two
+<a href="/comparisons/helm/">compose</a>
+: render a chart to manifests and deliver it with
+StageSet when a release needs ordered, gated stages and a durable action lifecycle.
+Reach for StageSet when the release is multi-component, the fleet is multi-tenant,
+the workloads are stateful, and rollout policy is a requirement — the case its
+complexity pays for.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/guides" term="guides" label="guides"/><category scheme="https://stageset.projects.metio.wtf/tags/best-practices" term="best-practices" label="best-practices"/><category scheme="https://stageset.projects.metio.wtf/tags/actions" term="actions" label="actions"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">Guides</title><link href="https://stageset.projects.metio.wtf/guides/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/guides/best-practices/?utm_source=atom_feed" rel="related" type="text/html" title="Best practices"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="related" type="text/html" title="Parameterizing a rollout"/><link href="https://stageset.projects.metio.wtf/guides/progressive-delivery/?utm_source=atom_feed" rel="related" type="text/html" title="Progressive delivery"/><id>https://stageset.projects.metio.wtf/guides/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-17T13:50:56+02:00</updated><content type="html"><![CDATA[<blockquote>End-to-end walkthroughs that build on the basics — parameterizing rollouts, progressive delivery, and generating migrations with Jsonnet.</blockquote><p>Task-focused walkthroughs that go deeper than <a href="/get-started/">Get started</a>
+. Each
+follows a whole job from start to finish; for a single feature in isolation, see
+the feature pages under <a href="/defining-a-release/">Defining a release</a>
+ and
+<a href="/gating/">Gating &amp; rollout safety</a>
+.</p>
+<ul>
+<li><strong><a href="/guides/parameters/">Parameterizing a rollout</a>
+</strong> — render-time and
+delivery-time parameters.</li>
+<li><strong><a href="/guides/progressive-delivery/">Progressive delivery</a>
+</strong> — hold a promotion
+behind Flagger or an Argo Rollouts metric gate.</li>
+<li><strong><a href="/guides/jsonnet-migrations/">Generating migrations with Jsonnet</a>
+</strong> — build a
+shared migration ladder.</li>
+<li><strong><a href="/guides/best-practices/">Best practices</a>
+</strong> — get the most out of StageSet, and
+the anti-patterns that bite.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/guides" term="guides" label="guides"/><category scheme="https://stageset.projects.metio.wtf/tags/tutorials" term="tutorials" label="tutorials"/><category scheme="https://stageset.projects.metio.wtf/tags/walkthrough" term="walkthrough" label="walkthrough"/></entry></feed>

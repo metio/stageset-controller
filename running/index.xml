@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Run in production on StageSet Controller</title><link>https://stageset.projects.metio.wtf/running/</link><description>Recent content in Run in production on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/running/index.xml" rel="self" type="application/rss+xml"/><item><title>Backup and disaster recovery</title><link>https://stageset.projects.metio.wtf/running/disaster-recovery/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/disaster-recovery/</guid><description>&lt;p&gt;Back up the small set of state the controller cannot reconstruct, then rebuild a
+lost cluster by restoring that state in the right order. Most of what a &lt;code&gt;StageSet&lt;/code&gt;
+manages is recomputed on the next reconcile from your Git repository and your Flux
+sources, so it needs no backup of its own. Three things are the exception, and
+losing any of them causes silent data damage rather than a clean failure.&lt;/p&gt;</description></item><item><title>Operations</title><link>https://stageset.projects.metio.wtf/running/operations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/operations/</guid><description>&lt;h2 id="metrics"&gt;Metrics&lt;/h2&gt;
+&lt;p&gt;The controller registers custom metrics on the controller-runtime registry, served
+on &lt;code&gt;--metrics-bind-address&lt;/code&gt; (&lt;code&gt;:8080&lt;/code&gt;) alongside the standard
+&lt;code&gt;controller_runtime_*&lt;/code&gt; and &lt;code&gt;workqueue_*&lt;/code&gt; series. Enable scraping with the chart&amp;rsquo;s
+opt-in &lt;code&gt;ServiceMonitor&lt;/code&gt; (&lt;code&gt;metrics.serviceMonitor.enabled&lt;/code&gt;):&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c"&gt;# values.yaml&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metrics&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;serviceMonitor&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;enabled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# needs the Prometheus operator CRDs&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Metric&lt;/th&gt;
+					&lt;th&gt;Type&lt;/th&gt;
+					&lt;th&gt;Labels&lt;/th&gt;
+					&lt;th&gt;Meaning&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_reconcile_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;, &lt;code&gt;reason&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reconciles, by terminal Ready reason.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_stage_applied_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;, &lt;code&gt;stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Stages applied and verified.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_drift_corrected_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;, &lt;code&gt;stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Out-of-band drift re-asserted on a steady-state reconcile.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_update_deferred_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Rollouts held by a closed update window.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_webhook_cert_renewal_failures_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(none)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Failed self-signed webhook cert renewals.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_teardown_force_drop_total&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;counter&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Finalizers force-dropped after &lt;code&gt;--max-teardown-wait&lt;/code&gt; of failing teardown; sustained non-zero values flag an unreachable target and orphaned objects. See &lt;a href="https://stageset.projects.metio.wtf/runbooks/teardown-forced/"&gt;TeardownForced&lt;/a&gt;
+.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;stageset_stage_ready&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;gauge&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;namespace&lt;/code&gt;, &lt;code&gt;stageset&lt;/code&gt;, &lt;code&gt;stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;1&lt;/code&gt; when a stage is Ready, else &lt;code&gt;0&lt;/code&gt; — for metric-based &lt;a href="https://stageset.projects.metio.wtf/guides/progressive-delivery/#argo-rollouts"&gt;progressive delivery&lt;/a&gt;
+.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="alerts"&gt;Alerts&lt;/h2&gt;
+&lt;p&gt;The chart ships an opt-in &lt;code&gt;PrometheusRule&lt;/code&gt; with a starter alert set, gated on
+&lt;code&gt;metrics.prometheusRule.enabled&lt;/code&gt; (requires the
+&lt;a href="https://prometheus-operator.dev/"&gt;Prometheus operator&lt;/a&gt;
+ CRDs). It covers the
+custom &lt;code&gt;stageset_*&lt;/code&gt; metrics plus controller-runtime signals:&lt;/p&gt;</description></item><item><title>Production</title><link>https://stageset.projects.metio.wtf/running/production/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/production/</guid><description>&lt;p&gt;The chart&amp;rsquo;s defaults bring up a hardened, lease-guarded controller, but a few
+decisions still belong to you before it manages production releases: whether
+rollback is enabled and where its store lives, how many replicas run, what the
+controller can reach, and how you observe and recover it. Work through these in
+order. Each step states what to set and why, and ends with the Helm values for
+that step. Every flag and its Helm value live in the &lt;a href="https://stageset.projects.metio.wtf/reference/configuration/"&gt;configuration
+reference&lt;/a&gt;
+.&lt;/p&gt;</description></item><item><title>Scale and capacity</title><link>https://stageset.projects.metio.wtf/running/scale-and-capacity/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/scale-and-capacity/</guid><description>&lt;p&gt;Size the controller for the number and size of the &lt;code&gt;StageSet&lt;/code&gt;s it manages, then
+tune its cadence and inventory knobs to fit. Start from the chart&amp;rsquo;s defaults,
+raise resources only where a driver below applies to your release sizes, and watch
+the saturation signals so you scale on evidence rather than guesswork.&lt;/p&gt;
+&lt;h2 id="sizing-a-replica"&gt;Sizing a replica&lt;/h2&gt;
+&lt;p&gt;A reconcile fetches each stage&amp;rsquo;s artifact, decrypts and builds it, applies the
+rendered objects server-side, and polls readiness until the stage&amp;rsquo;s gates pass.
+CPU and memory scale with different parts of that pipeline.&lt;/p&gt;</description></item></channel></rss>

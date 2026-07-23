@@ -1,0 +1,378 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Configuration on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/configuration/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/configuration/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/configuration/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/configuration/</id><entry><title type="html">Configuration reference</title><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><link href="https://stageset.projects.metio.wtf/reference/upgrading/?utm_source=atom_feed" rel="related" type="text/html" title="Upgrading"/><link href="https://stageset.projects.metio.wtf/reference/verifying-releases/?utm_source=atom_feed" rel="related" type="text/html" title="Verifying releases"/><id>https://stageset.projects.metio.wtf/reference/configuration/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Every stageset-controller command-line flag and its default.</blockquote><p>The controller is configured entirely through command-line flags, grouped below
+by subsystem. When deployed via the Helm chart you never pass these directly — the
+chart sets them from your values and its own defaults. For the values that drive
+each flag, see <a href="/reference/helm-values/">Helm chart values</a>
+. For the values
+worth tuning and the reasoning behind each, see
+<a href="/running/production/">Production</a>
+; for metrics and
+runbooks, <a href="/running/operations/">Operations</a>
+.</p>
+<p>The flag tables below are generated from the binary&rsquo;s own FlagSet, so they track
+the controller&rsquo;s runtime contract rather than a hand-maintained copy.</p>
+<h2 id="manager-and-leader-election">Manager and leader election</h2>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--health-probe-bind-address</code></td>
+      <td><code>:8081</code></td>
+      <td>The address the probe endpoint binds to.</td>
+    </tr>
+    <tr>
+      <td><code>--leader-elect</code></td>
+      <td><code>false</code></td>
+      <td>Enable leader election.</td>
+    </tr>
+  </tbody>
+</table>
+<p>The leader-election lease name is fixed at <code>stageset-controller.stages.metio.wtf</code>
+and is created in the namespace the controller pod runs in.</p>
+<h2 id="watch-scope">Watch scope</h2>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--watch-namespaces</code></td>
+      <td><em>(empty)</em></td>
+      <td>Comma-separated list of namespaces this controller watches. Empty (the default) means cluster-wide. When set, the manager&#39;s cache only observes StageSets and sources in these namespaces — the multi-tenant controller-instances pattern. Falls back to STAGESET_WATCH_NAMESPACES env when the flag is empty.</td>
+    </tr>
+  </tbody>
+</table>
+<p><strong>Environment variable:</strong> <code>STAGESET_WATCH_NAMESPACES</code> — comma-separated
+namespace list. When <code>--watch-namespaces</code> is non-empty the flag takes
+precedence. When restricted, the chart pivots RBAC to per-namespace
+RoleBindings instead of a cluster-wide ClusterRoleBinding.</p>
+<h2 id="reconciliation-defaults">Reconciliation defaults</h2>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--allowed-action-hosts</code></td>
+      <td><em>(empty)</em></td>
+      <td>Host glob allowed for http actions; repeatable. Loopback and link-local ranges are always denied unless explicitly listed.</td>
+    </tr>
+    <tr>
+      <td><code>--default-interval</code></td>
+      <td><code>10m0s</code></td>
+      <td>Reconcile cadence for StageSets that omit spec.interval.</td>
+    </tr>
+    <tr>
+      <td><code>--image-verification-insecure-registry</code></td>
+      <td><em>(empty)</em></td>
+      <td>Registry host[:port] whose images are pulled over plain HTTP during image verification (an on-prem/in-cluster registry without TLS); repeatable. Only affects verification bundle fetches, not the kubelet&#39;s image pulls.</td>
+    </tr>
+    <tr>
+      <td><code>--image-verification-trusted-root</code></td>
+      <td><em>(empty)</em></td>
+      <td>Path to an offline Sigstore trusted-root JSON for image verification (air-gapped clusters). Empty fetches the public Sigstore root over TUF on first use.</td>
+    </tr>
+    <tr>
+      <td><code>--inventory-shard-cap</code></td>
+      <td><code>5000</code></td>
+      <td>Maximum entries per StageInventory shard.</td>
+    </tr>
+    <tr>
+      <td><code>--max-teardown-wait</code></td>
+      <td><code>1h0m0s</code></td>
+      <td>How long a deleting StageSet&#39;s finalizer holds while reverse-order teardown keeps failing before it is force-dropped. Past this bound the controller emits a Warning TeardownForced event and removes the finalizer anyway, so a permanently-unreachable target cannot wedge the StageSet in Terminating — at the cost of orphaning objects the failing stage could not delete.</td>
+    </tr>
+    <tr>
+      <td><code>--no-cross-namespace-refs</code></td>
+      <td><code>false</code></td>
+      <td>Deny cross-namespace sourceRef and dependsOn references.</td>
+    </tr>
+    <tr>
+      <td><code>--object-level-kms</code></td>
+      <td><code>false</code></td>
+      <td>Decrypt SOPS cloud KMS keys with each StageSet&#39;s serviceAccountName federated to a cloud identity, instead of the controller&#39;s ambient credentials. The tenant ServiceAccount must be federated (IRSA / Workload Identity) to a cloud identity granted KMS decrypt. Off by default (ambient credentials).</td>
+    </tr>
+    <tr>
+      <td><code>--require-image-verification</code></td>
+      <td><code>false</code></td>
+      <td>Deny-by-default for the image-verification gate: hold a stage whose rendered container images match no ImageVerificationPolicy, instead of applying them ungoverned. When off, only images a policy governs are verified (an ungoverned image applies unchanged). Off by default; strongly recommended in production once policies cover every registry you deploy from.</td>
+    </tr>
+    <tr>
+      <td><code>--require-pinned-migration-sources</code></td>
+      <td><code>false</code></td>
+      <td>Require a spec.migrationsSourceRef source to be pinned to an immutable revision (OCIRepository spec.ref.digest or GitRepository spec.ref.commit) before its destructive migration ladder runs, so a tag/branch overwrite can&#39;t auto-roll new destructive content. When off, a mutable-pinned source still runs but emits a Warning event. Off by default; recommended in production.</td>
+    </tr>
+    <tr>
+      <td><code>--require-verified-migration-sources</code></td>
+      <td><code>false</code></td>
+      <td>Require a spec.migrationsSourceRef source to be signature-verified (status.conditions[SourceVerified]=True from the source&#39;s spec.verify cosign/notation config) before its destructive migration ladder runs. A source whose verification FAILED is always refused; this flag additionally refuses sources that configure no verification at all. Off by default; strongly recommended in production.</td>
+    </tr>
+  </tbody>
+</table>
+<h2 id="rollback-store--filesystem">Rollback store — filesystem</h2>
+<p>The rollback store preserves a copy of each stage&rsquo;s last-applied artifact so
+that a rollback can re-apply the previous revision without re-fetching from the
+producer. The filesystem backend is appropriate for single-replica deployments or
+multi-replica deployments backed by an <code>RWX</code> volume.</p>
+<p><code>--rollback-store-path</code> and <code>--rollback-store-s3-endpoint</code> are mutually
+exclusive. Both empty disables the store; rollback falls back to re-fetching the
+producer artifact.</p>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--rollback-store-path</code></td>
+      <td><em>(empty)</em></td>
+      <td>Filesystem directory (e.g. an RWX PVC mount) for the optional rollback store. Use an RWX volume for HA replicas. Mutually exclusive with the S3 store. The store holds rendered output that can include decrypted Secret data, and this backend adds no encryption — use an encrypted volume (or the S3 store with --rollback-store-s3-sse) when secrets are in play.</td>
+    </tr>
+  </tbody>
+</table>
+<p>The file store writes rendered output — including Secret data — in the clear.
+The volume must provide encryption at rest (encrypted StorageClass, LUKS, or
+cloud-disk encryption).</p>
+<h2 id="rollback-store--s3">Rollback store — S3</h2>
+<p>Active when <code>--rollback-store-s3-endpoint</code> and <code>--rollback-store-s3-bucket</code> are
+both non-empty.</p>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--rollback-store-s3-access-key</code></td>
+      <td><em>(empty)</em></td>
+      <td>Access key; empty engages minio-go&#39;s IAM/IRSA discovery chain.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-anonymous</code></td>
+      <td><code>false</code></td>
+      <td>Use anonymous (unsigned) requests for the rollback store.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-bucket</code></td>
+      <td><em>(empty)</em></td>
+      <td>Bucket for the rollback store.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-endpoint</code></td>
+      <td><em>(empty)</em></td>
+      <td>S3-compatible endpoint for the optional rollback store (host:port). Empty disables the store; rollback falls back to re-fetching the producer artifact.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-prefix</code></td>
+      <td><em>(empty)</em></td>
+      <td>Key prefix within the rollback-store bucket.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-region</code></td>
+      <td><em>(empty)</em></td>
+      <td>Region for the rollback-store bucket.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-secret-key</code></td>
+      <td><em>(empty)</em></td>
+      <td>Secret key for the rollback store.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-session-token</code></td>
+      <td><em>(empty)</em></td>
+      <td>Optional session token for the rollback store.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-sse</code></td>
+      <td><code>s3</code></td>
+      <td>Server-side encryption at rest for stored objects: none, s3 (SSE-S3), or kms (SSE-KMS). The store holds rendered Secret data, so encryption is on by default; set none only for a bucket whose backend cannot honor an SSE header.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-sse-kms-key</code></td>
+      <td><em>(empty)</em></td>
+      <td>KMS key ARN/ID for --rollback-store-s3-sse=kms; empty uses the bucket&#39;s default KMS key.</td>
+    </tr>
+    <tr>
+      <td><code>--rollback-store-s3-use-ssl</code></td>
+      <td><code>true</code></td>
+      <td>Use TLS for the rollback-store endpoint.</td>
+    </tr>
+  </tbody>
+</table>
+<h2 id="metrics-and-health">Metrics and health</h2>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--metrics-bind-address</code></td>
+      <td><code>:8080</code></td>
+      <td>The address the metric endpoint binds to.</td>
+    </tr>
+  </tbody>
+</table>
+<p>The metrics endpoint exposes standard <code>controller_runtime_*</code> and <code>workqueue_*</code>
+series alongside the custom <code>stageset_*</code> metrics documented in
+<a href="/running/operations/">Operations</a>
+.</p>
+<h2 id="tracing">Tracing</h2>
+<p>The controller exports OpenTelemetry traces over OTLP gRPC when
+<code>--tracing-endpoint</code> is set; it is off by default. See
+<a href="/observability/">Observability</a>
+ for the collector wiring.</p>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--tracing-endpoint</code></td>
+      <td><em>(empty)</em></td>
+      <td>OTLP gRPC collector host:port (e.g. otel-collector.observability.svc:4317). Empty disables tracing entirely.</td>
+    </tr>
+    <tr>
+      <td><code>--tracing-insecure</code></td>
+      <td><code>false</code></td>
+      <td>Skip TLS when dialing the OTLP collector. Use only for in-cluster collectors that don&#39;t terminate TLS themselves.</td>
+    </tr>
+    <tr>
+      <td><code>--tracing-sample-ratio</code></td>
+      <td><code>1</code></td>
+      <td>TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.</td>
+    </tr>
+  </tbody>
+</table>
+<h2 id="webhook-and-tls-provisioning">Webhook and TLS provisioning</h2>
+<p>The validating admission webhook for <code>StageSet</code> is enabled by default. Two TLS
+provisioning modes are supported: <code>cert-manager</code> (the chart renders a
+<code>Certificate</code> CR and mounts the issued cert from a Secret) and <code>self-signed</code>
+(the controller generates a CA and serving cert in-pod and patches the
+<code>ValidatingWebhookConfiguration</code> <code>caBundle</code>).</p>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--enable-webhook</code></td>
+      <td><code>true</code></td>
+      <td>Enable the validating admission webhook for StageSet.</td>
+    </tr>
+    <tr>
+      <td><code>--webhook-cert-dir</code></td>
+      <td><code>/tmp/k8s-webhook-server/serving-certs</code></td>
+      <td>Directory holding the webhook tls.crt and tls.key.</td>
+    </tr>
+    <tr>
+      <td><code>--webhook-cert-mode</code></td>
+      <td><code>cert-manager</code></td>
+      <td>How webhook TLS is provisioned: cert-manager (the chart renders a Certificate; cert mounted from a Secret), or self-signed (the controller generates a CA &#43; serving cert in-pod and patches the ValidatingWebhookConfiguration caBundle).</td>
+    </tr>
+    <tr>
+      <td><code>--webhook-cert-validity</code></td>
+      <td><code>8760h0m0s</code></td>
+      <td>Validity of the self-signed serving cert; the renewer rotates at validity/3. Operators wanting short-lived material should use cert-manager.</td>
+    </tr>
+    <tr>
+      <td><code>--webhook-port</code></td>
+      <td><code>9443</code></td>
+      <td>Port the validating webhook server binds to.</td>
+    </tr>
+    <tr>
+      <td><code>--webhook-service-name</code></td>
+      <td><code>stageset-controller-webhook</code></td>
+      <td>Service the webhook is reachable through; builds cert SANs for self-signed mode.</td>
+    </tr>
+    <tr>
+      <td><code>--webhook-service-namespace</code></td>
+      <td><em>(empty)</em></td>
+      <td>Namespace of the webhook Service; empty falls back to the in-cluster ServiceAccount namespace.</td>
+    </tr>
+    <tr>
+      <td><code>--webhook-validating-config-name</code></td>
+      <td><em>(empty)</em></td>
+      <td>Name of the ValidatingWebhookConfiguration whose caBundle to patch. Required for self-signed mode.</td>
+    </tr>
+  </tbody>
+</table>
+<h2 id="gate-endpoint">Gate endpoint</h2>
+<p>The gate endpoint exposes a read-only HTTP API for Flagger canary stage-gates.
+<code>GET /gate/{namespace}/{stageset}/{stage}</code> returns <code>200</code> when the named stage is
+ready to advance and <code>503</code> otherwise.</p>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--gate-bind-address</code></td>
+      <td><code>:8082</code></td>
+      <td>Address for the read-only Flagger stage-gate endpoint (GET /gate/{namespace}/{stageset}/{stage}). Empty disables it.</td>
+    </tr>
+  </tbody>
+</table>
+<h2 id="logging">Logging</h2>
+<p>The controller logs through <code>log/slog</code>. Set the verbosity with <code>--log-level</code>
+(<code>debug</code>, <code>info</code>, <code>warn</code>, or <code>error</code>, default <code>info</code>) and the encoding with
+<code>--log-format</code> (<code>json</code> or <code>text</code>, default <code>json</code>); controller-runtime&rsquo;s own
+logs flow through the same handler via a logr bridge. See
+<a href="/observability/logging/">Logging</a>
+ for reading and filtering the output.</p>
+<table>
+  <thead>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--log-format</code></td>
+      <td><code>json</code></td>
+      <td>Log output format: json or text.</td>
+    </tr>
+    <tr>
+      <td><code>--log-level</code></td>
+      <td><code>info</code></td>
+      <td>Log level: debug, info, warn, or error.</td>
+    </tr>
+  </tbody>
+</table>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/installation" term="installation" label="installation"/><category scheme="https://stageset.projects.metio.wtf/tags/configuration" term="configuration" label="configuration"/><category scheme="https://stageset.projects.metio.wtf/tags/reference" term="reference" label="reference"/></entry><entry><title type="html">Defining a release</title><link href="https://stageset.projects.metio.wtf/defining-a-release/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><link href="https://stageset.projects.metio.wtf/api/stageset/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet"/><link href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Stages and sources"/><link href="https://stageset.projects.metio.wtf/cli/build/?utm_source=atom_feed" rel="related" type="text/html" title="stagesetctl build"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><id>https://stageset.projects.metio.wtf/defining-a-release/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The core StageSet spec — ordered stages and their sources, typed actions, ready checks, conflict policies, and the inventory that tracks what was applied.</blockquote><p>These pages cover what goes in a StageSet&rsquo;s <code>spec</code>: the ordered stages, where
+each one reads from, and how each stage applies, verifies, and is cleaned up.
+Each page has a complete, copy-pasteable example; the
+<a href="/api/stageset/">API reference</a>
+ has the exhaustive field-by-field detail.</p>
+<ul>
+<li><strong><a href="/defining-a-release/stages-and-sources/">Stages and sources</a>
+</strong> — the ordered
+stages and the Flux source each one applies.</li>
+<li><strong><a href="/defining-a-release/actions/">Actions</a>
+</strong> — typed pre, post, and on-failure
+steps around a stage&rsquo;s apply.</li>
+<li><strong><a href="/defining-a-release/ready-checks/">Ready checks</a>
+</strong> — hold a stage until its
+objects report healthy.</li>
+<li><strong><a href="/defining-a-release/conflict-policies/">Conflict policies</a>
+</strong> — what to do
+when an apply hits an immutable-field conflict.</li>
+<li><strong><a href="/defining-a-release/inventory/">Inventory and pruning</a>
+</strong> — how the
+controller tracks and removes what each stage applied.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/configuration" term="configuration" label="configuration"/><category scheme="https://stageset.projects.metio.wtf/tags/sources" term="sources" label="sources"/></entry><entry><title type="html">Reference</title><link href="https://stageset.projects.metio.wtf/reference/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><id>https://stageset.projects.metio.wtf/reference/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Look up exact values — every controller flag and Helm chart value, how to verify a release&rsquo;s signatures, and upgrade notes.</blockquote><p>Look-up material for exact values and release mechanics, generated from the
+binary and chart so it tracks the current contract.</p>
+<ul>
+<li><strong><a href="/reference/configuration/">Configuration reference</a>
+</strong> — every controller flag
+with its default.</li>
+<li><strong><a href="/reference/helm-values/">Helm chart values</a>
+</strong> — every chart value with its
+default.</li>
+<li><strong><a href="/reference/verifying-releases/">Verifying releases</a>
+</strong> — check the signed
+image and binaries before you run them.</li>
+<li><strong><a href="/reference/upgrading/">Upgrading</a>
+</strong> — the actions required when moving
+between releases.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/reference" term="reference" label="reference"/><category scheme="https://stageset.projects.metio.wtf/tags/configuration" term="configuration" label="configuration"/><category scheme="https://stageset.projects.metio.wtf/tags/helm" term="helm" label="helm"/></entry></feed>

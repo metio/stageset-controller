@@ -1,0 +1,736 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Stages on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/stages/</link><description>Recent content in Stages on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/stages/index.xml" rel="self" type="application/rss+xml"/><item><title>Actions</title><link>https://stageset.projects.metio.wtf/defining-a-release/actions/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/actions/</guid><description>&lt;p&gt;Actions are typed steps the controller runs around a stage&amp;rsquo;s apply. They turn an
+ordered apply into an orchestrated rollout — run a migration before the app, gate
+the stage on an external check, clean up on failure.&lt;/p&gt;
+&lt;p&gt;A stage has three action hooks:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;pre&lt;/code&gt;&lt;/strong&gt; — run before the manifests are built and applied. A failure aborts the
+stage with nothing applied.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;post&lt;/code&gt;&lt;/strong&gt; — run after the apply is verified. The stage is &lt;code&gt;Ready&lt;/code&gt; only if these
+all succeed.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;onFailure&lt;/code&gt;&lt;/strong&gt; — best-effort steps run on any failure from the apply onward.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; fires at the &lt;em&gt;moment&lt;/em&gt; of failure, before any rollback. For
+cleanup that must run &lt;em&gt;after&lt;/em&gt; the previous manifests are restored, use the
+StageSet-level &lt;a href="#post-rollback-cleanup-onrollback"&gt;&lt;code&gt;onRollback&lt;/code&gt;&lt;/a&gt;
+ hook instead.&lt;/p&gt;</description></item><item><title>AwaitingPromotion</title><link>https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=AwaitingPromotion&lt;/code&gt;. The Message names the stage waiting to be promoted. &lt;code&gt;status.stages[].promotionState&lt;/code&gt; shows &lt;code&gt;phase: AwaitingManual&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is &lt;strong&gt;not a failure&lt;/strong&gt; — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;&lt;code&gt;spec.stages[].promotion.requireManualPromotion&lt;/code&gt;&lt;/a&gt;
+ holds the rollout there until an operator promotes it. This is the &amp;ldquo;hold before prod&amp;rdquo; gate: a human confirms the stage is good (ideally after reviewing metrics) before the rollout advances.&lt;/p&gt;</description></item><item><title>Best practices</title><link>https://stageset.projects.metio.wtf/guides/best-practices/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/best-practices/</guid><description>&lt;p&gt;StageSet works best when you lean into what it is: a delivery controller that
+keeps the &lt;em&gt;render&lt;/em&gt; pure and owns &lt;em&gt;ordering, gating, and execution memory&lt;/em&gt;. Almost
+every practice below — good or bad — follows from respecting or fighting that
+split. The one-line test for a decision is: &lt;strong&gt;does this belong in what should
+exist (the render) or in when and whether it runs (StageSet)?&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;For a single application, a small team, or a chart you distribute to others,
+Helm&amp;rsquo;s simplicity and ecosystem may serve you better; see
+&lt;a href="#when-helm-is-the-better-choice"&gt;when Helm is the better choice&lt;/a&gt;
+. These practices
+assume the case StageSet is built for — a multi-component, multi-tenant, stateful,
+policy-gated release.&lt;/p&gt;</description></item><item><title>Conflict policies</title><link>https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/</guid><description>&lt;p&gt;Conflict policies decide what happens when an apply hits an immutable-field
+conflict — a changed &lt;code&gt;clusterIP&lt;/code&gt;, a &lt;code&gt;Job&lt;/code&gt; pod template, a &lt;code&gt;StorageClass&lt;/code&gt; field
+that can&amp;rsquo;t be updated in place. By default the controller fails the stage and
+reports it, so nothing destructive happens by surprise. A policy opts specific
+resources into automatic resolution.&lt;/p&gt;
+&lt;h2 id="the-three-actions"&gt;The three actions&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;Fail&lt;/code&gt; — stop and report (the default; safest).&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;Recreate&lt;/code&gt; — delete and re-create the object to get past an immutable-field
+change.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;KeepExisting&lt;/code&gt; — leave the live object as-is and move on.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="a-default-for-the-whole-stage"&gt;A default for the whole stage&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;conflictPolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;default&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Fail &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# explicit; the safe default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The &lt;code&gt;force: true&lt;/code&gt; shorthand on a stage is equivalent to
+&lt;code&gt;conflictPolicy.default: Recreate&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Defining a release</title><link>https://stageset.projects.metio.wtf/defining-a-release/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/</guid><description>&lt;p&gt;These pages cover what goes in a StageSet&amp;rsquo;s &lt;code&gt;spec&lt;/code&gt;: the ordered stages, where
+each one reads from, and how each stage applies, verifies, and is cleaned up.
+Each page has a complete, copy-pasteable example; the
+&lt;a href="https://stageset.projects.metio.wtf/api/stageset/"&gt;API reference&lt;/a&gt;
+ has the exhaustive field-by-field detail.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;Stages and sources&lt;/a&gt;
+&lt;/strong&gt; — the ordered
+stages and the Flux source each one applies.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;Actions&lt;/a&gt;
+&lt;/strong&gt; — typed pre, post, and on-failure
+steps around a stage&amp;rsquo;s apply.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/ready-checks/"&gt;Ready checks&lt;/a&gt;
+&lt;/strong&gt; — hold a stage until its
+objects report healthy.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/"&gt;Conflict policies&lt;/a&gt;
+&lt;/strong&gt; — what to do
+when an apply hits an immutable-field conflict.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/inventory/"&gt;Inventory and pruning&lt;/a&gt;
+&lt;/strong&gt; — how the
+controller tracks and removes what each stage applied.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>DependencyNotReady</title><link>https://stageset.projects.metio.wtf/runbooks/dependencynotready/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/dependencynotready/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=DependencyNotReady&lt;/code&gt;. Transient: the controller requeues at &lt;code&gt;spec.retryInterval&lt;/code&gt; (or &lt;code&gt;spec.interval&lt;/code&gt;).&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A StageSet listed in &lt;code&gt;spec.dependsOn&lt;/code&gt; is not &lt;code&gt;Ready&lt;/code&gt; at its observed generation, so this StageSet holds before doing any work. Semantics match kustomize-controller: a dependency is satisfied only when its &lt;code&gt;Ready=True&lt;/code&gt; &lt;strong&gt;and&lt;/strong&gt; its &lt;code&gt;status.observedGeneration&lt;/code&gt; equals its current generation (so a freshly-edited dependency mid-reconcile does not count as ready).&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message names the dependency&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageset &amp;lt;dependency&amp;gt; &lt;span class="c1"&gt;# is it Ready?&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;dependency&amp;gt; &lt;span class="c1"&gt;# why not?&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Resolve the dependency&amp;rsquo;s own Ready condition first (follow its runbook). Once it reports &lt;code&gt;Ready=True&lt;/code&gt; at its current generation, this StageSet proceeds on the next reconcile. If the dependency is intentionally &lt;a href="https://stageset.projects.metio.wtf/runbooks/suspended/"&gt;suspended&lt;/a&gt;
+, this StageSet waits indefinitely by design — remove the &lt;code&gt;dependsOn&lt;/code&gt; entry or resume the dependency.&lt;/p&gt;</description></item><item><title>Flux Operator (ResourceSet) integration</title><link>https://stageset.projects.metio.wtf/integrations/flux-operator/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/flux-operator/</guid><description>&lt;p&gt;Pair &lt;code&gt;StageSet&lt;/code&gt; with the &lt;a href="https://fluxoperator.dev/"&gt;Flux Operator&lt;/a&gt;
+&amp;rsquo;s
+&lt;code&gt;ResourceSet&lt;/code&gt; to combine &lt;em&gt;discovery&lt;/em&gt; and &lt;em&gt;fan-out&lt;/em&gt; with &lt;em&gt;ordered, gated
+promotion&lt;/em&gt;. &lt;code&gt;ResourceSet&lt;/code&gt; and &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; (RSIP) discover and
+template inputs; &lt;code&gt;StageSet&lt;/code&gt; rolls a single app through its stages. The two work on
+&lt;a href="https://stageset.projects.metio.wtf/comparisons/flux-operator/"&gt;complementary axes&lt;/a&gt;
+ — this page shows the two
+patterns where they meet.&lt;/p&gt;
+&lt;p&gt;Both patterns require the
+&lt;a href="https://fluxoperator.dev/docs/install/"&gt;Flux Operator installed&lt;/a&gt;
+ alongside
+Flux and the stageset-controller.&lt;/p&gt;
+&lt;h2 id="discovery-feeding-gated-promotion"&gt;Discovery feeding gated promotion&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; watches an OCI registry for new chart or image tags
+on a schedule, and a &lt;code&gt;ResourceSet&lt;/code&gt; templates a &lt;code&gt;StageSet&lt;/code&gt; pinned to whatever tag
+it discovers. The &lt;code&gt;StageSet&lt;/code&gt; then promotes that version through its ordered,
+gated stages.&lt;/p&gt;</description></item><item><title>From Jsonnet to a gated rollout</title><link>https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/</guid><description>&lt;p&gt;This tutorial follows a complete delivery: write &lt;a href="https://kubernetes.io/docs/"&gt;Kubernetes&lt;/a&gt;
+
+manifests in &lt;a href="https://jsonnet.org/"&gt;Jsonnet&lt;/a&gt;
+ and publish the source through
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+; &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ renders it into a
+Flux &lt;code&gt;ExternalArtifact&lt;/code&gt;, and a StageSet rolls it out with a readiness gate.&lt;/p&gt;
+&lt;p&gt;The chain is:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Jsonnet in Git/OCI/Bucket → JaaS (JsonnetSnippet) → ExternalArtifact → StageSet
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;This tutorial renders &lt;em&gt;Jsonnet&lt;/em&gt;, so it goes through JaaS: JaaS turns the Jsonnet
+into an &lt;code&gt;ExternalArtifact&lt;/code&gt; the stage consumes. (If your manifests were already plain
+YAML, a stage could read a &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt; directly — see
+&lt;a href="https://stageset.projects.metio.wtf/get-started/flux-sources/"&gt;Stage sources&lt;/a&gt;
+. The renderer is here because the input is
+Jsonnet, not because StageSet can&amp;rsquo;t read Git.)&lt;/p&gt;</description></item><item><title>Inventory and pruning</title><link>https://stageset.projects.metio.wtf/defining-a-release/inventory/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/inventory/</guid><description>&lt;p&gt;Every time a stage applies, the controller records the exact set of objects it
+applied, so it can &lt;strong&gt;prune&lt;/strong&gt; what a later revision no longer renders and tear a
+StageSet down in reverse stage order. That record is the &lt;strong&gt;&lt;code&gt;StageInventory&lt;/code&gt;&lt;/strong&gt; — a
+controller-owned resource you never author (its fields are in the
+&lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/"&gt;API reference&lt;/a&gt;
+).&lt;/p&gt;
+&lt;h2 id="what-the-inventory-records"&gt;What the inventory records&lt;/h2&gt;
+&lt;p&gt;For each stage, the controller writes a &lt;code&gt;StageInventory&lt;/code&gt; listing every object the
+stage owns — group, kind, namespace, name. On the next reconcile it diffs the new
+render against that record and prunes the objects that dropped out, honoring
+&lt;code&gt;prune: false&lt;/code&gt; and the &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/"&gt;conflict policy&lt;/a&gt;
+. On deletion it
+walks the stages in reverse, so a later stage&amp;rsquo;s objects are removed before the
+earlier stages they depend on.&lt;/p&gt;</description></item><item><title>MigrationStageNotFound</title><link>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=MigrationStageNotFound&lt;/code&gt;. The Message names the migration
+and the anchor value it could not resolve. &lt;code&gt;status.version&lt;/code&gt; is &lt;strong&gt;not&lt;/strong&gt; advanced —
+the transition is held until the anchor resolves.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A migration that the version transition selected (&lt;code&gt;current &amp;lt; to &amp;lt;= desired&lt;/code&gt;)
+anchors to a stage that this StageSet does not have. A migration&amp;rsquo;s &lt;code&gt;stage&lt;/code&gt; value
+resolves to the stage whose &lt;code&gt;migrationAnchor&lt;/code&gt; (preferred) or &lt;code&gt;name&lt;/code&gt; equals it;
+an empty &lt;code&gt;stage&lt;/code&gt; anchors before the first stage. If none matches, the controller
+&lt;strong&gt;fails closed&lt;/strong&gt; instead of silently never running the migration — the failure
+mode a shared, late-binding ladder must not have (a &lt;code&gt;DROP&lt;/code&gt; that quietly never
+runs while the app advances to a schema that needs it).&lt;/p&gt;</description></item><item><title>Producer-aware sources</title><link>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</guid><description>&lt;p&gt;Point a stage at the resource that &lt;em&gt;produces&lt;/em&gt; an artifact, and the controller
+finds the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes. This is the third source
+route, alongside the two direct ones — an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default
+&lt;code&gt;sourceRef.kind&lt;/code&gt;) or a Flux &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt; — covered in
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/#source-kinds"&gt;stages and sources&lt;/a&gt;
+. Reach for it when an
+operator publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt; from a custom resource (for example
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ rendering Jsonnet).&lt;/p&gt;
+&lt;h2 id="referencing-a-producer"&gt;Referencing a producer&lt;/h2&gt;
+&lt;p&gt;Set &lt;code&gt;kind&lt;/code&gt; (and &lt;code&gt;apiVersion&lt;/code&gt;) to a producer resource, and the controller resolves
+it to the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes — the one whose
+&lt;code&gt;spec.sourceRef&lt;/code&gt; back-references the producer (matched on group, kind, and name).
+For example, a &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ &lt;code&gt;JsonnetSnippet&lt;/code&gt;
+renders Jsonnet and publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt;; reference the snippet and the
+controller follows the link:&lt;/p&gt;</description></item><item><title>Progressive delivery</title><link>https://stageset.projects.metio.wtf/guides/progressive-delivery/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/progressive-delivery/</guid><description>&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; integrates with both progressive-delivery controllers:
+&lt;a href="https://flagger.app/"&gt;Flagger&lt;/a&gt;
+ and
+&lt;a href="https://argoproj.github.io/argo-rollouts/"&gt;Argo Rollouts&lt;/a&gt;
+. The controller exposes
+a read-only gate endpoint and a readiness gauge so either one can hold a promotion
+until a &lt;code&gt;StageSet&lt;/code&gt; stage is healthy; ready checks let a stage wait on a Rollout in
+return. See also &lt;a href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/"&gt;StageSet vs Argo Rollouts&lt;/a&gt;
+.&lt;/p&gt;
+&lt;h2 id="the-gate-contract"&gt;The gate contract&lt;/h2&gt;
+&lt;p&gt;The gate endpoint backs the Flagger integration and the Argo Rollouts JSON-metric
+option.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /gate/{namespace}/{stageset}/{stage}
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; 200 — the stage is Ready at the currently pinned revision
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; 403 — the stage is not Ready (or not found / not gateable)
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;It is served on &lt;code&gt;--gate-bind-address&lt;/code&gt; (default &lt;code&gt;:8082&lt;/code&gt;) and exposed by the chart&amp;rsquo;s
+&lt;code&gt;stageset-controller-gate&lt;/code&gt; Service (&lt;code&gt;gate.enabled&lt;/code&gt;, on by default). The endpoint is
+&lt;strong&gt;unauthenticated and read-only&lt;/strong&gt;, so fence it with a &lt;code&gt;NetworkPolicy&lt;/code&gt;
+(&lt;a href="https://stageset.projects.metio.wtf/running/production/#network-policy"&gt;production&lt;/a&gt;
+) to admit only your
+delivery controller.&lt;/p&gt;</description></item><item><title>Ready checks</title><link>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</guid><description>&lt;p&gt;Ready checks decide when a stage is healthy enough to let the next stage start.
+They are purely observational — the controller waits and reports, but takes no
+action (active steps are &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+).&lt;/p&gt;
+&lt;p&gt;By default, with no &lt;code&gt;readyChecks&lt;/code&gt; block, the controller waits for &lt;strong&gt;every&lt;/strong&gt; object
+the stage applied to report ready via
+&lt;a href="https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus"&gt;kstatus&lt;/a&gt;
+.
+&lt;code&gt;readyChecks&lt;/code&gt; lets you narrow that to specific objects (&lt;code&gt;checks&lt;/code&gt;), add custom
+health for resources kstatus doesn&amp;rsquo;t understand (&lt;code&gt;exprs&lt;/code&gt;, &lt;a href="https://github.com/google/cel-spec"&gt;CEL&lt;/a&gt;
+),
+bound the wait (&lt;code&gt;timeout&lt;/code&gt;), or skip it entirely (&lt;code&gt;disableWait&lt;/code&gt;). &lt;code&gt;checks&lt;/code&gt; and
+&lt;code&gt;exprs&lt;/code&gt; may be set together.&lt;/p&gt;</description></item><item><title>Rollback</title><link>https://stageset.projects.metio.wtf/gating/rollback/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/rollback/</guid><description>&lt;p&gt;When a run fails, the controller can restore the last successfully-applied artifact
+revisions instead of leaving you on a broken release. Rollback is opt-in and needs
+somewhere to keep prior revisions.&lt;/p&gt;
+&lt;h2 id="enabling-it"&gt;Enabling it&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;rollbackOnFailure&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;On a failed run the controller restores each stage&amp;rsquo;s last-good artifact revision,
+best-effort, and emits a &lt;code&gt;RolledBack&lt;/code&gt; event. The coordinates it restores from are
+recorded in &lt;code&gt;status.lastAppliedSnapshot&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Soaking</title><link>https://stageset.projects.metio.wtf/runbooks/soaking/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/soaking/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=Soaking&lt;/code&gt;. The Message names the stage and when the soak window closes. &lt;code&gt;status.stages[].promotionState&lt;/code&gt; shows &lt;code&gt;phase: Soaking&lt;/code&gt; with a &lt;code&gt;soakUntil&lt;/code&gt; timestamp.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is &lt;strong&gt;not a failure&lt;/strong&gt; — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;&lt;code&gt;spec.stages[].promotion.soak&lt;/code&gt;&lt;/a&gt;
+ holds the rollout at this stage for the configured duration before advancing to the next one. A soak catches delayed regressions — an OOM after warm-up, error-rate creep, a crashloop after several minutes — that the point-in-time &lt;code&gt;readyChecks&lt;/code&gt; cannot see.&lt;/p&gt;</description></item><item><title>Stage promotion</title><link>https://stageset.projects.metio.wtf/gating/stage-promotion/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/stage-promotion/</guid><description>&lt;p&gt;A promotion gate decides whether a healthy, applied stage may &lt;em&gt;advance&lt;/em&gt; the
+rollout to the next stage. It is distinct from &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/ready-checks/"&gt;&lt;code&gt;readyChecks&lt;/code&gt;&lt;/a&gt;
+,
+which decide whether a stage&amp;rsquo;s just-applied objects became Ready: a promotion
+gate runs &lt;em&gt;after&lt;/em&gt; the stage is Ready and gates only advancement. Holding a gate
+parks the rollout at the stage — the stage stays applied and its drift keeps
+being corrected, and later stages are never touched.&lt;/p&gt;</description></item><item><title>StageFailed</title><link>https://stageset.projects.metio.wtf/runbooks/stagefailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/stagefailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=StageFailed&lt;/code&gt;. The Message names the stage and the operation that failed (&lt;code&gt;fetch artifact&lt;/code&gt;, &lt;code&gt;build&lt;/code&gt;, &lt;code&gt;apply&lt;/code&gt;, &lt;code&gt;verify&lt;/code&gt;, a pre/post action, or &lt;code&gt;connect to target cluster&lt;/code&gt;). The run halts at that stage; later stages keep their previous revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage failed during execution. By operation:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;fetch artifact&lt;/strong&gt; — the artifact URL was unreachable, or its bytes failed digest verification. Transient fetch failures (network, 5xx, source not ready) back off and retry. Terminal ones — a digest mismatch, an oversized tarball, or a URL the SSRF guard rejects — stop requeuing, since the same fetch would fail the same way; the next genuine watch event or interval tick re-runs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply RBAC / missing CRD&lt;/strong&gt; — a &lt;code&gt;Forbidden&lt;/code&gt; apply, or a manifest whose kind the apiserver doesn&amp;rsquo;t know, is reported as &lt;a href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/"&gt;&lt;code&gt;RBACDenied&lt;/code&gt;&lt;/a&gt;
+ (terminal), not &lt;code&gt;StageFailed&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;build&lt;/strong&gt; — kustomize build or post-build substitution failed (a missing &lt;code&gt;substituteFrom&lt;/code&gt; source, an invalid patch, a malformed manifest).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;apply&lt;/strong&gt; — the server-side apply was rejected: an immutable-field conflict, or an &lt;strong&gt;RBAC denial&lt;/strong&gt; under the impersonated &lt;code&gt;serviceAccountName&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;verify&lt;/strong&gt; — applied objects did not become Ready within the stage timeout (kstatus).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;pre/post action&lt;/strong&gt; — a &lt;code&gt;patch&lt;/code&gt;/&lt;code&gt;http&lt;/code&gt;/&lt;code&gt;wait&lt;/code&gt;/&lt;code&gt;job&lt;/code&gt;/&lt;code&gt;delete&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; action failed or timed out.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;connect to target cluster&lt;/strong&gt; — a &lt;code&gt;spec.kubeConfig&lt;/code&gt; Secret was missing, unparseable, or used the unsupported cloud-provider &lt;code&gt;configMapRef&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message: which stage + operation&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace stageset-system logs deploy/stageset-controller --tail&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="m"&gt;200&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# For apply/verify failures, inspect what the stage tried to apply:&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageinventory &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --selector stages.metio.wtf/stage-set&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;name&amp;gt;,stages.metio.wtf/stage&lt;span class="o"&gt;=&lt;/span&gt;&amp;lt;stage&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Match the operation in the Message:&lt;/p&gt;</description></item><item><title>StageInventory</title><link>https://stageset.projects.metio.wtf/api/stageinventory/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/api/stageinventory/</guid><description>&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageInventory&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;A &lt;code&gt;StageInventory&lt;/code&gt; records the set of objects a single stage has applied, so the
+controller can prune precisely and tear stages down in reverse order. &lt;strong&gt;You do not
+author these&lt;/strong&gt; — the controller creates, updates, and deletes them. The fields
+below let you read inventory state when debugging and back it up.&lt;/p&gt;
+&lt;p&gt;One stage may be backed by several &lt;code&gt;StageInventory&lt;/code&gt; shards once it exceeds
+&lt;code&gt;--inventory-shard-cap&lt;/code&gt; entries (default 5000), so a single object never grows
+unbounded.&lt;/p&gt;</description></item><item><title>Stages and sources</title><link>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</guid><description>&lt;p&gt;A &lt;code&gt;StageSet&lt;/code&gt; is an ordered list of stages. Each stage resolves a
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ source — a &lt;code&gt;GitRepository&lt;/code&gt;, &lt;code&gt;OCIRepository&lt;/code&gt;, &lt;code&gt;Bucket&lt;/code&gt;,
+or an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default) — applies its manifests, waits for them to
+become healthy, and only then lets the next stage start.&lt;/p&gt;
+&lt;h2 id="one-stage"&gt;One stage&lt;/h2&gt;
+&lt;p&gt;The minimum is one stage pointing at one artifact in the same namespace:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# an ExternalArtifact&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;sourceRef.kind&lt;/code&gt; defaults to &lt;code&gt;ExternalArtifact&lt;/code&gt;, so the common case is a single
+line. The controller fetches the artifact, applies every manifest in it, and marks
+the stage &lt;code&gt;Ready&lt;/code&gt; once the applied objects report healthy.&lt;/p&gt;</description></item><item><title>StageSet</title><link>https://stageset.projects.metio.wtf/api/stageset/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/api/stageset/</guid><description>&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;A &lt;code&gt;StageSet&lt;/code&gt; is a namespaced &lt;a href="https://kubernetes.io/docs/"&gt;Kubernetes&lt;/a&gt;
+ resource
+describing an ordered set of stages. Only &lt;code&gt;spec.stages&lt;/code&gt; is required; everything else
+refines scheduling, security, gating, versioning, and rollback. Every field below is
+shown in YAML at least once.&lt;/p&gt;
+&lt;p&gt;The smallest valid StageSet:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;hr&gt;
+&lt;h2 id="scheduling"&gt;Scheduling&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;interval: 5m # optional: reconcile cadence (default&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;--&lt;span class="l"&gt;default-interval)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;retryInterval: 1m # cadence after a failed run (default&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;interval)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;driftDetectionInterval&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;2m &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# faster drift correction than interval (optional)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;timeout&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;5m &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# default per-stage timeout (optional)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;suspend&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;false&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# pause reconciliation without deleting (default false)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;interval&lt;/code&gt;&lt;/strong&gt; (optional) — steady-state reconcile cadence; each reconcile
+re-resolves sources, re-asserts desired state (correcting drift), and prunes.
+&lt;strong&gt;When omitted, the controller&amp;rsquo;s &lt;code&gt;--default-interval&lt;/code&gt; is used&lt;/strong&gt; (the chart&amp;rsquo;s
+&lt;code&gt;controller.defaultInterval&lt;/code&gt;, default &lt;code&gt;10m&lt;/code&gt;), so most StageSets can leave it out.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;retryInterval&lt;/code&gt;&lt;/strong&gt; — retry cadence after a failure; falls back to &lt;code&gt;interval&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;driftDetectionInterval&lt;/code&gt;&lt;/strong&gt; — a shorter cadence dedicated to healing out-of-band
+drift when you need it tighter than &lt;code&gt;interval&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;timeout&lt;/code&gt;&lt;/strong&gt; — how long any one stage may take before it fails; override per
+stage with &lt;code&gt;stages[].timeout&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;suspend&lt;/code&gt;&lt;/strong&gt; — short-circuits to &lt;code&gt;Ready=False / Suspended&lt;/code&gt;, leaving applied state
+running. Use &lt;a href="https://stageset.projects.metio.wtf/cli/reconcile/"&gt;&lt;code&gt;stagesetctl reconcile --force&lt;/code&gt;&lt;/a&gt;
+ to run once while
+suspended. See the &lt;a href="https://stageset.projects.metio.wtf/runbooks/suspended/"&gt;&lt;code&gt;Suspended&lt;/code&gt; runbook&lt;/a&gt;
+.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="ordering-between-stagesets"&gt;Ordering between StageSets&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;dependsOn&lt;/code&gt; gates this StageSet on others being Ready at their observed generation
+with no new revision held back — cross-release ordering. (Ordering &lt;em&gt;within&lt;/em&gt; a
+StageSet is the order of &lt;code&gt;stages&lt;/code&gt;.) A dependency may also carry a &lt;code&gt;minVersion&lt;/code&gt;: the
+dependent then waits not just for the dependency to be Ready, but for it to be
+deployed &lt;strong&gt;at or above&lt;/strong&gt; that version — so an app that needs its database migrated
+to 5.2 first waits for exactly that, not merely for the database to be up.&lt;/p&gt;</description></item><item><title>StageSet vs Argo Rollouts</title><link>https://stageset.projects.metio.wtf/comparisons/argo-rollouts/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/argo-rollouts/</guid><description>&lt;p&gt;&lt;a href="https://argoproj.github.io/argo-rollouts/"&gt;Argo Rollouts&lt;/a&gt;
+ and &lt;code&gt;StageSet&lt;/code&gt; are easy
+to mention in the same breath because both roll things out gradually, but they
+operate at different layers and are complementary rather than competing.&lt;/p&gt;
+&lt;h2 id="what-argo-rollouts-does"&gt;What Argo Rollouts does&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;Argo Rollouts&lt;/code&gt; replaces a &lt;code&gt;Deployment&lt;/code&gt; with a &lt;code&gt;Rollout&lt;/code&gt; that shifts traffic to a new
+version &lt;strong&gt;progressively&lt;/strong&gt; — canary or blue-green — pausing at weighted steps and
+promoting based on &lt;strong&gt;metric analysis&lt;/strong&gt; (Prometheus queries, web/Job providers).
+Its unit of work is a &lt;strong&gt;single workload&amp;rsquo;s&lt;/strong&gt; version transition and the traffic in
+front of it.&lt;/p&gt;</description></item><item><title>StageSet vs Flux kustomize-controller</title><link>https://stageset.projects.metio.wtf/comparisons/flux/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/flux/</guid><description>&lt;p&gt;This is the closest comparison — &lt;code&gt;StageSet&lt;/code&gt; is built &lt;em&gt;for&lt;/em&gt;
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ and borrows its conventions. Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt;
+(and &lt;code&gt;helm-controller&lt;/code&gt;) reconcile a source into the cluster continuously, exactly
+like &lt;code&gt;StageSet&lt;/code&gt;. The difference is granularity.&lt;/p&gt;
+&lt;h2 id="what-kustomize-controller-gives-you"&gt;What kustomize-controller gives you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Continuous reconciliation of a &lt;code&gt;Kustomization&lt;/code&gt; from a Flux source, with pruning,
+health checks, drift correction, and &lt;code&gt;dependsOn&lt;/code&gt; ordering &lt;strong&gt;between&lt;/strong&gt;
+Kustomizations.&lt;/li&gt;
+&lt;li&gt;Impersonation via &lt;code&gt;serviceAccountName&lt;/code&gt;, &lt;code&gt;postBuild&lt;/code&gt; substitution, patches — the
+same surface &lt;code&gt;StageSet&lt;/code&gt; deliberately mirrors.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Ordering within a release.&lt;/strong&gt; &lt;code&gt;kustomize-controller&lt;/code&gt; applies one Kustomization
+as a unit; ordering exists only &lt;em&gt;between&lt;/em&gt; Kustomizations via &lt;code&gt;dependsOn&lt;/code&gt;. To
+sequence three steps you create three Kustomizations and wire their
+dependencies. &lt;code&gt;StageSet&lt;/code&gt; expresses that as one resource with ordered &lt;code&gt;stages&lt;/code&gt; —
+and the controller waits for each stage&amp;rsquo;s health before the next.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Typed actions between steps.&lt;/strong&gt; Migrations, HTTP gates, waits, and transient
+applies are first-class &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+; in plain Flux you&amp;rsquo;d model
+these as extra Kustomizations and Jobs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Typed dependencies.&lt;/strong&gt; &lt;code&gt;dependsOn&lt;/code&gt; exists in Flux too, but only as readiness
+ordering. &lt;code&gt;StageSet&lt;/code&gt; adds a &lt;code&gt;minVersion&lt;/code&gt; floor — a dependent waits until its
+dependency is deployed &lt;em&gt;at or above&lt;/em&gt; a version, not merely Ready, so &amp;ldquo;the app rolls
+only once the database is migrated to 5.2&amp;rdquo; is a declared gate, not a hope.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Release-level features.&lt;/strong&gt; &lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;Update windows&lt;/a&gt;
+,
+&lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+, and
+&lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;rollback&lt;/a&gt;
+ operate across the whole staged release.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Source-native.&lt;/strong&gt; A stage consumes a &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt;
+directly (just like &lt;code&gt;kustomize-controller&lt;/code&gt;), or an &lt;code&gt;ExternalArtifact&lt;/code&gt; (RFC-0012),
+or a &lt;em&gt;producer&lt;/em&gt; resolved to its artifact — which is how it also pairs with
+renderers like &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SOPS parity.&lt;/strong&gt; Encrypted Secrets in a source decrypt the same way, via
+&lt;a href="https://stageset.projects.metio.wtf/security/encryption/"&gt;&lt;code&gt;spec.decryption&lt;/code&gt;&lt;/a&gt;
+ (age, PGP, or cloud KMS), so a SOPS-using
+repo ports across unchanged.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; sits alongside the other Flux controllers and reuses Flux&amp;rsquo;s source layer,
+notifications (&lt;code&gt;Alert&lt;/code&gt;/&lt;code&gt;Provider&lt;/code&gt; targeting &lt;code&gt;kind: StageSet&lt;/code&gt;), and reconcile
+annotations. Use &lt;code&gt;kustomize-controller&lt;/code&gt; for ordinary one-shot reconciliation and
+reach for &lt;code&gt;StageSet&lt;/code&gt; when a release needs ordered, gated stages.&lt;/p&gt;</description></item><item><title>StageSet vs Flux Operator ResourceSet</title><link>https://stageset.projects.metio.wtf/comparisons/flux-operator/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/flux-operator/</guid><description>&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; and the &lt;a href="https://fluxoperator.dev/"&gt;Flux Operator&lt;/a&gt;
+&amp;rsquo;s &lt;code&gt;ResourceSet&lt;/code&gt;
+solve different axes of delivery, and they compose cleanly:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;ResourceSet&lt;/code&gt; is horizontal fan-out.&lt;/strong&gt; It templates &lt;em&gt;N&lt;/em&gt; instances of a set of
+resources from a matrix of inputs, and pairs with a
+&lt;code&gt;ResourceSetInputProvider&lt;/code&gt; (RSIP) to &lt;em&gt;discover&lt;/em&gt; those inputs — pull requests,
+branches, tags, OCI artifact tags — on a schedule.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;StageSet&lt;/code&gt; is vertical promotion.&lt;/strong&gt; It moves &lt;em&gt;one&lt;/em&gt; application through an
+ordered list of gated &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages&lt;/a&gt;
+, with typed
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+, &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+,
+and &lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;rollback&lt;/a&gt;
+ along the way.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Reach for &lt;code&gt;ResourceSet&lt;/code&gt; to stamp out many similar deployments from a changing set
+of inputs. Reach for &lt;code&gt;StageSet&lt;/code&gt; to roll a single release out in order, gated at
+each step. To do both — discover a new version, then promote it through gated
+stages — run them together; see the
+&lt;a href="https://stageset.projects.metio.wtf/integrations/flux-operator/"&gt;Flux Operator integration&lt;/a&gt;
+ page.&lt;/p&gt;</description></item><item><title>StageSet vs Helm</title><link>https://stageset.projects.metio.wtf/comparisons/helm/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/helm/</guid><description>&lt;p&gt;&lt;a href="https://helm.sh/"&gt;Helm&lt;/a&gt;
+ is two things: a templating engine (charts) and an
+imperative release tool (&lt;code&gt;helm upgrade&lt;/code&gt;). &lt;code&gt;StageSet&lt;/code&gt; is neither — it&amp;rsquo;s a declarative
+delivery controller. They overlap on one axis: sequencing work around a release.
+Helm expresses that with hooks and hook weights &lt;em&gt;inside&lt;/em&gt; a single chart&amp;rsquo;s install
+or upgrade; &lt;code&gt;StageSet&lt;/code&gt; expresses it as ordered, gated stages with typed actions,
+under continuous reconciliation.&lt;/p&gt;
+&lt;p&gt;Helm stays the better tool for what it was built for: packaging an application,
+parameterizing it with values, and distributing that chart to others. &lt;code&gt;StageSet&lt;/code&gt;
+starts once you have manifests and need to deliver them carefully — so the two
+&lt;a href="#using-them-together"&gt;compose&lt;/a&gt;
+ rather than compete.&lt;/p&gt;</description></item><item><title>StageSet vs jsonnet-controller</title><link>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</guid><description>&lt;p&gt;&lt;a href="https://github.com/pelotech/jsonnet-controller"&gt;jsonnet-controller&lt;/a&gt;
+ (pelotech) is a
+Flux controller that evaluates Jsonnet (kubecfg- and Tanka-style) and applies the
+result to the cluster. Its &lt;code&gt;Konfiguration&lt;/code&gt; resource (&lt;code&gt;jsonnet.io/v1beta1&lt;/code&gt;) is, in
+effect, &lt;em&gt;kustomize-controller for Jsonnet&lt;/em&gt;: point it at a &lt;code&gt;GitRepository&lt;/code&gt; (or an
+HTTP(S) URL), and it builds the Jsonnet and reconciles the manifests — with
+pruning, health/revision tracking, TLA string/code variables, and &lt;code&gt;dependsOn&lt;/code&gt;
+ordering &lt;strong&gt;between&lt;/strong&gt; Konfigurations.&lt;/p&gt;
+&lt;p&gt;The two projects sit at &lt;strong&gt;different layers&lt;/strong&gt;, which is the whole comparison.&lt;/p&gt;</description></item><item><title>StageSet vs Kustomize</title><link>https://stageset.projects.metio.wtf/comparisons/kustomize/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/kustomize/</guid><description>&lt;p&gt;&lt;a href="https://kustomize.io/"&gt;Kustomize&lt;/a&gt;
+ (the &lt;code&gt;kustomize&lt;/code&gt; CLI / &lt;code&gt;kubectl kustomize&lt;/code&gt;) is a
+manifest &lt;em&gt;builder&lt;/em&gt;: it composes bases and overlays, applies patches, and emits YAML.
+It does not apply anything, and it has no notion of ordering, readiness, or
+reconciliation — that&amp;rsquo;s &lt;code&gt;kubectl apply&lt;/code&gt;&amp;rsquo;s job, and &lt;code&gt;kubectl&lt;/code&gt; applies everything at
+once.&lt;/p&gt;
+&lt;h2 id="what-kustomize-gives-you"&gt;What Kustomize gives you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Overlay composition, strategic-merge and JSON6902 patches, variable replacement,
+generators.&lt;/li&gt;
+&lt;li&gt;A pure transformation: in goes a kustomization, out come manifests.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;It delivers, not just builds.&lt;/strong&gt; Kustomize stops at YAML. &lt;code&gt;StageSet&lt;/code&gt; applies it,
+waits for health, prunes what&amp;rsquo;s gone, and keeps doing so.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Ordering and gates.&lt;/strong&gt; &lt;code&gt;kubectl apply -k&lt;/code&gt; has no stages and no gates. &lt;code&gt;StageSet&lt;/code&gt;
+sequences stages and runs &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ between them.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Continuous reconciliation and drift correction&lt;/strong&gt;, versus a one-shot &lt;code&gt;apply&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; &lt;em&gt;includes&lt;/em&gt; the parts of Kustomize you reach for at delivery time: a stage
+has &lt;code&gt;path&lt;/code&gt;, &lt;code&gt;patches&lt;/code&gt;, and &lt;code&gt;postBuild&lt;/code&gt; substitution
+(&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages and sources&lt;/a&gt;
+). So you can keep authoring with
+Kustomize overlays and let a stage apply the right overlay, patched and
+substituted — then add the ordering, gating, and reconciliation Kustomize alone
+doesn&amp;rsquo;t offer.&lt;/p&gt;</description></item><item><title>StageSet vs Tanka and kubecfg</title><link>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</guid><description>&lt;p&gt;&lt;a href="https://tanka.dev/"&gt;Tanka&lt;/a&gt;
+ and &lt;a href="https://github.com/kubecfg/kubecfg"&gt;kubecfg&lt;/a&gt;
+ are
+Jsonnet-based config tools: you express your resources in Jsonnet, the tool renders
+them, diffs against the cluster, and applies. They generate configuration and run a
+CLI-driven apply, but they are imperative tools you run, not controllers that
+reconcile.&lt;/p&gt;
+&lt;h2 id="what-tanka--kubecfg-give-you"&gt;What Tanka / kubecfg give you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Jsonnet-powered, DRY manifest generation (libraries, abstractions, environments).&lt;/li&gt;
+&lt;li&gt;A &lt;code&gt;diff&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; workflow with dependency-aware ordering of a single apply.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Reconciliation, not invocation.&lt;/strong&gt; Tanka/kubecfg apply when &lt;em&gt;you&lt;/em&gt; run them.
+&lt;code&gt;StageSet&lt;/code&gt; runs in-cluster and continuously reconciles, corrects drift, and
+prunes.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Staged, gated delivery.&lt;/strong&gt; They apply a rendered set (in dependency order);
+they don&amp;rsquo;t model multi-stage rollouts with readiness gates, update windows, or
+versioned migrations between stages.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;GitOps identity and tenancy.&lt;/strong&gt; &lt;code&gt;StageSet&lt;/code&gt; applies under a per-tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt; inside the cluster; Tanka/kubecfg use your local credentials.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;The Jsonnet &lt;em&gt;generation&lt;/em&gt; that Tanka and kubecfg do so well has a GitOps-native
+equivalent in two related projects:&lt;/p&gt;</description></item><item><title>stagesetctl apply</title><link>https://stageset.projects.metio.wtf/cli/apply/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/apply/</guid><description>&lt;p&gt;&lt;code&gt;apply&lt;/code&gt; renders a StageSet&amp;rsquo;s stages with the controller&amp;rsquo;s resolve→fetch→build path
+and &lt;a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/"&gt;server-side-applies&lt;/a&gt;
+
+the resulting objects in stage order, under the controller&amp;rsquo;s field manager and owner
+labels — so a later reconcile sees no drift. Preview first with &lt;a href="https://stageset.projects.metio.wtf/cli/diff/"&gt;&lt;code&gt;diff&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;apply&lt;/code&gt; materializes the manifests only. It does &lt;strong&gt;not&lt;/strong&gt; run stage
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+, &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migrations&lt;/a&gt;
+,
+&lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;update-window&lt;/a&gt;
+ gating, ready checks (beyond &lt;code&gt;--wait&lt;/code&gt;), or
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/inventory/"&gt;pruning&lt;/a&gt;
+ — those belong to the controller&amp;rsquo;s reconcile loop. When
+a controller manages this StageSet it stays the source of truth and reconciles on its
+own schedule; reach for &lt;code&gt;apply&lt;/code&gt; in cluster-free workflows (no controller installed)
+and break-glass.&lt;/p&gt;</description></item><item><title>stagesetctl build</title><link>https://stageset.projects.metio.wtf/cli/build/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/build/</guid><description>&lt;p&gt;Runs the same resolve → fetch → build pipeline the controller uses and writes the
+result — a multi-document YAML stream — to stdout. This is what would be applied,
+before it is applied. To preview the change against live cluster state instead, use
+&lt;a href="https://stageset.projects.metio.wtf/cli/diff/"&gt;&lt;code&gt;diff&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl build NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(all)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Render only the named stage(s); repeatable.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--source-dir&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(none)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Use a local artifact tree as &lt;code&gt;[STAGE=]PATH&lt;/code&gt; instead of fetching from the cluster; repeatable.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-secrets&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reveal Secret values instead of masking them.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--as-tenant&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Read the SOPS decryption key Secret as &lt;code&gt;spec.serviceAccountName&lt;/code&gt;, the identity the controller uses for it. Rendering itself always uses your credentials — the controller resolves sources and &lt;code&gt;substituteFrom&lt;/code&gt; as itself (see &lt;a href="https://stageset.projects.metio.wtf/security/multi-cluster/"&gt;multi-cluster and tenancy&lt;/a&gt;
+).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reject a stage &lt;code&gt;sourceRef&lt;/code&gt; that targets another namespace, matching a controller run with &lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;, so the preview fails the way the controller would.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;Secret values are masked by default, so the output is safe to paste into a review.
+&lt;code&gt;build&lt;/code&gt; writes YAML unconditionally — there is no output-format flag.&lt;/p&gt;</description></item><item><title>stagesetctl diff</title><link>https://stageset.projects.metio.wtf/cli/diff/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/diff/</guid><description>&lt;p&gt;By default &lt;code&gt;diff&lt;/code&gt; performs a
+&lt;a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/"&gt;server-side&lt;/a&gt;
+
+dry-run apply and exits &lt;code&gt;1&lt;/code&gt; when there are changes, so it works as a CI gate. It
+shows, per object, what a reconcile would create, configure, or delete, plus the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ a rollout would run. To see the full rendered manifests
+without comparing against the cluster, use &lt;a href="https://stageset.projects.metio.wtf/cli/build/"&gt;&lt;code&gt;build&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl diff NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(all)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Diff only the named stage(s); repeatable.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--source-dir&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(none)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Use a local artifact tree as &lt;code&gt;[STAGE=]PATH&lt;/code&gt;; repeatable. Skips the cluster fetch.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--server-side&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Server-side dry-run apply diff (needs update/patch RBAC). &lt;code&gt;false&lt;/code&gt; renders client-side against live objects.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--as-tenant&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Server-side dry-run each stage as its effective &lt;code&gt;serviceAccountName&lt;/code&gt; — the identity the controller &lt;em&gt;applies&lt;/em&gt; with (the stage&amp;rsquo;s own, else &lt;code&gt;spec.serviceAccountName&lt;/code&gt;). Reads (source resolve, &lt;code&gt;substituteFrom&lt;/code&gt;, inventory) always use your credentials, mirroring the controller, which reads as itself (see &lt;a href="https://stageset.projects.metio.wtf/security/multi-cluster/"&gt;multi-cluster and tenancy&lt;/a&gt;
+).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reject a stage &lt;code&gt;sourceRef&lt;/code&gt; that targets another namespace, matching a controller run with &lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;, so the preview fails the way the controller would.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-secrets&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reveal Secret values instead of masking.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-unchanged&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Include objects with no change.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--prune&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Show resources that would be deleted (fell out of inventory).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--color&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;auto&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Colorize output: &lt;code&gt;auto&lt;/code&gt;, &lt;code&gt;always&lt;/code&gt;, or &lt;code&gt;never&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--exit-code&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Exit &lt;code&gt;1&lt;/code&gt; when changes are found. &lt;code&gt;false&lt;/code&gt; always exits &lt;code&gt;0&lt;/code&gt; on a clean run.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="example"&gt;Example&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl diff payments
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;--- live
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;+++ merged
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;@@ Deployment payments/web @@
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; spec:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- replicas: 3
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;+ replicas: 6
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- ConfigMap payments/old-feature-flags (pruned: fell out of inventory)
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Actions to run:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; application:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; pre db-migrate job ledger-migrations
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; post smoke-test http https://payments.internal/healthz
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Objects that left the stage&amp;rsquo;s &lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/"&gt;inventory&lt;/a&gt;
+ show as deletions
+(&lt;code&gt;pruned: …&lt;/code&gt;); pass &lt;code&gt;--prune=false&lt;/code&gt; to hide them. The trailing &lt;code&gt;Actions to run&lt;/code&gt;
+block lists the &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;pre/post actions&lt;/a&gt;
+ a real reconcile
+would run, honoring the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#scope-revision-version-or-lifetime"&gt;action scopes&lt;/a&gt;
+:
+an action already satisfied for its scope — a &lt;code&gt;Revision&lt;/code&gt; action recorded at this
+revision, a &lt;code&gt;Version&lt;/code&gt; action held at a fixed version, a completed once-ever
+&lt;code&gt;Lifetime&lt;/code&gt; action — is omitted, plus the stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; actions. &lt;code&gt;diff&lt;/code&gt; never
+runs them, it only reports them. For the full behavioral preview — &lt;em&gt;why&lt;/em&gt; each
+action runs, skips, or re-runs — see &lt;a href="https://stageset.projects.metio.wtf/cli/plan/"&gt;&lt;code&gt;plan&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;</description></item><item><title>stagesetctl get</title><link>https://stageset.projects.metio.wtf/cli/get/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/get/</guid><description>&lt;p&gt;With no &lt;code&gt;NAME&lt;/code&gt;, lists StageSets in the current namespace. With a &lt;code&gt;NAME&lt;/code&gt;, prints that
+StageSet&amp;rsquo;s detail (Ready reason, per-stage phase, revisions, version) — a readable
+view of &lt;a href="https://stageset.projects.metio.wtf/api/stageset/#status"&gt;&lt;code&gt;StageSet.status&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl get [NAME] [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;-A&lt;/code&gt;, &lt;code&gt;--all-namespaces&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;List StageSets across all namespaces.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;-o&lt;/code&gt;, &lt;code&gt;--output&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(table)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Output format: empty for the human table, or &lt;code&gt;yaml&lt;/code&gt; / &lt;code&gt;json&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="listing"&gt;Listing&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl get -A
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;NAMESPACE NAME READY REASON STAGES VERSION PENDING
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;payments payments True Succeeded 2/2 2.1.0 -
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;platform platform True Succeeded 3/3 - -
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;staging web False StageFailed 1/2 - -
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;STAGES&lt;/code&gt; is &lt;code&gt;ready/total&lt;/code&gt;; &lt;code&gt;PENDING&lt;/code&gt; shows &lt;code&gt;held until &amp;lt;time&amp;gt;&lt;/code&gt; when an
+&lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;update window&lt;/a&gt;
+ is holding a rollout. A &lt;code&gt;False&lt;/code&gt; &lt;code&gt;READY&lt;/code&gt;
+maps to a &lt;a href="https://stageset.projects.metio.wtf/runbooks/"&gt;runbook&lt;/a&gt;
+ by its &lt;code&gt;REASON&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>stagesetctl reconcile</title><link>https://stageset.projects.metio.wtf/cli/reconcile/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/reconcile/</guid><description>&lt;p&gt;Stamps the &lt;code&gt;reconcile.fluxcd.io/requestedAt&lt;/code&gt;
+&lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/#well-known-labels-and-annotations"&gt;annotation&lt;/a&gt;
+ to trigger a
+reconcile now, optionally waiting for the controller to report it handled.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl reconcile NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(all)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Force only this stage to re-run its actions (single-stage reconcile).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--with-source&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Also re-request each stage source before reconciling. For an &lt;code&gt;ExternalArtifact&lt;/code&gt; source this stamps the &lt;em&gt;producer&lt;/em&gt; behind it (via the artifact&amp;rsquo;s back-pointer); an artifact with no producer back-pointer is a no-op and warns.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--update-now&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Apply a window-held rollout immediately, bypassing update windows.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--force&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Proceed even when the StageSet is suspended.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--wait&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Block until the controller reports the request handled.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--timeout&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;5m&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;How long to wait with &lt;code&gt;--wait&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="example"&gt;Example&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl --namespace payments reconcile payments
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Reconcile requested for StageSet payments (token 2026-06-15T09:30:00Z)
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Force just one stage to re-run its actions:&lt;/p&gt;</description></item><item><title>Stalled</title><link>https://stageset.projects.metio.wtf/runbooks/stalled/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/stalled/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=Stalled&lt;/code&gt;. Terminal: the controller does not requeue until the spec changes.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A condition that retrying cannot clear. Currently this is a &lt;strong&gt;&lt;code&gt;spec.dependsOn&lt;/code&gt; cycle&lt;/strong&gt; — two or more StageSets depend on each other (directly or transitively), so none can ever become Ready first. The cycle is detected by a breadth-first walk over the &lt;code&gt;dependsOn&lt;/code&gt; graph. A dependency that is merely not Ready yet (no cycle) reports &lt;a href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/"&gt;&lt;code&gt;DependencyNotReady&lt;/code&gt;&lt;/a&gt;
+ instead.&lt;/p&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message states &amp;#34;spec.dependsOn forms a cycle&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Trace the edges:&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get stageset &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --output custom-columns&lt;span class="o"&gt;=&lt;/span&gt;NAME:.metadata.name,DEPENDSON:.spec.dependsOn&lt;span class="o"&gt;[&lt;/span&gt;*&lt;span class="o"&gt;]&lt;/span&gt;.name
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Follow the &lt;code&gt;dependsOn&lt;/code&gt; names until you find the loop (A → B → A, or longer).&lt;/p&gt;</description></item><item><title>Succeeded</title><link>https://stageset.projects.metio.wtf/runbooks/succeeded/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/succeeded/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=True&lt;/code&gt;, &lt;code&gt;REASON=Succeeded&lt;/code&gt;. The Message names the applied revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is the healthy steady state: every stage&amp;rsquo;s artifact resolved, built, applied, and passed its readiness checks, and &lt;code&gt;status.lastAppliedRevisions&lt;/code&gt; matches &lt;code&gt;status.lastAttemptedRevisions&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Nothing to remediate.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;The controller keeps reconciling at &lt;code&gt;spec.interval&lt;/code&gt;; a re-render upstream (a new &lt;code&gt;ExternalArtifact&lt;/code&gt; revision) re-applies automatically and the condition stays &lt;code&gt;Succeeded&lt;/code&gt; once the new revision converges.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;status.stages[]&lt;/code&gt; reports per-stage &lt;code&gt;appliedRevision&lt;/code&gt; and inventory entry counts to confirm what each stage owns.&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>Update windows</title><link>https://stageset.projects.metio.wtf/gating/update-windows/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/update-windows/</guid><description>&lt;p&gt;Update windows gate &lt;em&gt;when&lt;/em&gt; new artifact revisions roll out, without pausing
+reconciliation. Drift correction keeps running; only the rollout of a &lt;em&gt;new&lt;/em&gt;
+revision is held until a window allows it.&lt;/p&gt;
+&lt;h2 id="deny-a-recurring-window"&gt;Deny a recurring window&lt;/h2&gt;
+&lt;p&gt;Freeze rollouts during business hours:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;updateWindows&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Deny&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;schedule&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;0 9 * * MON-FRI&amp;#34;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# 5-field cron: start of the window&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;duration&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;8h&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;timeZone&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Europe/Berlin&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;A new revision that arrives inside the window is held; &lt;code&gt;status.pendingUpdate&lt;/code&gt;
+records what is waiting and &lt;code&gt;nextWindowOpens&lt;/code&gt; when it will ship. The controller
+emits an &lt;code&gt;UpdateDeferred&lt;/code&gt; event and increments &lt;code&gt;stageset_update_deferred_total&lt;/code&gt;.&lt;/p&gt;</description></item></channel></rss>

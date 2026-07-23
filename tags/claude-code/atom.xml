@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Claude-Code on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/claude-code/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/claude-code/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/claude-code/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/claude-code/</id><entry><title type="html">Claude Code skill</title><link href="https://stageset.projects.metio.wtf/integrations/claude-code/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/contributing/building/?utm_source=atom_feed" rel="related" type="text/html" title="Building and testing"/><link href="https://stageset.projects.metio.wtf/contributing/ci-and-release/?utm_source=atom_feed" rel="related" type="text/html" title="CI and releases"/><id>https://stageset.projects.metio.wtf/integrations/claude-code/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Install the StageSet plugin so Claude Code authors and operates StageSets.</blockquote><p>The repository ships a <a href="https://claude.com/claude-code">Claude Code</a>
+ skill that
+teaches the assistant to author and operate <code>StageSet</code> resources: writing and
+editing StageSet YAML, wiring a Flux source or a producer like
+<a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ into staged rollouts, adding typed
+actions, ready checks, update windows, versioned migrations, and conflict
+policies, and driving a StageSet with the <code>stagesetctl</code> CLI. With it installed,
+Claude Code works against the real schema and defaults instead of guessing.</p>
+<h2 id="install-the-plugin">Install the plugin</h2>
+<p>The skill is packaged as a plugin in a marketplace. Add the marketplace from the
+repository, then install the plugin:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">/plugin marketplace add metio/stageset-controller
+</span></span><span class="line"><span class="cl">/plugin install stageset@stageset
+</span></span></code></pre></div><p>The first command registers the <code>stageset</code> marketplace from this repository; the
+second installs the <code>stageset</code> plugin from it. Restart Claude Code if prompted, and
+the skill activates automatically whenever a repository contains StageSet manifests
+or the stageset-controller is in play.</p>
+<h2 id="what-the-skill-knows">What the skill knows</h2>
+<ul>
+<li><strong>Authoring.</strong> It starts from a minimal StageSet (only <code>spec.stages</code> is
+required) and layers on options in order of need — more stages,
+<code>serviceAccountName</code> impersonation, <code>decryption</code>, per-stage build surface,
+actions, ready checks, conflict policies, update windows, versioned migrations,
+and rollback.</li>
+<li><strong>Source wiring.</strong> It knows <code>sourceRef.kind</code> defaults to <code>ExternalArtifact</code>, that
+a stage can point directly at a <code>GitRepository</code> / <code>OCIRepository</code> / <code>Bucket</code>, and
+when to use a producer such as a JaaS <code>JsonnetSnippet</code> instead.</li>
+<li><strong>Operating.</strong> It drives <code>stagesetctl</code> (also usable as <code>kubectl stageset</code>) to
+preview and reconcile — <code>diff</code>, <code>build</code>, <code>get</code>, <code>reconcile</code> — and previews
+changes before applying them.</li>
+<li><strong>Debugging.</strong> It maps <code>status.conditions[Ready].reason</code> to the matching
+<a href="/runbooks/">runbook</a>
+ and reads <code>status.stages[]</code> for per-stage phase, applied
+revision, and executed actions.</li>
+</ul>
+<p>The skill treats this site as its source of truth, fetching exact fields and
+defaults from the <a href="/api/stageset/">API reference</a>
+, the <a href="/defining-a-release/">usage</a>
+ pages, and
+the <a href="/cli/">CLI</a>
+ reference rather than relying on memory.</p>
+<h2 id="where-it-lives">Where it lives</h2>
+<p>The skill source is under <code>skills/stageset/</code> — <code>SKILL.md</code> plus a
+<code>references/reference.md</code> cheat-sheet — and the plugin and marketplace manifests
+are under <code>.claude-plugin/</code>. Edit those files to change what the assistant knows;
+the install commands above pull whatever the repository currently ships.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/contributing" term="contributing" label="contributing"/><category scheme="https://stageset.projects.metio.wtf/tags/claude-code" term="claude-code" label="claude-code"/><category scheme="https://stageset.projects.metio.wtf/tags/skill" term="skill" label="skill"/><category scheme="https://stageset.projects.metio.wtf/tags/plugin" term="plugin" label="plugin"/></entry></feed>

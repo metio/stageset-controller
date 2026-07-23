@@ -1,0 +1,490 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Observability on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/observability/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/observability/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/observability/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/observability/</id><entry><title type="html">Alerting</title><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/observability/alerting/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-19T09:16:22+02:00</updated><content type="html"><![CDATA[<blockquote>The controller&rsquo;s Kubernetes Events on StageSet transitions, the opt-in PrometheusRule alert catalog with tunable thresholds, and how every alert and Ready reason links to a runbook.</blockquote><p>Two layers surface trouble: Kubernetes Events the controller emits on a StageSet&rsquo;s
+own timeline, and a Prometheus alert set built on the <a href="/observability/metrics/">metrics</a>
+.
+Both lead an operator to a <a href="/runbooks/">runbook</a>
+.</p>
+<p>These alerts page on the <em>causes</em> of trouble. To alert on a
+<a href="/observability/slos/">service-level objective</a>
+ directly, and to see availability,
+error budget, and latency against their objectives, use the published
+<a href="/observability/dashboard/">dashboard</a>
+.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<h3 id="kubernetes-events">Kubernetes Events</h3>
+<p>On a StageSet&rsquo;s condition transitions and notable actions, the controller emits
+standard Kubernetes Events (events.v1) against the StageSet object. The reason
+fills both the Event <code>reason</code> and <code>action</code> slots. Read them with:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace team-a describe stageset checkout
+</span></span><span class="line"><span class="cl"><span class="c1"># or, just the events:</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace team-a get events --field-selector involvedObject.name<span class="o">=</span>checkout
+</span></span></code></pre></div><p>Reasons you will see include <code>Succeeded</code> and <code>StageFailed</code> on the rollout outcome,
+<code>UpdateDeferred</code> when an update window holds a rollout, <code>MigrationStarted</code> /
+<code>MigrationCompleted</code> / <code>MigrationFailed</code> around a versioned migration,
+<code>DriftCorrected</code> when an apply repaired out-of-band drift, <code>RolledBack</code> when
+<code>rollbackOnFailure</code> restored the last-good revisions, and <code>RollbackStoreFailed</code> /
+<code>OnFailureAction</code> for best-effort side paths. Because Events target a <code>StageSet</code>,
+Flux&rsquo;s <code>notification-controller</code> can route them to Slack, Teams, or any provider by
+declaring an <code>Alert</code> that targets <code>kind: StageSet</code> — no extra plumbing on the
+controller side.</p>
+<h3 id="ready-reasons-link-to-runbooks">Ready reasons link to runbooks</h3>
+<p>Every actionable Ready-condition reason maps to a runbook page at
+<code>/runbooks/&lt;reason&gt;/</code>. The controller threads a
+<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code> suffix onto
+actionable Ready-condition messages, so <code>kubectl describe stageset</code> links straight
+to the remediation page. Intentional, steady states — <code>Succeeded</code>, <code>Suspended</code> —
+carry no suffix, since there is nothing to remediate.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>The chart ships an opt-in <code>PrometheusRule</code> named <code>&lt;release&gt;-alerts</code> with a starter
+alert set. It requires the Prometheus operator CRDs. Enable it and route every
+alert to one Alertmanager receiver with <code>extraAlertLabels</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">prometheusRule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Labels Prometheus selects the rule object on.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prometheus-stack</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Merged onto every rendered alert, so all stageset alerts route together.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraAlertLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l">platform</span><span class="w">
+</span></span></span></code></pre></div><h3 id="shipped-alerts">Shipped alerts</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Alert</th>
+					<th>Severity</th>
+					<th>Fires when</th>
+					<th>Threshold knobs</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSetReconcileErrorsHigh</code></td>
+					<td>warning</td>
+					<td>Per-StageSet Ready=False rate (5m window) exceeds the rate, excluding the happy <code>Succeeded</code> and <code>Suspended</code> reasons.</td>
+					<td><code>reconcileErrorRate</code> (<code>0.1</code>/s), <code>reconcileErrorDuration</code> (<code>10m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerWorkqueueDepthHigh</code></td>
+					<td>warning</td>
+					<td><code>workqueue_depth{controller=&quot;stageset&quot;}</code> exceeds the depth.</td>
+					<td><code>workqueueDepth</code> (<code>50</code>), <code>workqueueDuration</code> (<code>15m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetReconcileLatencyHigh</code></td>
+					<td>warning</td>
+					<td>Reconcile p99 (10m window) exceeds the ceiling in seconds.</td>
+					<td><code>reconcileLatencySeconds</code> (<code>30</code>), <code>reconcileLatencyDuration</code> (<code>15m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerPodDown</code></td>
+					<td>critical</td>
+					<td>A controller pod is NotReady for the window.</td>
+					<td><code>podDownDuration</code> (<code>5m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWebhookCertRenewalFailing</code></td>
+					<td>critical</td>
+					<td><code>stageset_webhook_cert_renewal_failures_total</code> increases over 1h beyond the count.</td>
+					<td><code>webhookCertRenewalFailuresPerHour</code> (<code>1</code>), <code>webhookCertRenewalFailuresDuration</code> (<code>30m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWatchEngagementFailing</code></td>
+					<td>warning</td>
+					<td><code>stageset_watch_engagement_failures_total{gvk=...}</code> increases over 1h beyond the count — a producer watch failed to engage, so StageSets referencing that kind stop re-triggering on its upstream changes.</td>
+					<td><code>watchEngagementFailuresPerHour</code> (<code>1</code>), <code>watchEngagementFailuresDuration</code> (<code>30m</code>)</td>
+			</tr>
+	</tbody>
+</table>
+<p>Each threshold lives under <code>metrics.prometheusRule.thresholds</code>. To silence a
+built-in alert without forking the chart, raise its threshold to an impossibly high
+value; to add alerts, append them under <code>metrics.prometheusRule.extraRules</code>, which
+renders verbatim in a separate <code>stageset-extras</code> group.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">prometheusRule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">thresholds</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileErrorRate</span><span class="p">:</span><span class="w"> </span><span class="m">0.1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileErrorDuration</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">workqueueDepth</span><span class="p">:</span><span class="w"> </span><span class="m">50</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">workqueueDuration</span><span class="p">:</span><span class="w"> </span><span class="l">15m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileLatencySeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileLatencyDuration</span><span class="p">:</span><span class="w"> </span><span class="l">15m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">podDownDuration</span><span class="p">:</span><span class="w"> </span><span class="l">5m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">webhookCertRenewalFailuresPerHour</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">webhookCertRenewalFailuresDuration</span><span class="p">:</span><span class="w"> </span><span class="l">30m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">watchEngagementFailuresPerHour</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">watchEngagementFailuresDuration</span><span class="p">:</span><span class="w"> </span><span class="l">30m</span><span class="w">
+</span></span></span></code></pre></div><h3 id="alerts-link-to-runbooks">Alerts link to runbooks</h3>
+<p>Each alert carries a runbook link in its <code>runbook_url</code> annotation (the annotation
+key is <code>metrics.prometheusRule.runbookAnnotationKey</code>; the URL prefix is fixed to
+this site&rsquo;s <a href="/runbooks/">runbooks</a>
+). <code>StageSetReconcileErrorsHigh</code> templates its
+link on the <code>reason</code> label — every Ready-condition reason maps to a runbook at
+<code>/runbooks/&lt;reason&gt;/</code> — while the availability, webhook, and
+watch-engagement alerts point at their fixed pages
+(<a href="/runbooks/workqueue-saturation/">workqueue-saturation</a>
+,
+<a href="/runbooks/reconcile-latency/">reconcile-latency</a>
+,
+<a href="/runbooks/controller-pod-down/">controller-pod-down</a>
+,
+<a href="/runbooks/webhook-cert-renewal/">webhook-cert-renewal</a>
+,
+<a href="/runbooks/watch-engagement/">watch-engagement</a>
+).</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/prometheus" term="prometheus" label="prometheus"/><category scheme="https://stageset.projects.metio.wtf/tags/events" term="events" label="events"/><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/></entry><entry><title type="html">Logging</title><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/observability/tracing/?utm_source=atom_feed" rel="related" type="text/html" title="Tracing"/><id>https://stageset.projects.metio.wtf/observability/logging/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-18T20:07:19+02:00</updated><content type="html"><![CDATA[<blockquote>The controller&rsquo;s structured slog output, the &ndash;log-level and &ndash;log-format flags, reading logs with kubectl and jq, and the chart values that drive them.</blockquote><p>The controller logs through Go&rsquo;s <code>log/slog</code>. Controller-runtime&rsquo;s own logs flow
+through the same handler via the logr bridge, so the manager, the cache, and the
+reconciler all share one consistent output stream — there is no second logger to
+configure.</p>
+<blockquote>
+<p><strong>Status Conditions and Kubernetes Events stay the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. Logs are additive operator-side detail
+for tracing what a reconcile did, not a replacement for the condition that
+tells you whether a StageSet is Ready.</p>
+</blockquote>
+<p>Each reconcile seeds its log lines with <code>namespace</code>, <code>name</code>, and <code>reconcileID</code>,
+so every line from one pass is correlatable. The reconciler&rsquo;s own outcome lines
+add fields describing what happened — <code>stages</code> (the stage count), <code>ready</code>, and
+<code>requeueAfter</code> on synced and deferred runs, and <code>stage</code> plus <code>op</code> on a stage
+failure — which is what the <code>jq</code> filters below select on.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<p>Two flags govern logging:</p>
+<ul>
+<li><code>--log-level</code> — one of <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>. Defaults to <code>info</code>.</li>
+<li><code>--log-format</code> — <code>json</code> or <code>text</code>. Defaults to <code>json</code>.</li>
+</ul>
+<p><code>json</code> emits one structured object per line, which is what you want for any log
+pipeline (Loki, Elasticsearch, Cloud Logging). <code>text</code> is the human-readable
+<code>key=value</code> form, handy when tailing logs locally.</p>
+<h3 id="reading-logs">Reading logs</h3>
+<p>Tail the controller&rsquo;s logs with <code>kubectl</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller --follow
+</span></span></code></pre></div><p>With <code>--log-format=json</code> every line is a JSON object, so <code>jq</code> filters and
+reshapes them. Show only warnings and errors:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq <span class="s1">&#39;select(.level == &#34;WARN&#34; or .level == &#34;ERROR&#34;)&#39;</span>
+</span></span></code></pre></div><p>Project just the fields you care about onto one compact line:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;{t: .time, level, msg, namespace, name, reconcileID, stages, ready, requeueAfter}&#39;</span>
+</span></span></code></pre></div><p>Follow a single StageSet by <code>namespace</code> and <code>name</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller --follow <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;select(.namespace == &#34;apps&#34; and .name == &#34;checkout&#34;)&#39;</span>
+</span></span></code></pre></div><p>Pull every line from one reconcile pass by its <code>reconcileID</code> to read a single
+run end to end:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;select(.reconcileID == &#34;a1b2c3d4-...&#34;)&#39;</span>
+</span></span></code></pre></div><p>Surface only stage failures, which carry the failing <code>stage</code> and <code>op</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deployment/stageset-controller <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -c <span class="s1">&#39;select(.msg == &#34;stage failed&#34;) | {namespace, name, stage, op, error}&#39;</span>
+</span></span></code></pre></div><p>Turning <code>--log-level=debug</code> on raises the volume considerably — controller-runtime
+logs every reconcile request at debug. Use it to diagnose a specific issue, then
+return to <code>info</code>.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>Two values map directly onto the flags:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">logLevel</span><span class="p">:</span><span class="w"> </span><span class="l">info  </span><span class="w"> </span><span class="c"># debug | info | warn | error  -&gt; --log-level</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">logFormat</span><span class="p">:</span><span class="w"> </span><span class="l">json </span><span class="w"> </span><span class="c"># json | text                  -&gt; --log-format</span><span class="w">
+</span></span></span></code></pre></div><p>Both are enum-validated in the chart&rsquo;s values schema, so a typo fails the install
+rather than reaching the binary as an unknown level. The defaults (<code>info</code> / <code>json</code>)
+are production-ready; lower the level only while investigating, and switch to
+<code>text</code> only for ad-hoc local runs where a human reads the stream directly.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/logging" term="logging" label="logging"/><category scheme="https://stageset.projects.metio.wtf/tags/slog" term="slog" label="slog"/></entry><entry><title type="html">Metrics</title><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><id>https://stageset.projects.metio.wtf/observability/metrics/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-17T12:56:39+02:00</updated><content type="html"><![CDATA[<blockquote>The controller&rsquo;s Prometheus metrics — the stageset_* custom series and controller-runtime signals, scraping with a ServiceMonitor or a plain config, querying with PromQL, and the chart values that drive them.</blockquote><p>The controller exports Prometheus metrics on an HTTP endpoint: a set of custom
+<code>stageset_*</code> series describing reconcile outcomes, stage applies, drift
+correction, deferred rollouts, webhook-cert renewals, and per-stage readiness —
+alongside the controller-runtime and workqueue series every controller-runtime
+manager exposes for free.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<p>The controller binds its metrics endpoint via <code>--metrics-bind-address</code>, defaulting
+to <code>:8080</code>. Setting it to <code>0</code> disables the endpoint. Every custom metric is
+registered against controller-runtime&rsquo;s registry, so it rides the same endpoint as
+the built-in series.</p>
+<p>All counters and the readiness gauge are labelled by <code>namespace</code> and the StageSet
+<code>name</code> so a single StageSet&rsquo;s behaviour is isolatable.</p>
+<h3 id="reconcile-outcomes">Reconcile outcomes</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_reconcile_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>reason</code></td>
+					<td>Reconciles by their terminal Ready-condition reason. The <code>reason</code> label is one of the wire-stable Ready reasons.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_update_deferred_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td>Reconciles that held a rollout because an update window was closed.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="stage-progress">Stage progress</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_stage_applied_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Stages that applied and verified successfully.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_drift_corrected_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Objects whose out-of-band drift the apply corrected on a steady-state reconcile (same revision as last applied).</td>
+			</tr>
+			<tr>
+					<td><code>stageset_stage_ready</code></td>
+					<td>Gauge</td>
+					<td><code>namespace</code>, <code>stageset</code>, <code>stage</code></td>
+					<td>Whether a stage is Ready (<code>1</code>) or not (<code>0</code>) at the current observed state. A metrics-gated progressive-delivery controller — Argo Rollouts&rsquo; Prometheus metric provider, for example — can hold a rollout directly on this gauge. The series is deleted when a StageSet or one of its stages goes away, so a removed stage leaves no stale gauge.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="stage-actions">Stage actions</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_action_runs_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>scope</code></td>
+					<td>Pre/post <a href="/defining-a-release/actions/">actions</a>
+ executed, by ledger <a href="/defining-a-release/actions/#scope-revision-version-or-lifetime"><code>scope</code></a>
+ (<code>Revision</code>, <code>Version</code>, <code>Lifetime</code>). A <code>Version</code> rate well below the <code>Revision</code> rate is the signal that version scoping is holding upgrade choreography off config churn.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_ledger_adoptions_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td>StageSets that adopted a non-empty <code>StageLedger</code> on their first reconcile — a delete+recreate, or a fresh StageSet over a retained ledger. A recorded completion may suppress an action that would otherwise run, so a surprise here is worth an alert.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_ledger_anchor_errors_total</code></td>
+					<td>Counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td><code>scope: Lifetime</code> completions whose <a href="/defining-a-release/actions/#tie-a-completion-to-a-witness-with-completionanchor"><code>completionAnchor</code></a>
+ could not be read at gate time (missing RBAC, API error). The completion is retained (fail open); a non-zero rate means the stage&rsquo;s ServiceAccount needs read on the anchor kind.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="webhook">Webhook</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_webhook_cert_renewal_failures_total</code></td>
+					<td>Counter</td>
+					<td>—</td>
+					<td>Failed self-signed webhook certificate renewals in the background renewer goroutine. Meaningful only in self-signed webhook mode.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="controller-runtime-and-workqueue-metrics">Controller-runtime and workqueue metrics</h3>
+<p>The manager also exports the standard controller-runtime series without any extra
+configuration, all carrying <code>controller=&quot;stageset&quot;</code>:</p>
+<ul>
+<li><code>controller_runtime_reconcile_total</code>, <code>controller_runtime_reconcile_errors_total</code>,
+and the <code>controller_runtime_reconcile_time_seconds</code> histogram.</li>
+<li><code>workqueue_depth</code>, <code>workqueue_adds_total</code>, the <code>workqueue_queue_duration_seconds</code>
+and <code>workqueue_work_duration_seconds</code> histograms, and the retry counters.</li>
+</ul>
+<h3 id="querying-with-promql">Querying with PromQL</h3>
+<p>A few starting points once the series are scraped:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="c1"># Reconciles settling to a non-happy reason, per StageSet, over 5m.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">namespace</span><span class="p">,</span><span class="w"> </span><span class="nv">name</span><span class="p">,</span><span class="w"> </span><span class="nv">reason</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">stageset_reconcile_total</span><span class="p">{</span><span class="nl">reason</span><span class="o">!~</span><span class="p">&#34;</span><span class="s">Succeeded|Suspended</span><span class="p">&#34;}[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c1"># Stages currently not Ready.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nv">stageset_stage_ready</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="c1"># Reconcile p99 latency for the controller.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="kr">histogram_quantile</span><span class="o">(</span><span class="mf">0.99</span><span class="p">,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">le</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">controller_runtime_reconcile_time_seconds_bucket</span><span class="p">{</span><span class="nl">controller</span><span class="o">=</span><span class="p">&#34;</span><span class="s">stageset</span><span class="p">&#34;}[</span><span class="s">10m</span><span class="p">]</span><span class="o">))</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">)</span><span class="w">
+</span></span></span></code></pre></div><p>The <a href="/observability/alerting/">alerting</a>
+ catalog builds on exactly these expressions.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>The chart binds the metrics port through <code>ports.metrics</code> (default <code>8080</code>) and
+always renders a ClusterIP <code>Service</code> named <code>&lt;release&gt;-metrics</code> exposing a <code>metrics</code>
+port that targets the container&rsquo;s <code>metrics</code> port, so any scrape mechanism has a
+stable target.</p>
+<h3 id="scrape-with-a-servicemonitor">Scrape with a ServiceMonitor</h3>
+<p>When the Prometheus operator is installed, opt into a <code>ServiceMonitor</code> that
+selects the metrics Service:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Extra labels so your Prometheus instance&#39;s serviceMonitorSelector picks it up.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">additionalLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prometheus-stack</span><span class="w">
+</span></span></span></code></pre></div><h3 id="scrape-without-the-prometheus-operator">Scrape without the Prometheus operator</h3>
+<p>Without the operator&rsquo;s CRDs, point a plain Prometheus scrape config at the metrics
+Service, or annotate the rendered Service for an annotation-driven scrape discovery
+setup:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate service &lt;release&gt;-metrics <span class="se">\
+</span></span></span><span class="line"><span class="cl">  prometheus.io/scrape<span class="o">=</span><span class="nb">true</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  prometheus.io/port<span class="o">=</span><span class="m">8080</span>
+</span></span></code></pre></div><p>For the full flag list with defaults, see the
+<a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/prometheus" term="prometheus" label="prometheus"/><category scheme="https://stageset.projects.metio.wtf/tags/promql" term="promql" label="promql"/></entry><entry><title type="html">Observability</title><link href="https://stageset.projects.metio.wtf/observability/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><id>https://stageset.projects.metio.wtf/observability/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The four observability pillars for the controller — structured logging, OTLP tracing, Prometheus metrics, and the opt-in alert catalog — plus service level objectives and a ready-made dashboard.</blockquote><blockquote>
+<p><strong>Status Conditions and Kubernetes Events are the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. The four pillars below are additive
+operator-side detail; they explain how a reconcile behaved, but the condition
+on the StageSet is what tells you whether it is Ready.</p>
+</blockquote>
+<p>The controller surfaces its behaviour through four pillars, each configured by a
+small set of binary flags that the Helm chart drives from values:</p>
+<ul>
+<li><strong><a href="/observability/logging/">Logging</a>
+</strong> — structured <code>log/slog</code> output (JSON or text)
+for the controller and, through the logr bridge, controller-runtime itself.
+Read it with <code>kubectl logs</code> and filter with <code>jq</code>.</li>
+<li><strong><a href="/observability/tracing/">Tracing</a>
+</strong> — OpenTelemetry spans exported over OTLP gRPC to
+a collector you point the controller at. Off until you set an endpoint.</li>
+<li><strong><a href="/observability/metrics/">Metrics</a>
+</strong> — a <code>stageset_*</code> family of Prometheus series on
+reconcile outcomes, stage applies, drift correction, deferred rollouts, and
+per-stage readiness, alongside the controller-runtime and workqueue series.
+Scrape with a <code>ServiceMonitor</code> or a plain scrape config and query with PromQL.</li>
+<li><strong><a href="/observability/alerting/">Alerting</a>
+</strong> — an opt-in <code>PrometheusRule</code> with a starter
+alert set whose thresholds are tunable values, plus the Kubernetes Events the
+controller emits on StageSet transitions. Every alert links to a
+<a href="/runbooks/">runbook</a>
+.</li>
+</ul>
+<p>Two further pages build on the metrics:</p>
+<ul>
+<li><strong><a href="/observability/slos/">Service level objectives</a>
+</strong> — the controller&rsquo;s own
+reconcile-availability and reconcile-latency SLOs, computed from the
+<code>stageset_*</code> series, with their targets and error budgets.</li>
+<li><strong><a href="/observability/dashboard/">Dashboard</a>
+</strong> — a ready-made Grafana dashboard
+over the controller and workqueue series.</li>
+</ul>
+<p>For each pillar you configure the controller binary&rsquo;s flags, read or query its
+output, and drive both from the Helm chart values. The full flag list with
+defaults is on the <a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/logging" term="logging" label="logging"/><category scheme="https://stageset.projects.metio.wtf/tags/tracing" term="tracing" label="tracing"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/slos" term="slos" label="slos"/><category scheme="https://stageset.projects.metio.wtf/tags/dashboard" term="dashboard" label="dashboard"/></entry><entry><title type="html">Tracing</title><link href="https://stageset.projects.metio.wtf/observability/tracing/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><id>https://stageset.projects.metio.wtf/observability/tracing/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>OpenTelemetry tracing for the controller — the &ndash;tracing-endpoint, &ndash;tracing-insecure, and &ndash;tracing-sample-ratio flags, pointing at an OTLP collector, and the chart values that drive them.</blockquote><p>The controller integrates with OpenTelemetry and exports spans over OTLP gRPC.
+Tracing is <strong>off until you set an endpoint</strong> — with no endpoint the OTel SDK
+installs a no-op tracer provider, so the instrumentation costs a function
+indirection and nothing ships off the pod. The controller takes no opinion on
+whether you run a collector.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<p>Three flags govern tracing:</p>
+<ul>
+<li><code>--tracing-endpoint</code> — the OTLP gRPC collector as <code>host:port</code>, e.g.
+<code>otel-collector.observability.svc:4317</code>. Empty (the default) disables tracing
+entirely.</li>
+<li><code>--tracing-insecure</code> — skip TLS when dialing the collector. Use only for
+in-cluster collectors that do not terminate TLS themselves. Defaults to <code>false</code>,
+so the dial uses TLS against the system trust store.</li>
+<li><code>--tracing-sample-ratio</code> — TraceID-ratio sampling between <code>0.0</code> and <code>1.0</code>.
+Defaults to <code>1.0</code>, which samples every trace. Lower it on a busy controller to
+cap exporter and collector load.</li>
+</ul>
+<p>Every span carries a <code>service.name</code> of <code>stageset-controller</code> and a
+<code>service.version</code> resource attribute filled from the controller&rsquo;s build version,
+so the collector can group spans by release.</p>
+<blockquote>
+<p><strong>Status Conditions and Kubernetes Events stay the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. Traces are additive operator-side detail
+for understanding <em>where</em> a reconcile spent its time, not a replacement for the
+condition that tells you <em>whether</em> a StageSet is Ready.</p>
+</blockquote>
+<h3 id="the-span-tree">The span tree</h3>
+<p>A single reconcile produces one trace rooted at <strong><code>StageSet.Reconcile</code></strong>, with a
+child span per phase nested underneath. The root carries <code>stageset.namespace</code>,
+<code>stageset.name</code>, and <code>stageset.generation</code> attributes; the per-stage spans carry
+a <code>stage</code> attribute naming the stage. A failure on any phase records the error on
+its span and marks the span&rsquo;s status as an error before it ends, so a failed
+reconcile shows you the exact phase that broke.</p>
+<ul>
+<li><strong><code>StageSet.Reconcile</code></strong> — the root span, open for the whole reconcile.</li>
+<li><strong><code>stageset.gateWindows</code></strong> — evaluating update windows to decide whether the
+rollout may proceed now.</li>
+<li><strong><code>stageset.planMigrations</code></strong> — planning version migrations across stages.</li>
+<li><strong><code>stageset.buildDecryptor</code></strong> — constructing the SOPS decryptor for the run.</li>
+<li><strong><code>stage.fetch</code></strong> — fetching the artifact for a stage; also carries
+<code>stage.revision</code> and <code>stage.digest</code> attributes pinning the exact source the
+stage applied.</li>
+<li><strong><code>stage.decrypt</code></strong> — decrypting the fetched files for a stage.</li>
+<li><strong><code>stage.build</code></strong> — building the stage&rsquo;s objects from the decrypted files.</li>
+<li><strong><code>stage.apply</code></strong> — applying the built objects; also carries a
+<code>stage.objectCount</code> attribute.</li>
+<li><strong><code>stageset.rollback</code></strong> — attempting a rollback to the last-applied revisions
+after a failed run.</li>
+</ul>
+<p>The four <code>stage.*</code> spans repeat once per stage, so a multi-stage StageSet shows
+several <code>stage.fetch</code> → <code>stage.decrypt</code> → <code>stage.build</code> → <code>stage.apply</code> groups in
+order under the root.</p>
+<h3 id="pointing-at-a-collector-and-viewing-spans">Pointing at a collector and viewing spans</h3>
+<p>Set the endpoint to an OTLP gRPC receiver — an OpenTelemetry Collector, or any
+backend that speaks OTLP (Jaeger, Tempo, Grafana Cloud). A typical in-cluster
+collector exposes gRPC on port <code>4317</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">--tracing-endpoint<span class="o">=</span>otel-collector.observability.svc:4317
+</span></span><span class="line"><span class="cl">--tracing-insecure   <span class="c1"># in-cluster collector with no TLS</span>
+</span></span></code></pre></div><p>Once spans flow into the collector, open its UI (Jaeger, Grafana Tempo&rsquo;s trace
+explorer, etc.) and filter by <code>service.name = stageset-controller</code> to see the
+controller&rsquo;s traces. Spans propagate W3C trace context, so a collector that also
+receives spans from your apiserver or source-controller can stitch a reconcile to
+its upstream cause.</p>
+<p>When the controller runs under a NetworkPolicy, the OTLP collector egress must be
+allowed; see the <a href="/security/network-policy/">network policy page</a>
+ for the egress row.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>The tracing flags are driven by <code>controller.tracing</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tracing</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># OTLP gRPC collector host:port. Empty (default) disables tracing entirely.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l">otel-collector.observability.svc:4317</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Skip TLS for an in-cluster collector that doesn&#39;t terminate TLS itself.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">insecure</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># TraceID-ratio sampling (0.0..1.0). 1.0 samples every trace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sampleRatio</span><span class="p">:</span><span class="w"> </span><span class="m">1.0</span><span class="w">
+</span></span></span></code></pre></div><p>The chart threads these into the deployment only when <code>endpoint</code> is non-empty, so
+leaving the default empty endpoint renders no tracing flags at all and the
+controller stays in no-op mode. <code>sampleRatio</code> is schema-bounded to the <code>0.0..1.0</code>
+range. For the full flag list with defaults, see the
+<a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/tracing" term="tracing" label="tracing"/><category scheme="https://stageset.projects.metio.wtf/tags/opentelemetry" term="opentelemetry" label="opentelemetry"/><category scheme="https://stageset.projects.metio.wtf/tags/otlp" term="otlp" label="otlp"/></entry></feed>

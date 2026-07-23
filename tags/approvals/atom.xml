@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Approvals on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/approvals/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/approvals/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/approvals/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/approvals/</id><entry><title type="html">AwaitingApproval</title><link href="https://stageset.projects.metio.wtf/runbooks/awaitingapproval/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/downgradenotallowed/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeNotAllowed"/><link href="https://stageset.projects.metio.wtf/runbooks/downgraderequiresmigration/?utm_source=atom_feed" rel="related" type="text/html" title="DowngradeRequiresMigration"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationartifactinvalid/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationArtifactInvalid"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationcoveragemissing/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationCoverageMissing"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationdirty/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationDirty"/><id>https://stageset.projects.metio.wtf/runbooks/awaitingapproval/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-18T23:36:21+02:00</updated><content type="html"><![CDATA[<blockquote>A version transition is held for approval; approve the target version to proceed.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=AwaitingApproval</code>. The Message names the target version (and
+the pending migration count, when the transition carries migrations).
+<code>status.pendingMigrations</code> lists exactly what will run. Nothing is applied and
+<code>status.version</code> is not advanced — this is an intentional hold, not an error.</p>
+<h2 id="cause">Cause</h2>
+<p><code>spec.version.approvalMode</code> holds this transition until the target version is
+approved:</p>
+<ul>
+<li><code>OnMigrations</code> holds only a transition that carries migrations, so destructive
+migrations don&rsquo;t run unattended while a config-only version bump proceeds.</li>
+<li><code>Always</code> holds every version advance — a fleet-managed StageSet sets this so a
+<a href="/gating/versioned-migrations/"><code>FleetRollout</code></a>
+ can pace its adoption wave by wave.</li>
+</ul>
+<p>The whole rollout (app and migrations) waits until the target version is authorized.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Review <code>status.pendingMigrations</code> (or <code>stagesetctl diff</code> / <code>plan</code>) to see what will
+run, then approve the target version by setting the annotation to it:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  stages.metio.wtf/approved-version<span class="o">=</span>2.0.0 --overwrite
+</span></span></code></pre></div><p>For a fleet-managed StageSet the <code>FleetRollout</code> controller stamps this annotation
+when the StageSet&rsquo;s wave opens; approving by hand is a break-glass override.</p>
+<p>The controller proceeds on the next reconcile once the annotation equals the
+desired version. Because approval is tied to that exact version, a later transition
+to a different version holds again until you approve the new target — a stale
+approval never carries over.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/migrations" term="migrations" label="migrations"/><category scheme="https://stageset.projects.metio.wtf/tags/approvals" term="approvals" label="approvals"/><category scheme="https://stageset.projects.metio.wtf/tags/fleet" term="fleet" label="fleet"/></entry></feed>

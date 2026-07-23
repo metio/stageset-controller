@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Conflict-Policies on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/conflict-policies/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/conflict-policies/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/conflict-policies/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/conflict-policies/</id><entry><title type="html">Conflict policies</title><link href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/guides/best-practices/?utm_source=atom_feed" rel="related" type="text/html" title="Best practices"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/integrations/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="Flux Operator (ResourceSet) integration"/><id>https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Resolve immutable-field and ownership conflicts per resource.</blockquote><p>Conflict policies decide what happens when an apply hits an immutable-field
+conflict — a changed <code>clusterIP</code>, a <code>Job</code> pod template, a <code>StorageClass</code> field
+that can&rsquo;t be updated in place. By default the controller fails the stage and
+reports it, so nothing destructive happens by surprise. A policy opts specific
+resources into automatic resolution.</p>
+<h2 id="the-three-actions">The three actions</h2>
+<ul>
+<li><code>Fail</code> — stop and report (the default; safest).</li>
+<li><code>Recreate</code> — delete and re-create the object to get past an immutable-field
+change.</li>
+<li><code>KeepExisting</code> — leave the live object as-is and move on.</li>
+</ul>
+<h2 id="a-default-for-the-whole-stage">A default for the whole stage</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">conflictPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l">Fail           </span><span class="w"> </span><span class="c"># explicit; the safe default</span><span class="w">
+</span></span></span></code></pre></div><p>The <code>force: true</code> shorthand on a stage is equivalent to
+<code>conflictPolicy.default: Recreate</code>.</p>
+<h2 id="per-resource-rules">Per-resource rules</h2>
+<p>Rules recreate exactly the resources that need it while everything else stays
+<code>Fail</code>. A rule&rsquo;s <code>target</code> is a partial selector — any field you omit matches
+everything. Rules are evaluated in list order; the <strong>first</strong> rule whose target
+matches wins, and an object matching no rule falls back to <code>default</code>.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">conflictPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l">Fail</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="c"># a Job&#39;s pod template is immutable — recreate it on change</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">batch/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Job</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l">Recreate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="c"># never fight an HPA over replica counts</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l">KeepExisting</span><span class="w">
+</span></span></span></code></pre></div><h2 id="recreating-storage">Recreating storage</h2>
+<p>Recreating a <code>PersistentVolumeClaim</code> or <code>PersistentVolume</code> destroys data, so a
+<code>Recreate</code> <strong>rule</strong> targeting one is refused unless you explicitly accept the loss:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">        </span><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">target</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">PersistentVolumeClaim</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">scratch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l">Recreate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">allowDataLoss</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">     </span><span class="c"># required for PVC/PV Recreate, refused otherwise</span><span class="w">
+</span></span></span></code></pre></div><p>Without <code>allowDataLoss: true</code>, a <code>Recreate</code> rule targeting a PVC/PV is rejected —
+a guardrail against accidentally wiping a volume.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/conflict-policies" term="conflict-policies" label="conflict-policies"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

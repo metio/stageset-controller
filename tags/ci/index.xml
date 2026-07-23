@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Ci on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/ci/</link><description>Recent content in Ci on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/ci/index.xml" rel="self" type="application/rss+xml"/><item><title>Building and testing</title><link>https://stageset.projects.metio.wtf/contributing/building/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/contributing/building/</guid><description>&lt;p&gt;The host needs no Go toolchain. Every command runs through the development shell
+that &lt;code&gt;flake.nix&lt;/code&gt; defines, with &lt;code&gt;flake.lock&lt;/code&gt; pinning each tool to an exact
+version:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;nix develop --command go build ./...
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;nix develop --command go &lt;span class="nb"&gt;test&lt;/span&gt; -race -cover ./...
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;CI runs the same shell, so a gate that is green locally is green there by
+construction. Run &lt;code&gt;nix develop&lt;/code&gt; on its own to drop into an interactive shell and
+call the tools bare.&lt;/p&gt;</description></item><item><title>CI and releases</title><link>https://stageset.projects.metio.wtf/contributing/ci-and-release/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/contributing/ci-and-release/</guid><description>&lt;h2 id="continuous-integration"&gt;Continuous integration&lt;/h2&gt;
+&lt;p&gt;Every pull request runs &lt;code&gt;verify.yml&lt;/code&gt;, which fans out into one job per concern so a
+failure points straight at the cause:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;test&lt;/strong&gt; — &lt;code&gt;go build&lt;/code&gt; then the full &lt;code&gt;go test&lt;/code&gt; suite.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;lint-go&lt;/strong&gt; — &lt;code&gt;go vet&lt;/code&gt;, &lt;code&gt;staticcheck&lt;/code&gt;, &lt;code&gt;gosec&lt;/code&gt;, and a &lt;code&gt;gofumpt&lt;/code&gt; formatting check.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;vulnerabilities&lt;/strong&gt; — &lt;code&gt;govulncheck&lt;/code&gt; (a reachable advisory is a hard gate).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;architecture&lt;/strong&gt; — &lt;code&gt;arch-go&lt;/code&gt; against &lt;code&gt;arch-go.yml&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;reuse&lt;/strong&gt; — SPDX/REUSE compliance on every file.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;text linters&lt;/strong&gt; — &lt;code&gt;yamllint&lt;/code&gt;, &lt;code&gt;actionlint&lt;/code&gt;, &lt;code&gt;markdownlint&lt;/code&gt;, &lt;code&gt;typos&lt;/code&gt;, and Vale
+prose linting.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;docs-lint&lt;/strong&gt; — builds the Hugo site and lints the rendered output.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;container-image&lt;/strong&gt; — a buildx image build plus a Trivy scan.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;dco&lt;/strong&gt; — every non-bot commit carries a &lt;code&gt;Signed-off-by&lt;/code&gt; trailer.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A single &lt;strong&gt;all-green&lt;/strong&gt; job depends on every other job and is the only required
+check, so new jobs are covered automatically. A separate &lt;code&gt;kind-smoke.yml&lt;/code&gt; runs the
+operator end to end against a real kind cluster, and &lt;code&gt;fuzz.yml&lt;/code&gt; exercises the fuzz
+targets.&lt;/p&gt;</description></item><item><title>stagesetctl diff</title><link>https://stageset.projects.metio.wtf/cli/diff/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/diff/</guid><description>&lt;p&gt;By default &lt;code&gt;diff&lt;/code&gt; performs a
+&lt;a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/"&gt;server-side&lt;/a&gt;
+
+dry-run apply and exits &lt;code&gt;1&lt;/code&gt; when there are changes, so it works as a CI gate. It
+shows, per object, what a reconcile would create, configure, or delete, plus the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ a rollout would run. To see the full rendered manifests
+without comparing against the cluster, use &lt;a href="https://stageset.projects.metio.wtf/cli/build/"&gt;&lt;code&gt;build&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl diff NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(all)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Diff only the named stage(s); repeatable.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--source-dir&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(none)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Use a local artifact tree as &lt;code&gt;[STAGE=]PATH&lt;/code&gt;; repeatable. Skips the cluster fetch.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--server-side&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Server-side dry-run apply diff (needs update/patch RBAC). &lt;code&gt;false&lt;/code&gt; renders client-side against live objects.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--as-tenant&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Server-side dry-run each stage as its effective &lt;code&gt;serviceAccountName&lt;/code&gt; — the identity the controller &lt;em&gt;applies&lt;/em&gt; with (the stage&amp;rsquo;s own, else &lt;code&gt;spec.serviceAccountName&lt;/code&gt;). Reads (source resolve, &lt;code&gt;substituteFrom&lt;/code&gt;, inventory) always use your credentials, mirroring the controller, which reads as itself (see &lt;a href="https://stageset.projects.metio.wtf/security/multi-cluster/"&gt;multi-cluster and tenancy&lt;/a&gt;
+).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reject a stage &lt;code&gt;sourceRef&lt;/code&gt; that targets another namespace, matching a controller run with &lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;, so the preview fails the way the controller would.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-secrets&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reveal Secret values instead of masking.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-unchanged&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Include objects with no change.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--prune&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Show resources that would be deleted (fell out of inventory).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--color&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;auto&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Colorize output: &lt;code&gt;auto&lt;/code&gt;, &lt;code&gt;always&lt;/code&gt;, or &lt;code&gt;never&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--exit-code&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Exit &lt;code&gt;1&lt;/code&gt; when changes are found. &lt;code&gt;false&lt;/code&gt; always exits &lt;code&gt;0&lt;/code&gt; on a clean run.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="example"&gt;Example&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl diff payments
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;--- live
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;+++ merged
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;@@ Deployment payments/web @@
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; spec:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- replicas: 3
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;+ replicas: 6
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- ConfigMap payments/old-feature-flags (pruned: fell out of inventory)
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Actions to run:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; application:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; pre db-migrate job ledger-migrations
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; post smoke-test http https://payments.internal/healthz
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Objects that left the stage&amp;rsquo;s &lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/"&gt;inventory&lt;/a&gt;
+ show as deletions
+(&lt;code&gt;pruned: …&lt;/code&gt;); pass &lt;code&gt;--prune=false&lt;/code&gt; to hide them. The trailing &lt;code&gt;Actions to run&lt;/code&gt;
+block lists the &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;pre/post actions&lt;/a&gt;
+ a real reconcile
+would run, honoring the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#scope-revision-version-or-lifetime"&gt;action scopes&lt;/a&gt;
+:
+an action already satisfied for its scope — a &lt;code&gt;Revision&lt;/code&gt; action recorded at this
+revision, a &lt;code&gt;Version&lt;/code&gt; action held at a fixed version, a completed once-ever
+&lt;code&gt;Lifetime&lt;/code&gt; action — is omitted, plus the stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; actions. &lt;code&gt;diff&lt;/code&gt; never
+runs them, it only reports them. For the full behavioral preview — &lt;em&gt;why&lt;/em&gt; each
+action runs, skips, or re-runs — see &lt;a href="https://stageset.projects.metio.wtf/cli/plan/"&gt;&lt;code&gt;plan&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;</description></item></channel></rss>

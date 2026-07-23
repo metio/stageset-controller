@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Flux-Operator on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/flux-operator/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/flux-operator/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/flux-operator/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/flux-operator/</id><entry><title type="html">Flux Operator (ResourceSet) integration</title><link href="https://stageset.projects.metio.wtf/integrations/flux-operator/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux Operator ResourceSet"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/guides/best-practices/?utm_source=atom_feed" rel="related" type="text/html" title="Best practices"/><link href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/?utm_source=atom_feed" rel="related" type="text/html" title="Conflict policies"/><id>https://stageset.projects.metio.wtf/integrations/flux-operator/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Feed discovered versions into gated promotion, or fan out one StageSet per input.</blockquote><p>Pair <code>StageSet</code> with the <a href="https://fluxoperator.dev/">Flux Operator</a>
+&rsquo;s
+<code>ResourceSet</code> to combine <em>discovery</em> and <em>fan-out</em> with <em>ordered, gated
+promotion</em>. <code>ResourceSet</code> and <code>ResourceSetInputProvider</code> (RSIP) discover and
+template inputs; <code>StageSet</code> rolls a single app through its stages. The two work on
+<a href="/comparisons/flux-operator/">complementary axes</a>
+ — this page shows the two
+patterns where they meet.</p>
+<p>Both patterns require the
+<a href="https://fluxoperator.dev/docs/install/">Flux Operator installed</a>
+ alongside
+Flux and the stageset-controller.</p>
+<h2 id="discovery-feeding-gated-promotion">Discovery feeding gated promotion</h2>
+<p>A <code>ResourceSetInputProvider</code> watches an OCI registry for new chart or image tags
+on a schedule, and a <code>ResourceSet</code> templates a <code>StageSet</code> pinned to whatever tag
+it discovers. The <code>StageSet</code> then promotes that version through its ordered,
+gated stages.</p>
+<p>The RSIP discovers tags, filtered to a semver range, refreshing only inside a
+weekday morning window:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSetInputProvider</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-tags</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">OCIArtifactTag</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">oci://ghcr.io/example/my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">filter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">semver</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&gt;=1.0.0 &lt;2.0.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">limit</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">schedule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">cron</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0 8 * * 1-5&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">timeZone</span><span class="p">:</span><span class="w"> </span><span class="l">Europe/Berlin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">window</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span></code></pre></div><p>The <code>ResourceSet</code> consumes that provider&rsquo;s exported inputs and renders a
+<code>StageSet</code> pinned to the discovered <code>&lt;&lt; inputs.tag &gt;&gt;</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-stageset</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inputsFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSetInputProvider</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-tags</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">oci://ghcr.io/example/my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ref</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tag | quote &gt;&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">crds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./crds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">source.toolkit.fluxcd.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">OCIRepository</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">./app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">readyChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span></code></pre></div><p>The RSIP&rsquo;s <code>schedule.window</code> already constrains when a new tag becomes visible, so
+the <code>StageSet</code> here carries no <code>updateWindows</code> — gating lives at the discovery
+layer. A new tag inside the morning window re-renders the <code>OCIRepository</code> and
+<code>StageSet</code>, and the promotion runs CRDs before the app, waiting on the
+<code>Deployment</code>&rsquo;s health between stages.</p>
+<h2 id="fanning-out-one-stageset-per-input">Fanning out one StageSet per input</h2>
+<p>A single <code>ResourceSet</code> can stamp out one <code>StageSet</code> per input — per tenant,
+branch, or pull request — each promoted through the same stages independently.
+Here a <code>Static</code> provider lists the tenants:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSetInputProvider</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">tenants</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Static</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">defaultValues</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">region</span><span class="p">:</span><span class="w"> </span><span class="l">eu-central-1</span><span class="w">
+</span></span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">fluxcd.controlplane.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">tenant-stagesets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inputs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l">acme</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l">globex</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l">initech</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tenant &gt;&gt;-app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tenant &gt;&gt;-deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">app</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;&lt; inputs.tenant &gt;&gt;-app  </span><span class="w"> </span><span class="c"># an ExternalArtifact per tenant</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">updateWindows</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Allow</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0 14 * * TUE,THU&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">duration</span><span class="p">:</span><span class="w"> </span><span class="l">3h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">timeZone</span><span class="p">:</span><span class="w"> </span><span class="l">Europe/Berlin</span><span class="w">
+</span></span></span></code></pre></div><p>Each rendered <code>StageSet</code> impersonates its own tenant ServiceAccount, so a tenant&rsquo;s
+rollout can only touch what that account allows. Adding a tenant is one more entry
+under <code>spec.inputs</code>; the <code>ResourceSet</code> reconciles the new <code>StageSet</code> into being.</p>
+<h2 id="choosing-where-to-time-gate">Choosing where to time-gate</h2>
+<p>Both tools can gate on a clock — the RSIP <code>spec.schedule</code> constrains <em>when inputs
+refresh</em>, while a <code>StageSet</code>&rsquo;s <a href="/gating/update-windows/">update windows</a>
+ constrain
+<em>when a revision rolls out</em>. Pick one layer per release so a rollout isn&rsquo;t gated
+twice:</p>
+<ul>
+<li>Gate at the <strong>RSIP</strong> when you want discovery itself to be periodic — a new
+version only ever appears during the schedule window (the first pattern above).</li>
+<li>Gate at the <strong>StageSet</strong> when inputs may refresh freely but promotion must wait
+for a maintenance window (the second pattern above).</li>
+</ul>
+<p>See the <a href="/comparisons/flux-operator/">comparison</a>
+ for how the two axes line up.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/flux-operator" term="flux-operator" label="flux-operator"/><category scheme="https://stageset.projects.metio.wtf/tags/resourceset" term="resourceset" label="resourceset"/><category scheme="https://stageset.projects.metio.wtf/tags/integration" term="integration" label="integration"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry><entry><title type="html">StageSet vs Flux Operator ResourceSet</title><link href="https://stageset.projects.metio.wtf/comparisons/flux-operator/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/integrations/flux-operator/?utm_source=atom_feed" rel="related" type="text/html" title="Flux Operator (ResourceSet) integration"/><link href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Argo Rollouts"/><link href="https://stageset.projects.metio.wtf/comparisons/flux/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Flux kustomize-controller"/><link href="https://stageset.projects.metio.wtf/comparisons/helm/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Helm"/><link href="https://stageset.projects.metio.wtf/comparisons/kustomize/?utm_source=atom_feed" rel="related" type="text/html" title="StageSet vs Kustomize"/><id>https://stageset.projects.metio.wtf/comparisons/flux-operator/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Horizontal fan-out and scheduled discovery versus vertical, gated promotion.</blockquote><p><code>StageSet</code> and the <a href="https://fluxoperator.dev/">Flux Operator</a>
+&rsquo;s <code>ResourceSet</code>
+solve different axes of delivery, and they compose cleanly:</p>
+<ul>
+<li><strong><code>ResourceSet</code> is horizontal fan-out.</strong> It templates <em>N</em> instances of a set of
+resources from a matrix of inputs, and pairs with a
+<code>ResourceSetInputProvider</code> (RSIP) to <em>discover</em> those inputs — pull requests,
+branches, tags, OCI artifact tags — on a schedule.</li>
+<li><strong><code>StageSet</code> is vertical promotion.</strong> It moves <em>one</em> application through an
+ordered list of gated <a href="/defining-a-release/stages-and-sources/">stages</a>
+, with typed
+<a href="/defining-a-release/actions/">actions</a>
+, <a href="/gating/versioned-migrations/">versioned migrations</a>
+,
+and <a href="/gating/rollback/">rollback</a>
+ along the way.</li>
+</ul>
+<p>Reach for <code>ResourceSet</code> to stamp out many similar deployments from a changing set
+of inputs. Reach for <code>StageSet</code> to roll a single release out in order, gated at
+each step. To do both — discover a new version, then promote it through gated
+stages — run them together; see the
+<a href="/integrations/flux-operator/">Flux Operator integration</a>
+ page.</p>
+<h2 id="what-resourceset-gives-you">What ResourceSet gives you</h2>
+<p><code>ResourceSet</code> (<code>fluxcd.controlplane.io/v1</code>) renders Kubernetes resources from a
+template, fanned out over inputs:</p>
+<ul>
+<li><strong>Inputs.</strong> <code>spec.inputs</code> holds static key-value sets; <code>spec.inputsFrom</code>
+references one or more <code>ResourceSetInputProvider</code> objects that supply inputs
+dynamically. <code>spec.inputStrategy</code> combines them by <code>Flatten</code> or <code>Permute</code>.</li>
+<li><strong>Templating.</strong> <code>spec.resources</code> (or <code>spec.resourcesTemplate</code> for one YAML
+string) carries Go templates with <code>&lt;&lt; &gt;&gt;</code> delimiters, e.g. <code>&lt;&lt; inputs.tag &gt;&gt;</code>,
+plus sprig-style helpers.</li>
+<li><strong>Discovery.</strong> A <code>ResourceSetInputProvider</code> (<code>spec.type</code> of <code>Static</code>,
+<code>GitHubPullRequest</code>, <code>OCIArtifactTag</code>, and others) exports inputs to
+<code>status.exportedInputs</code>, optionally filtered by <code>spec.filter</code> (semver, regex,
+limit). Its <code>spec.schedule</code> (cron + <code>timeZone</code> + <code>window</code>) controls <em>when</em> it
+re-checks the source for new inputs — the Flux Operator&rsquo;s
+<a href="https://fluxoperator.dev/docs/resourcesets/time-based-delivery/">time-based delivery</a>
+.</li>
+<li><strong>Apply.</strong> <code>spec.dependsOn</code>, <code>spec.wait</code>, and <code>spec.serviceAccountName</code> govern
+ordering between objects, health waiting, and impersonation.</li>
+</ul>
+<p>What <code>ResourceSet</code> does not model is an ordered, gated rollout of a single app:
+there are no per-stage gates, no typed migrations crossing a version boundary, and
+no automatic rollback to a previous revision.</p>
+<h2 id="what-stageset-adds">What StageSet adds</h2>
+<ul>
+<li><strong>Ordered, gated stages.</strong> <code>spec.stages</code> runs top to bottom; each waits for the
+previous to report healthy via <a href="/defining-a-release/ready-checks/">ready checks</a>
+ before the
+next begins.</li>
+<li><strong>Typed actions between steps.</strong> <code>patch</code>, <code>http</code>, <code>wait</code>, <code>job</code>, <code>delete</code>, and
+<code>apply</code> <a href="/defining-a-release/actions/">actions</a>
+ run as <code>pre</code> / <code>post</code> / <code>onFailure</code> gates
+around a stage.</li>
+<li><strong>Version-gated migrations.</strong> <a href="/gating/versioned-migrations/"><code>spec.migrations</code></a>
+
+run an action ladder exactly once when crossing a version boundary.</li>
+<li><strong>Rollback.</strong> <a href="/gating/rollback/"><code>rollbackOnFailure</code></a>
+ restores the last good
+revisions when a run fails.</li>
+</ul>
+<h2 id="both-time-gate-delivery">Both time-gate delivery</h2>
+<p>Both tools can gate delivery on a clock, but at different layers:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Layer</th>
+					<th>Field</th>
+					<th>Gates</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ResourceSetInputProvider</code></td>
+					<td><code>spec.schedule</code> (cron, <code>timeZone</code>, <code>window</code>)</td>
+					<td><em>when inputs refresh</em> — how often a new version or PR is discovered</td>
+			</tr>
+			<tr>
+					<td><code>StageSet</code></td>
+					<td><a href="/gating/update-windows/"><code>spec.updateWindows</code></a>
+ (<code>Allow</code> / <code>Deny</code>)</td>
+					<td><em>when a discovered revision rolls out</em> through the stages</td>
+			</tr>
+	</tbody>
+</table>
+<p>When you combine them, gate at <strong>one</strong> layer to avoid double-gating. Either let the
+RSIP <code>schedule</code> constrain when a new version becomes visible and leave the
+<code>StageSet</code> always-open, or refresh inputs freely and let the <code>StageSet</code>
+<code>updateWindows</code> decide when the promotion happens. The
+<a href="/integrations/flux-operator/">integration page</a>
+ shows both.</p>
+<h2 id="using-them-together">Using them together</h2>
+<p>The two compose along their separate axes: a <code>ResourceSetInputProvider</code> discovers
+a new version on a schedule, a <code>ResourceSet</code> templates a <code>StageSet</code> pinned to that
+version, and the <code>StageSet</code> runs the ordered, gated promotion. The other direction
+fans a <code>ResourceSet</code> out into one <code>StageSet</code> per tenant, branch, or pull request.
+Both patterns, with complete manifests, are on the
+<a href="/integrations/flux-operator/">Flux Operator integration</a>
+ page.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/comparison" term="comparison" label="comparison"/><category scheme="https://stageset.projects.metio.wtf/tags/flux-operator" term="flux-operator" label="flux-operator"/><category scheme="https://stageset.projects.metio.wtf/tags/resourceset" term="resourceset" label="resourceset"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

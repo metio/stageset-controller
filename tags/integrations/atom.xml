@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Integrations on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/integrations/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/integrations/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/integrations/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/integrations/</id><entry><title type="html">Integrations &amp; tooling</title><link href="https://stageset.projects.metio.wtf/integrations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="related" type="text/html" title="Dashboard"/><link href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/?utm_source=atom_feed" rel="related" type="text/html" title="From Jsonnet to a gated rollout"/><link href="https://stageset.projects.metio.wtf/guides/jsonnet-migrations/?utm_source=atom_feed" rel="related" type="text/html" title="Generating migrations with Jsonnet"/><link href="https://stageset.projects.metio.wtf/guides/parameters/?utm_source=atom_feed" rel="related" type="text/html" title="Parameterizing a rollout"/><link href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/?utm_source=atom_feed" rel="related" type="text/html" title="Producer-aware sources"/><id>https://stageset.projects.metio.wtf/integrations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Connect StageSet to producers and tooling — producer-aware sources, the Flux Operator, the Claude Code skill, and the MCP server.</blockquote><p>How StageSet fits with the rest of your delivery stack: react to upstream
+producers that render artifacts, compose with the Flux Operator, and drive
+StageSets from an AI assistant.</p>
+<ul>
+<li><strong><a href="/integrations/producer-aware-sources/">Producer-aware sources</a>
+</strong> — point a
+stage at a producer like <a href="https://jaas.projects.metio.wtf/">JaaS</a>
+ and re-render
+when it republishes.</li>
+<li><strong><a href="/integrations/flux-operator/">Flux Operator integration</a>
+</strong> — combine StageSet
+with the Flux Operator&rsquo;s <code>ResourceSet</code>.</li>
+<li><strong><a href="/integrations/claude-code/">Claude Code skill</a>
+</strong> — a skill that helps an
+assistant author and operate StageSets.</li>
+<li><strong><a href="/integrations/mcp-server/">MCP server</a>
+</strong> — an MCP server an agent uses to
+read status and drive reconciliation.
+</content></li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/integrations" term="integrations" label="integrations"/><category scheme="https://stageset.projects.metio.wtf/tags/tooling" term="tooling" label="tooling"/><category scheme="https://stageset.projects.metio.wtf/tags/jaas" term="jaas" label="jaas"/></entry></feed>

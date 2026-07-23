@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Pruning on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/pruning/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/pruning/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/pruning/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/pruning/</id><entry><title type="html">Inventory and pruning</title><link href="https://stageset.projects.metio.wtf/defining-a-release/inventory/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/running/disaster-recovery/?utm_source=atom_feed" rel="related" type="text/html" title="Backup and disaster recovery"/><link href="https://stageset.projects.metio.wtf/guides/best-practices/?utm_source=atom_feed" rel="related" type="text/html" title="Best practices"/><link href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/?utm_source=atom_feed" rel="related" type="text/html" title="Conflict policies"/><id>https://stageset.projects.metio.wtf/defining-a-release/inventory/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>How a StageSet records what each stage applied — the sharded StageInventory — prunes what a revision no longer renders, and labels every applied object for per-stage discovery.</blockquote><p>Every time a stage applies, the controller records the exact set of objects it
+applied, so it can <strong>prune</strong> what a later revision no longer renders and tear a
+StageSet down in reverse stage order. That record is the <strong><code>StageInventory</code></strong> — a
+controller-owned resource you never author (its fields are in the
+<a href="/api/stageinventory/">API reference</a>
+).</p>
+<h2 id="what-the-inventory-records">What the inventory records</h2>
+<p>For each stage, the controller writes a <code>StageInventory</code> listing every object the
+stage owns — group, kind, namespace, name. On the next reconcile it diffs the new
+render against that record and prunes the objects that dropped out, honoring
+<code>prune: false</code> and the <a href="/defining-a-release/conflict-policies/">conflict policy</a>
+. On deletion it
+walks the stages in reverse, so a later stage&rsquo;s objects are removed before the
+earlier stages they depend on.</p>
+<p>Large stages are <strong>sharded</strong>: once a stage&rsquo;s inventory passes <code>--inventory-shard-cap</code>
+entries (default <code>5000</code>), it is split across multiple <code>StageInventory</code> objects so a
+single object never grows unbounded. Sharding is automatic; the cap is a tuning
+knob you rarely touch.</p>
+<h2 id="discovering-a-stages-objects">Discovering a stage&rsquo;s objects</h2>
+<p>Every applied object carries labels that let you find it without reading the
+<code>StageInventory</code>:</p>
+<ul>
+<li><code>stages.metio.wtf/name</code> — the owning StageSet.</li>
+<li><code>stages.metio.wtf/namespace</code> — the StageSet&rsquo;s namespace.</li>
+<li><code>stages.metio.wtf/stage</code> — the stage that applied the object.</li>
+</ul>
+<p>So a single label selector enumerates exactly one stage&rsquo;s objects:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl get all --namespace prod --selector stages.metio.wtf/stage<span class="o">=</span>canary
+</span></span></code></pre></div><p>These labels are for discovery only; pruning and teardown are driven by the
+<code>StageInventory</code> record, which is authoritative and scope-agnostic (it tracks
+cluster-scoped and namespaced objects alike). The controller owns pruning — there
+is no <code>kubectl apply --prune</code> handoff to keep in sync.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># Helm values</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">inventoryShardCap</span><span class="p">:</span><span class="w"> </span><span class="m">5000</span><span class="w">      </span><span class="c"># maximum entries per StageInventory shard</span><span class="w">
+</span></span></span></code></pre></div><p>The <a href="/reference/configuration/">configuration reference</a>
+ lists the flag, and
+the <a href="/api/stageinventory/">StageInventory API</a>
+ documents the object&rsquo;s fields.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/inventory" term="inventory" label="inventory"/><category scheme="https://stageset.projects.metio.wtf/tags/pruning" term="pruning" label="pruning"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/></entry></feed>

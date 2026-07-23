@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Promotion on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/promotion/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/promotion/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/promotion/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/promotion/</id><entry><title type="html">AwaitingPromotion</title><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="related" type="text/html" title="StageFailed"/><id>https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage is applied and healthy and the rollout is holding for a manual promotion.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=AwaitingPromotion</code>. The Message names the stage waiting to be promoted. <code>status.stages[].promotionState</code> shows <code>phase: AwaitingManual</code>.</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its <a href="/gating/stage-promotion/"><code>spec.stages[].promotion.requireManualPromotion</code></a>
+ holds the rollout there until an operator promotes it. This is the &ldquo;hold before prod&rdquo; gate: a human confirms the stage is good (ideally after reviewing metrics) before the rollout advances.</p>
+<p>The gate holds only <em>advancement to the next stage</em>. The awaiting stage stays applied and its drift keeps being corrected; earlier stages remain promoted. A manual promotion gate is distinct from a migration&rsquo;s <code>requireApproval</code>, which gates a destructive version transition rather than a stage advance.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages}&#39;</span>
+</span></span></code></pre></div><p>The stage whose <code>promotionState.phase</code> is <code>AwaitingManual</code> is the one waiting. Verify it is behaving as expected before promoting.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Promote the stage when you are satisfied it is healthy:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl promote &lt;name&gt; --namespace &lt;namespace&gt; --stage &lt;stage&gt;
+</span></span></code></pre></div><p>This stamps a one-shot <code>stages.metio.wtf/promote</code> annotation that advances the named stage exactly once; the rollout then continues to the next stage. To promote without the CLI:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; annotate --overwrite stageset &lt;name&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  stages.metio.wtf/promote<span class="o">=</span><span class="s2">&#34;&lt;stage&gt;@</span><span class="k">$(</span>date +%s<span class="k">)</span><span class="s2">&#34;</span>
+</span></span></code></pre></div><p>A manual gate that is always rubber-stamped is theatre — it earns its keep when the operator actually checks the stage&rsquo;s behavior (in a later release, paired with promotion analysis) before promoting.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/promotion" term="promotion" label="promotion"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">PromotionBlocked</title><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/runbooks/promotionblocked/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage&rsquo;s promotion analysis breached its thresholds, so the rollout will not advance past it.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=PromotionBlocked</code>. <code>status.stages[].promotionState</code> shows <code>phase: Blocked</code>, an <code>analysisFailures</code> count, and <code>lastAnalysis</code> with each check&rsquo;s observed value and verdict. When the stage&rsquo;s <code>onFailure</code> is <code>Rollback</code>, a Warning event records the revert and <code>promotionState.abortedRevision</code> names the revision that was rolled back.</p>
+<h2 id="cause">Cause</h2>
+<p>A <a href="/gating/stage-promotion/">promotion analysis</a>
+ on the named stage failed: one or more checks read a metric outside its threshold for more than <code>failureLimit</code> consecutive evaluations. The stage applied and became Ready, but its <em>observed behavior</em> — error rate, latency, SLO burn, whatever the checks measure — is out of bounds, so the rollout is not advanced to the next stage.</p>
+<p><code>onFailure</code> decides what happened:</p>
+<ul>
+<li><code>Hold</code> (default): the stage stays applied but not promoted, surfacing why.</li>
+<li><code>Rollback</code>: the stage was reverted to its last-known-good revision (scoped to this stage; earlier promoted stages are untouched) and the failing revision is parked so it is not re-applied each reconcile.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages[*].promotionState.lastAnalysis}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.stages[*].promotion.analysis}&#39;</span>
+</span></span></code></pre></div><p><code>lastAnalysis.checks[]</code> shows each check&rsquo;s observed <code>value</code>, whether it was <code>ok</code>, and any source <code>error</code>. Confirm whether the metric reflects a real regression in the new revision or a too-tight threshold / wrong query. The <code>stageset_stage_promotion_blocked</code> gauge is <code>1</code> for a blocked stage.</p>
+<h2 id="remediation">Remediation</h2>
+<p>If the new revision is genuinely bad, fix it forward (push a corrected revision) — a new revision clears the failure count and re-runs the analysis. If the analysis itself is wrong (threshold too tight, query off), correct <code>spec.stages[].promotion.analysis</code> and re-reconcile. To accept the current revision despite the analysis (you have confirmed it is healthy), promote past the gate:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl promote &lt;name&gt; --namespace &lt;namespace&gt; --stage &lt;stage&gt;
+</span></span></code></pre></div><p>While tuning a new analysis, set <code>dryRun: true</code> on it so it records what <em>would</em> block without holding or rolling back anything.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/promotion" term="promotion" label="promotion"/><category scheme="https://stageset.projects.metio.wtf/tags/analysis" term="analysis" label="analysis"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Soaking</title><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetexhausted/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetExhausted"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><id>https://stageset.projects.metio.wtf/runbooks/soaking/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stage is applied and healthy and the rollout is holding through its promotion soak window before advancing.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=Soaking</code>. The Message names the stage and when the soak window closes. <code>status.stages[].promotionState</code> shows <code>phase: Soaking</code> with a <code>soakUntil</code> timestamp.</p>
+<h2 id="cause">Cause</h2>
+<p>This is <strong>not a failure</strong> — it is a promotion gate working as configured. The named stage applied cleanly and became Ready, and its <a href="/gating/stage-promotion/"><code>spec.stages[].promotion.soak</code></a>
+ holds the rollout at this stage for the configured duration before advancing to the next one. A soak catches delayed regressions — an OOM after warm-up, error-rate creep, a crashloop after several minutes — that the point-in-time <code>readyChecks</code> cannot see.</p>
+<p>The soak gates only <em>advancement to the next stage</em>. The soaking stage stays applied and its drift keeps being corrected; earlier stages remain promoted. The controller requeues at <code>soakUntil</code> and advances on its own once the window closes (provided the stage is still healthy).</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.stages}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;namespace&gt; get stageset &lt;name&gt; --output <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.stages[*].promotion}&#39;</span>
+</span></span></code></pre></div><p>Compare <code>promotionState.soakUntil</code> against the current time. A new revision restarts the soak from the start, so a fresh rollout resets the clock.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Usually none — the rollout advances automatically when the soak elapses. If you need it sooner (for example to ship a fix without waiting out a long soak):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl promote &lt;name&gt; --namespace &lt;namespace&gt; --stage &lt;stage&gt;
+</span></span></code></pre></div><p>A manual promotion advances the stage immediately, ending the soak early. If a soak is consistently too long for the environment, lower or remove <code>spec.stages[].promotion.soak</code> for that stage — soaks are a per-stage trade-off (long for prod, short or absent for dev).</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/promotion" term="promotion" label="promotion"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Stage promotion</title><link href="https://stageset.projects.metio.wtf/gating/stage-promotion/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/gating/update-windows/?utm_source=atom_feed" rel="related" type="text/html" title="Update windows"/><link href="https://stageset.projects.metio.wtf/defining-a-release/actions/?utm_source=atom_feed" rel="related" type="text/html" title="Actions"/><link href="https://stageset.projects.metio.wtf/guides/best-practices/?utm_source=atom_feed" rel="related" type="text/html" title="Best practices"/><id>https://stageset.projects.metio.wtf/gating/stage-promotion/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-27T07:14:32+02:00</updated><content type="html"><![CDATA[<blockquote>Hold a rollout at a stage with a soak window or a manual gate before it advances.</blockquote><p>A promotion gate decides whether a healthy, applied stage may <em>advance</em> the
+rollout to the next stage. It is distinct from <a href="/defining-a-release/ready-checks/"><code>readyChecks</code></a>
+,
+which decide whether a stage&rsquo;s just-applied objects became Ready: a promotion
+gate runs <em>after</em> the stage is Ready and gates only advancement. Holding a gate
+parks the rollout at the stage — the stage stays applied and its drift keeps
+being corrected, and later stages are never touched.</p>
+<p>Two mechanisms are available, and they compose: a <code>soak</code> window runs first, then
+a manual gate.</p>
+<h2 id="soak-before-advancing">Soak before advancing</h2>
+<p>Hold at a stage for a fixed duration after it becomes Ready, advancing only if it
+stays healthy for the whole window. This catches delayed regressions — an OOM
+after warm-up, error-rate creep, a crashloop after several minutes — that
+point-in-time <code>readyChecks</code> cannot see.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">stages.metio.wtf/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">apps</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceAccountName</span><span class="p">:</span><span class="w"> </span><span class="l">deployer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promotion</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-prod</span><span class="w">
+</span></span></span></code></pre></div><p>While <code>staging</code> soaks, the StageSet reports <code>Ready=False</code> with reason <code>Soaking</code>
+and <code>status.stages[].promotionState</code> carries the <code>soakUntil</code> instant. The
+controller requeues at that instant and advances on its own once the window
+elapses. There is no default soak — omit <code>soak</code> (or set it to <code>0</code>) for no hold;
+soaks are a per-stage trade-off, so use a long window for prod and none for dev.</p>
+<h2 id="block-on-pod-restarts">Block on pod restarts</h2>
+<p>A soak waits, but a bare soak only re-checks readiness — and a Deployment can stay
+<code>Available</code> while individual pods crash-loop and restart behind it. A <code>restartGate</code>
+closes that gap with no external dependency: each check watches a group of pods by
+label and blocks the promotion if their container restarts exceed <code>maxRestarts</code>.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promotion</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">restartGate</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">onFailure</span><span class="p">:</span><span class="w"> </span><span class="l">Hold       </span><span class="w"> </span><span class="c"># default for every check below (Hold | Rollback)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">api</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">selector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">web-api</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">maxRestarts</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">     </span><span class="c"># no restarts tolerated (the default)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">workers</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">selector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">web-worker</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">maxRestarts</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">     </span><span class="c"># tolerate a couple of blips</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">onFailure</span><span class="p">:</span><span class="w"> </span><span class="l">Rollback </span><span class="w"> </span><span class="c"># override the gate default for this group</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-prod</span><span class="w">
+</span></span></span></code></pre></div><p>Each check sums the restart counts across the init and regular containers of every
+pod matching its <code>selector</code>, in the StageSet&rsquo;s namespace, and fails once the total
+exceeds <code>maxRestarts</code> (<code>0</code> by default — no restarts allowed). Pods being terminated
+are skipped, so a prior revision draining out during the rollout doesn&rsquo;t gate the
+revision replacing it. Pods are matched by label, not by a workload reference, so a
+group can span any source — a Deployment, StatefulSet, DaemonSet, Job, or a custom
+controller. Pair it with a <code>soak</code> so the
+window gives a crash time to surface; it catches the OOM-after-warm-up or
+crashloop-after-N-minutes that point-in-time
+<a href="/defining-a-release/ready-checks/"><code>readyChecks</code></a>
+ miss.</p>
+<p><code>onFailure</code> decides what a breach does — set it once on the gate and override it
+per check:</p>
+<ul>
+<li><code>Hold</code> (default) parks the rollout at this stage and surfaces why.</li>
+<li><code>Rollback</code> reverts the stage to its last-good revision (needs
+<a href="/gating/rollback/"><code>spec.rollbackOnFailure</code></a>
+ so a snapshot exists; with none it
+degrades to a hold) and parks the failing revision so it isn&rsquo;t re-applied each
+reconcile. Scoped to this stage — earlier promoted stages are untouched.</li>
+</ul>
+<p>While a check is breached the StageSet reports <code>Ready=False</code> with reason
+<code>PromotionBlocked</code>, naming the failing check and the restart total on
+<code>status.stages[].promotionState</code>. A manual promotion is break-glass over it.</p>
+<p>The watched pods are read under the same identity that applies the stage. In the
+default single-tenant setup — a StageSet with no <code>serviceAccountName</code> or
+<code>kubeConfig</code> — that is the controller, and the Helm chart grants it <code>pods</code> read
+out of the box. A StageSet that sets <code>serviceAccountName</code> reads under that
+ServiceAccount, so grant it <code>pods</code> <code>list</code>; a <code>kubeConfig</code> target reads under that
+kubeconfig&rsquo;s identity.</p>
+<h2 id="block-on-bad-events">Block on bad events</h2>
+<p>A pod can stay <code>Ready</code> and never restart while the API streams Warning events
+about it — new replicas that can&rsquo;t schedule, probes flapping under load, an
+image that won&rsquo;t pull. An <code>eventGate</code> watches those events on a group of pods and
+blocks the promotion once they pile up.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promotion</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">eventGate</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">onFailure</span><span class="p">:</span><span class="w"> </span><span class="l">Hold       </span><span class="w"> </span><span class="c"># default for every check below (Hold | Rollback)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">api</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">selector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">web-api</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">reasons</span><span class="p">:</span><span class="w">            </span><span class="c"># only these Warning reasons count</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="l">FailedScheduling</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="l">OOMKilling</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="l">FailedMount</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span>- <span class="l">ErrImagePull</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">maxEvents</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">        </span><span class="c"># any matching event fails (the default)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-prod</span><span class="w">
+</span></span></span></code></pre></div><p>Each check counts Warning events whose <code>reason</code> is in its <code>reasons</code> list and whose
+target pod matches the <code>selector</code>, in the StageSet&rsquo;s namespace, and fails once the
+total (by occurrence count) exceeds <code>maxEvents</code> (<code>0</code> by default). <code>reasons</code> is
+required — events are noisy, so a check only counts the reasons you name. Events
+are matched to the exact pods running this revision, so a previous revision&rsquo;s
+events don&rsquo;t carry over.</p>
+<p><code>selector</code> and <code>onFailure</code> work exactly as they do for the
+<a href="#block-on-pod-restarts">restart gate</a>
+ — pods matched by label (any source), the
+gate default overridable per check, and <code>Rollback</code> reverting the stage to its
+last-good revision. While a check is breached the StageSet reports <code>Ready=False</code>
+with reason <code>PromotionBlocked</code>, naming the failing check and the event total. The
+apply identity reads events under the same rules as the
+<a href="#block-on-pod-restarts">restart gate</a>
+ — the chart grants the controller <code>events</code>
+read out of the box; a <code>serviceAccountName</code> or <code>kubeConfig</code> target needs <code>events</code>
+<code>list</code> (alongside <code>pods</code> <code>list</code>) on that identity.</p>
+<h2 id="require-a-manual-promotion">Require a manual promotion</h2>
+<p>Hold at a stage until an operator promotes it — the &ldquo;confirm before prod&rdquo; gate.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-prod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promotion</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">requireManualPromotion</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><p>While held, the StageSet reports <code>Ready=False</code> with reason <code>AwaitingPromotion</code>.
+Promote the stage when you are satisfied it is healthy:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">stagesetctl promote web --namespace apps --stage prod
+</span></span></code></pre></div><p><code>promote</code> stamps a one-shot <code>stages.metio.wtf/promote</code> annotation that advances
+the named stage exactly once; the rollout then continues. Add <code>--wait</code> to block
+until the controller records the promotion. A manual gate that is always
+rubber-stamped is theatre — it earns its keep when the operator actually checks
+the stage&rsquo;s behavior before promoting. <code>requireManualPromotion</code> defaults to
+<code>false</code>, and is distinct from a migration&rsquo;s <a href="/gating/versioned-migrations/"><code>requireApproval</code></a>
+,
+which gates a destructive version transition rather than a stage advance.</p>
+<h2 id="advance-only-if-metrics-stay-healthy">Advance only if metrics stay healthy</h2>
+<p>An analysis advances the stage only while metric checks against an external
+source keep passing — error rate, latency, an SLO burn rate, anything Prometheus
+can answer. This sees behavior a Deployment&rsquo;s own <code>.status</code> cannot, and is the
+difference between &ldquo;did it become Ready&rdquo; (<a href="/defining-a-release/ready-checks/"><code>readyChecks</code></a>
+)
+and &ldquo;is it behaving&rdquo; (analysis).</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sourceRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">web-staging</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promotion</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">10m           </span><span class="w"> </span><span class="c"># observe across this window</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">analysis</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">1m      </span><span class="w"> </span><span class="c"># re-evaluate this often while holding; defaults to spec.interval</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">failureLimit</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">    </span><span class="c"># consecutive failing evaluations tolerated; defaults to 0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">checks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">error-rate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">http://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="l">sum(rate(http_requests_total{stage=&#34;staging&#34;,code=~&#34;5..&#34;}[1m]))/sum(rate(http_requests_total{stage=&#34;staging&#34;}[1m]))</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">threshold</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.01&#34;</span><span class="w">  </span><span class="c"># ≤1% 5xx</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">latency-p99</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">http://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="l">histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{stage=&#34;staging&#34;}[5m])) by (le))</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">threshold</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.5&#34;</span><span class="w">   </span><span class="c"># ≤500ms p99</span><span class="w">
+</span></span></span></code></pre></div><p>Every check must stay within its <a href="/gating/error-budget/"><code>threshold</code></a>
+ (<code>min</code>
+and/or <code>max</code>, inclusive). A breach increments a failure counter; the counter
+resets on a passing evaluation and fails the promotion once it exceeds
+<code>failureLimit</code>. While analysis is holding, the StageSet reports <code>Ready=False</code> with
+reason <code>Soaking</code> (during the soak) or, once a check has failed past the limit,
+<code>PromotionBlocked</code>. Each check&rsquo;s last observed value and verdict are on
+<code>status.stages[].promotionState.lastAnalysis</code>. The analysis shares the metric
+source contract with the <a href="/gating/error-budget/">error-budget freeze</a>
+, including
+its SSRF guard and <code>secretRef</code> bearer-token support.</p>
+<p><code>onFailure</code> decides what a failed analysis does:</p>
+<ul>
+<li><code>Hold</code> (default) — leave the stage applied but not promoted, surfacing why.</li>
+<li><code>Rollback</code> — revert this stage to its last-known-good revision (requires
+<a href="/gating/rollback/"><code>spec.rollbackOnFailure</code></a>
+ so a snapshot exists) and park the
+failing revision so it isn&rsquo;t re-applied each reconcile. Scoped to this stage:
+earlier promoted stages are untouched.</li>
+</ul>
+<p><code>onSourceError</code> decides what an unreadable source does, defaulting to <code>Hold</code> —
+never advance a stage whose behavior can&rsquo;t be verified. (This is the opposite of
+the error-budget freeze&rsquo;s <code>Allow</code> default, because holding a promotion only parks
+the rollout at the current healthy stage.) See the
+<a href="/runbooks/promotionblocked/">PromotionBlocked</a>
+ and
+<a href="/runbooks/budgetsourceunavailable/">BudgetSourceUnavailable</a>
+ runbooks. While
+tuning a new analysis, set <code>dryRun: true</code> to record what <em>would</em> block without
+holding or rolling back anything.</p>
+<h2 id="promote-early-when-the-system-is-healthy">Promote early when the system is healthy</h2>
+<p>A long soak is insurance against a slow regression — but when the system is
+demonstrably healthy there&rsquo;s no reason to wait it out. <code>fastTrack</code> shortens a
+soak based on a metric: once a minimum soak has elapsed and a burn-rate (or
+similar) metric stays within bounds, the stage promotes early.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promotion</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">30m             </span><span class="w"> </span><span class="c"># the maximum soak</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">fastTrack</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">after</span><span class="p">:</span><span class="w"> </span><span class="l">5m           </span><span class="w"> </span><span class="c"># always soak at least this long</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">             </span><span class="c"># promote early once burn rate &lt;= 1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">prometheus</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">http://prometheus.monitoring:9090</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="l">slo:current_burn_rate:ratio{sloth_service=&#34;checkout&#34;}</span><span class="w">
+</span></span></span></code></pre></div><p><code>fastTrack</code> only ever promotes <em>earlier</em> than <code>soak</code> — it never extends it. If the
+metric is over <code>max</code>, unreadable, or the minimum <code>after</code> hasn&rsquo;t elapsed, the stage
+just keeps soaking as normal. Use it with <code>analysis</code> when you also want to <em>block</em>
+on a bad metric: analysis holds/rolls back on breach, fastTrack accelerates on
+health. <code>fastTrack</code> requires a <code>soak</code> (there&rsquo;s nothing to shorten otherwise), and
+<code>after</code> defaults to <code>0</code> (a healthy metric can promote immediately).</p>
+<h2 id="combine-soak-and-a-manual-gate">Combine soak and a manual gate</h2>
+<p>With both set, the stage soaks first, then awaits a manual promotion:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">promotion</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">soak</span><span class="p">:</span><span class="w"> </span><span class="l">30m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">requireManualPromotion</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span></code></pre></div><p><code>stagesetctl promote</code> is also a break-glass: promoting a soaking stage ends the
+soak early and advances it immediately, whichever gate is currently holding it.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/promotion" term="promotion" label="promotion"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/scheduling" term="scheduling" label="scheduling"/></entry></feed>

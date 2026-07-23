@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Slos on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/slos/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/slos/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/slos/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/slos/</id><entry><title type="html">Observability</title><link href="https://stageset.projects.metio.wtf/observability/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><id>https://stageset.projects.metio.wtf/observability/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The four observability pillars for the controller — structured logging, OTLP tracing, Prometheus metrics, and the opt-in alert catalog — plus service level objectives and a ready-made dashboard.</blockquote><blockquote>
+<p><strong>Status Conditions and Kubernetes Events are the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. The four pillars below are additive
+operator-side detail; they explain how a reconcile behaved, but the condition
+on the StageSet is what tells you whether it is Ready.</p>
+</blockquote>
+<p>The controller surfaces its behaviour through four pillars, each configured by a
+small set of binary flags that the Helm chart drives from values:</p>
+<ul>
+<li><strong><a href="/observability/logging/">Logging</a>
+</strong> — structured <code>log/slog</code> output (JSON or text)
+for the controller and, through the logr bridge, controller-runtime itself.
+Read it with <code>kubectl logs</code> and filter with <code>jq</code>.</li>
+<li><strong><a href="/observability/tracing/">Tracing</a>
+</strong> — OpenTelemetry spans exported over OTLP gRPC to
+a collector you point the controller at. Off until you set an endpoint.</li>
+<li><strong><a href="/observability/metrics/">Metrics</a>
+</strong> — a <code>stageset_*</code> family of Prometheus series on
+reconcile outcomes, stage applies, drift correction, deferred rollouts, and
+per-stage readiness, alongside the controller-runtime and workqueue series.
+Scrape with a <code>ServiceMonitor</code> or a plain scrape config and query with PromQL.</li>
+<li><strong><a href="/observability/alerting/">Alerting</a>
+</strong> — an opt-in <code>PrometheusRule</code> with a starter
+alert set whose thresholds are tunable values, plus the Kubernetes Events the
+controller emits on StageSet transitions. Every alert links to a
+<a href="/runbooks/">runbook</a>
+.</li>
+</ul>
+<p>Two further pages build on the metrics:</p>
+<ul>
+<li><strong><a href="/observability/slos/">Service level objectives</a>
+</strong> — the controller&rsquo;s own
+reconcile-availability and reconcile-latency SLOs, computed from the
+<code>stageset_*</code> series, with their targets and error budgets.</li>
+<li><strong><a href="/observability/dashboard/">Dashboard</a>
+</strong> — a ready-made Grafana dashboard
+over the controller and workqueue series.</li>
+</ul>
+<p>For each pillar you configure the controller binary&rsquo;s flags, read or query its
+output, and drive both from the Helm chart values. The full flag list with
+defaults is on the <a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/logging" term="logging" label="logging"/><category scheme="https://stageset.projects.metio.wtf/tags/tracing" term="tracing" label="tracing"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/slos" term="slos" label="slos"/><category scheme="https://stageset.projects.metio.wtf/tags/dashboard" term="dashboard" label="dashboard"/></entry></feed>

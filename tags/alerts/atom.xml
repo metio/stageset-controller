@@ -1,0 +1,512 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Alerts on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/alerts/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/alerts/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/alerts/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-07-23T07:22:19+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/alerts/</id><entry><title type="html">Alerting</title><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/observability/alerting/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-19T09:16:22+02:00</updated><content type="html"><![CDATA[<blockquote>The controller&rsquo;s Kubernetes Events on StageSet transitions, the opt-in PrometheusRule alert catalog with tunable thresholds, and how every alert and Ready reason links to a runbook.</blockquote><p>Two layers surface trouble: Kubernetes Events the controller emits on a StageSet&rsquo;s
+own timeline, and a Prometheus alert set built on the <a href="/observability/metrics/">metrics</a>
+.
+Both lead an operator to a <a href="/runbooks/">runbook</a>
+.</p>
+<p>These alerts page on the <em>causes</em> of trouble. To alert on a
+<a href="/observability/slos/">service-level objective</a>
+ directly, and to see availability,
+error budget, and latency against their objectives, use the published
+<a href="/observability/dashboard/">dashboard</a>
+.</p>
+<h2 id="the-controller-binary">The controller binary</h2>
+<h3 id="kubernetes-events">Kubernetes Events</h3>
+<p>On a StageSet&rsquo;s condition transitions and notable actions, the controller emits
+standard Kubernetes Events (events.v1) against the StageSet object. The reason
+fills both the Event <code>reason</code> and <code>action</code> slots. Read them with:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace team-a describe stageset checkout
+</span></span><span class="line"><span class="cl"><span class="c1"># or, just the events:</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace team-a get events --field-selector involvedObject.name<span class="o">=</span>checkout
+</span></span></code></pre></div><p>Reasons you will see include <code>Succeeded</code> and <code>StageFailed</code> on the rollout outcome,
+<code>UpdateDeferred</code> when an update window holds a rollout, <code>MigrationStarted</code> /
+<code>MigrationCompleted</code> / <code>MigrationFailed</code> around a versioned migration,
+<code>DriftCorrected</code> when an apply repaired out-of-band drift, <code>RolledBack</code> when
+<code>rollbackOnFailure</code> restored the last-good revisions, and <code>RollbackStoreFailed</code> /
+<code>OnFailureAction</code> for best-effort side paths. Because Events target a <code>StageSet</code>,
+Flux&rsquo;s <code>notification-controller</code> can route them to Slack, Teams, or any provider by
+declaring an <code>Alert</code> that targets <code>kind: StageSet</code> — no extra plumbing on the
+controller side.</p>
+<h3 id="ready-reasons-link-to-runbooks">Ready reasons link to runbooks</h3>
+<p>Every actionable Ready-condition reason maps to a runbook page at
+<code>/runbooks/&lt;reason&gt;/</code>. The controller threads a
+<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code> suffix onto
+actionable Ready-condition messages, so <code>kubectl describe stageset</code> links straight
+to the remediation page. Intentional, steady states — <code>Succeeded</code>, <code>Suspended</code> —
+carry no suffix, since there is nothing to remediate.</p>
+<h2 id="the-helm-chart">The Helm chart</h2>
+<p>The chart ships an opt-in <code>PrometheusRule</code> named <code>&lt;release&gt;-alerts</code> with a starter
+alert set. It requires the Prometheus operator CRDs. Enable it and route every
+alert to one Alertmanager receiver with <code>extraAlertLabels</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">prometheusRule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l">30s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Labels Prometheus selects the rule object on.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">release</span><span class="p">:</span><span class="w"> </span><span class="l">kube-prometheus-stack</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Merged onto every rendered alert, so all stageset alerts route together.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraAlertLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="l">platform</span><span class="w">
+</span></span></span></code></pre></div><h3 id="shipped-alerts">Shipped alerts</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Alert</th>
+					<th>Severity</th>
+					<th>Fires when</th>
+					<th>Threshold knobs</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSetReconcileErrorsHigh</code></td>
+					<td>warning</td>
+					<td>Per-StageSet Ready=False rate (5m window) exceeds the rate, excluding the happy <code>Succeeded</code> and <code>Suspended</code> reasons.</td>
+					<td><code>reconcileErrorRate</code> (<code>0.1</code>/s), <code>reconcileErrorDuration</code> (<code>10m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerWorkqueueDepthHigh</code></td>
+					<td>warning</td>
+					<td><code>workqueue_depth{controller=&quot;stageset&quot;}</code> exceeds the depth.</td>
+					<td><code>workqueueDepth</code> (<code>50</code>), <code>workqueueDuration</code> (<code>15m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetReconcileLatencyHigh</code></td>
+					<td>warning</td>
+					<td>Reconcile p99 (10m window) exceeds the ceiling in seconds.</td>
+					<td><code>reconcileLatencySeconds</code> (<code>30</code>), <code>reconcileLatencyDuration</code> (<code>15m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerPodDown</code></td>
+					<td>critical</td>
+					<td>A controller pod is NotReady for the window.</td>
+					<td><code>podDownDuration</code> (<code>5m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWebhookCertRenewalFailing</code></td>
+					<td>critical</td>
+					<td><code>stageset_webhook_cert_renewal_failures_total</code> increases over 1h beyond the count.</td>
+					<td><code>webhookCertRenewalFailuresPerHour</code> (<code>1</code>), <code>webhookCertRenewalFailuresDuration</code> (<code>30m</code>)</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWatchEngagementFailing</code></td>
+					<td>warning</td>
+					<td><code>stageset_watch_engagement_failures_total{gvk=...}</code> increases over 1h beyond the count — a producer watch failed to engage, so StageSets referencing that kind stop re-triggering on its upstream changes.</td>
+					<td><code>watchEngagementFailuresPerHour</code> (<code>1</code>), <code>watchEngagementFailuresDuration</code> (<code>30m</code>)</td>
+			</tr>
+	</tbody>
+</table>
+<p>Each threshold lives under <code>metrics.prometheusRule.thresholds</code>. To silence a
+built-in alert without forking the chart, raise its threshold to an impossibly high
+value; to add alerts, append them under <code>metrics.prometheusRule.extraRules</code>, which
+renders verbatim in a separate <code>stageset-extras</code> group.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">prometheusRule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">thresholds</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileErrorRate</span><span class="p">:</span><span class="w"> </span><span class="m">0.1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileErrorDuration</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">workqueueDepth</span><span class="p">:</span><span class="w"> </span><span class="m">50</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">workqueueDuration</span><span class="p">:</span><span class="w"> </span><span class="l">15m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileLatencySeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reconcileLatencyDuration</span><span class="p">:</span><span class="w"> </span><span class="l">15m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">podDownDuration</span><span class="p">:</span><span class="w"> </span><span class="l">5m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">webhookCertRenewalFailuresPerHour</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">webhookCertRenewalFailuresDuration</span><span class="p">:</span><span class="w"> </span><span class="l">30m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">watchEngagementFailuresPerHour</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">watchEngagementFailuresDuration</span><span class="p">:</span><span class="w"> </span><span class="l">30m</span><span class="w">
+</span></span></span></code></pre></div><h3 id="alerts-link-to-runbooks">Alerts link to runbooks</h3>
+<p>Each alert carries a runbook link in its <code>runbook_url</code> annotation (the annotation
+key is <code>metrics.prometheusRule.runbookAnnotationKey</code>; the URL prefix is fixed to
+this site&rsquo;s <a href="/runbooks/">runbooks</a>
+). <code>StageSetReconcileErrorsHigh</code> templates its
+link on the <code>reason</code> label — every Ready-condition reason maps to a runbook at
+<code>/runbooks/&lt;reason&gt;/</code> — while the availability, webhook, and
+watch-engagement alerts point at their fixed pages
+(<a href="/runbooks/workqueue-saturation/">workqueue-saturation</a>
+,
+<a href="/runbooks/reconcile-latency/">reconcile-latency</a>
+,
+<a href="/runbooks/controller-pod-down/">controller-pod-down</a>
+,
+<a href="/runbooks/webhook-cert-renewal/">webhook-cert-renewal</a>
+,
+<a href="/runbooks/watch-engagement/">watch-engagement</a>
+).</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/prometheus" term="prometheus" label="prometheus"/><category scheme="https://stageset.projects.metio.wtf/tags/events" term="events" label="events"/><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/></entry><entry><title type="html">Controller pod down</title><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/suspended/?utm_source=atom_feed" rel="related" type="text/html" title="Suspended"/><link href="https://stageset.projects.metio.wtf/runbooks/webhook-cert-renewal/?utm_source=atom_feed" rel="related" type="text/html" title="Webhook cert renewal failing"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><id>https://stageset.projects.metio.wtf/runbooks/controller-pod-down/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>A stageset-controller pod has been NotReady for the alert window.</blockquote><h2 id="symptom">Symptom</h2>
+<p>A <code>stageset-controller</code> pod is <code>NotReady</code>; the <code>StageSetControllerPodDown</code> alert
+fires. While no replica is Ready, StageSets are not reconciled and the
+<a href="https://kubernetes.io/docs/">Kubernetes</a>
+ admission webhook may reject <code>StageSet</code>
+writes (<code>failurePolicy: Fail</code>).</p>
+<h2 id="cause">Cause</h2>
+<ul>
+<li>a crash-looping container (bad config flag, missing RBAC, panic),</li>
+<li>the node draining or out of resources,</li>
+<li>a failing readiness probe (<code>/readyz</code> on <code>--health-probe-bind-address</code>),</li>
+<li>the leader-election lease unobtainable.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system get pods --selector app.kubernetes.io/name<span class="o">=</span>stageset-controller
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system describe pod &lt;pod&gt;
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system logs &lt;pod&gt; --previous --tail<span class="o">=</span><span class="m">200</span>
+</span></span></code></pre></div><p>Look for flag-parse errors at startup, RBAC <code>Forbidden</code> on the controller&rsquo;s own
+<code>ServiceAccount</code>, or OOMKills.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Fix the surfaced cause (correct the flag/values, grant the missing controller
+RBAC, raise resource limits).</li>
+<li>Run more than one replica with leader election so a single pod failure doesn&rsquo;t
+stop reconciliation — see <a href="/running/production/#high-availability">production</a>
+.</li>
+<li>If admission is blocking writes during the outage and you must unblock urgently,
+scope or relax the webhook <code>failurePolicy</code>, then restore it once the controller
+is healthy.</li>
+</ul>
+<p>See <a href="/running/operations/">operations</a>
+ for the full alert set and its thresholds.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Observability</title><link href="https://stageset.projects.metio.wtf/observability/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/observability/logging/?utm_source=atom_feed" rel="related" type="text/html" title="Logging"/><link href="https://stageset.projects.metio.wtf/observability/metrics/?utm_source=atom_feed" rel="related" type="text/html" title="Metrics"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><id>https://stageset.projects.metio.wtf/observability/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The four observability pillars for the controller — structured logging, OTLP tracing, Prometheus metrics, and the opt-in alert catalog — plus service level objectives and a ready-made dashboard.</blockquote><blockquote>
+<p><strong>Status Conditions and Kubernetes Events are the primary status surface</strong> —
+<code>kubectl describe</code>, <code>kubectl wait --for=condition</code>, and Flux&rsquo;s
+notification-controller all read them. The four pillars below are additive
+operator-side detail; they explain how a reconcile behaved, but the condition
+on the StageSet is what tells you whether it is Ready.</p>
+</blockquote>
+<p>The controller surfaces its behaviour through four pillars, each configured by a
+small set of binary flags that the Helm chart drives from values:</p>
+<ul>
+<li><strong><a href="/observability/logging/">Logging</a>
+</strong> — structured <code>log/slog</code> output (JSON or text)
+for the controller and, through the logr bridge, controller-runtime itself.
+Read it with <code>kubectl logs</code> and filter with <code>jq</code>.</li>
+<li><strong><a href="/observability/tracing/">Tracing</a>
+</strong> — OpenTelemetry spans exported over OTLP gRPC to
+a collector you point the controller at. Off until you set an endpoint.</li>
+<li><strong><a href="/observability/metrics/">Metrics</a>
+</strong> — a <code>stageset_*</code> family of Prometheus series on
+reconcile outcomes, stage applies, drift correction, deferred rollouts, and
+per-stage readiness, alongside the controller-runtime and workqueue series.
+Scrape with a <code>ServiceMonitor</code> or a plain scrape config and query with PromQL.</li>
+<li><strong><a href="/observability/alerting/">Alerting</a>
+</strong> — an opt-in <code>PrometheusRule</code> with a starter
+alert set whose thresholds are tunable values, plus the Kubernetes Events the
+controller emits on StageSet transitions. Every alert links to a
+<a href="/runbooks/">runbook</a>
+.</li>
+</ul>
+<p>Two further pages build on the metrics:</p>
+<ul>
+<li><strong><a href="/observability/slos/">Service level objectives</a>
+</strong> — the controller&rsquo;s own
+reconcile-availability and reconcile-latency SLOs, computed from the
+<code>stageset_*</code> series, with their targets and error budgets.</li>
+<li><strong><a href="/observability/dashboard/">Dashboard</a>
+</strong> — a ready-made Grafana dashboard
+over the controller and workqueue series.</li>
+</ul>
+<p>For each pillar you configure the controller binary&rsquo;s flags, read or query its
+output, and drive both from the Helm chart values. The full flag list with
+defaults is on the <a href="/reference/configuration/">configuration reference</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/observability" term="observability" label="observability"/><category scheme="https://stageset.projects.metio.wtf/tags/logging" term="logging" label="logging"/><category scheme="https://stageset.projects.metio.wtf/tags/tracing" term="tracing" label="tracing"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/slos" term="slos" label="slos"/><category scheme="https://stageset.projects.metio.wtf/tags/dashboard" term="dashboard" label="dashboard"/></entry><entry><title type="html">Operations</title><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><link href="https://stageset.projects.metio.wtf/observability/alerting/?utm_source=atom_feed" rel="related" type="text/html" title="Alerting"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><id>https://stageset.projects.metio.wtf/running/operations/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Metrics, alerts, events, and runbooks for running the controller day to day.</blockquote><h2 id="metrics">Metrics</h2>
+<p>The controller registers custom metrics on the controller-runtime registry, served
+on <code>--metrics-bind-address</code> (<code>:8080</code>) alongside the standard
+<code>controller_runtime_*</code> and <code>workqueue_*</code> series. Enable scraping with the chart&rsquo;s
+opt-in <code>ServiceMonitor</code> (<code>metrics.serviceMonitor.enabled</code>):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># values.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">serviceMonitor</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">        </span><span class="c"># needs the Prometheus operator CRDs</span><span class="w">
+</span></span></span></code></pre></div><table>
+	<thead>
+			<tr>
+					<th>Metric</th>
+					<th>Type</th>
+					<th>Labels</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>stageset_reconcile_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>reason</code></td>
+					<td>Reconciles, by terminal Ready reason.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_stage_applied_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Stages applied and verified.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_drift_corrected_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code>, <code>stage</code></td>
+					<td>Out-of-band drift re-asserted on a steady-state reconcile.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_update_deferred_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td>Rollouts held by a closed update window.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_webhook_cert_renewal_failures_total</code></td>
+					<td>counter</td>
+					<td><em>(none)</em></td>
+					<td>Failed self-signed webhook cert renewals.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_teardown_force_drop_total</code></td>
+					<td>counter</td>
+					<td><code>namespace</code>, <code>name</code></td>
+					<td>Finalizers force-dropped after <code>--max-teardown-wait</code> of failing teardown; sustained non-zero values flag an unreachable target and orphaned objects. See <a href="/runbooks/teardown-forced/">TeardownForced</a>
+.</td>
+			</tr>
+			<tr>
+					<td><code>stageset_stage_ready</code></td>
+					<td>gauge</td>
+					<td><code>namespace</code>, <code>stageset</code>, <code>stage</code></td>
+					<td><code>1</code> when a stage is Ready, else <code>0</code> — for metric-based <a href="/guides/progressive-delivery/#argo-rollouts">progressive delivery</a>
+.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="alerts">Alerts</h2>
+<p>The chart ships an opt-in <code>PrometheusRule</code> with a starter alert set, gated on
+<code>metrics.prometheusRule.enabled</code> (requires the
+<a href="https://prometheus-operator.dev/">Prometheus operator</a>
+ CRDs). It covers the
+custom <code>stageset_*</code> metrics plus controller-runtime signals:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Alert</th>
+					<th>Fires on</th>
+					<th>Severity</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>StageSetReconcileErrorsHigh</code></td>
+					<td>per-StageSet Ready=False rate (excludes the healthy <code>Succeeded</code>/<code>Suspended</code> reasons)</td>
+					<td>warning</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerWorkqueueDepthHigh</code></td>
+					<td>the reconcile queue not draining</td>
+					<td>warning</td>
+			</tr>
+			<tr>
+					<td><code>StageSetReconcileLatencyHigh</code></td>
+					<td>reconcile p99 latency over threshold</td>
+					<td>warning</td>
+			</tr>
+			<tr>
+					<td><code>StageSetControllerPodDown</code></td>
+					<td>a controller pod NotReady</td>
+					<td>critical</td>
+			</tr>
+			<tr>
+					<td><code>StageSetWebhookCertRenewalFailing</code></td>
+					<td>self-signed cert rotation failing</td>
+					<td>critical</td>
+			</tr>
+	</tbody>
+</table>
+<p>Every threshold is a knob under <code>metrics.prometheusRule.thresholds</code>, and
+<code>extraAlertLabels</code> is merged onto every rendered alert so all stageset alerts can
+route through one Alertmanager receiver. Each alert carries a <code>runbook_url</code>
+annotation pointing at the matching <a href="/runbooks/">runbook</a>
+ page on this site; the
+URL prefix is fixed to this site, and the reconcile-errors alert templates the
+URL on <code>$labels.reason</code>. Append your own rules under
+<code>metrics.prometheusRule.extraRules</code>, and silence a built-in alert by raising its
+threshold rather than forking the chart. When <code>StageSetControllerWorkqueueDepthHigh</code>
+or <code>StageSetReconcileLatencyHigh</code> fires persistently, the controller is at capacity
+— see <a href="/running/scale-and-capacity/">Scale and capacity</a>
+ for which lever to
+pull.</p>
+<h2 id="events">Events</h2>
+<p>The controller emits Kubernetes Events on every Ready-condition transition, so
+<code>kubectl describe stageset &lt;name&gt;</code> and <a href="https://fluxcd.io/">Flux</a>
+&rsquo;s
+<code>notification-controller</code> (via an <code>Alert</code> targeting <code>kind: StageSet</code>) both
+surface what happened. Normal events
+include <code>Succeeded</code>, <code>UpdateDeferred</code>, <code>MigrationStarted</code>, and
+<code>MigrationCompleted</code>; warnings include <code>StageFailed</code>, <code>DriftCorrected</code>,
+<code>RolledBack</code>, <code>MigrationFailed</code>, <code>OnFailureAction</code>, <code>RollbackStoreFailed</code>, and
+<code>TeardownForced</code> (a deleting StageSet&rsquo;s finalizer force-dropped after
+<code>--max-teardown-wait</code> — see <a href="/runbooks/teardown-forced/">TeardownForced</a>
+).</p>
+<h2 id="runbooks">Runbooks</h2>
+<p>Every actionable Ready-condition reason has a <a href="/runbooks/">runbook</a>
+ covering the
+symptom, cause, diagnosis, and remediation. The controller appends a
+<code>(runbook: https://stageset.projects.metio.wtf/runbooks/&lt;reason&gt;/)</code> link to every
+actionable Ready message (the reason lower-cased into a path segment), so a
+<code>kubectl describe</code> links straight to the fix. Healthy reasons (<code>Succeeded</code>,
+<code>Suspended</code>) get no link.</p>
+<p>For example, a <code>StageFailed</code> StageSet shows:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Message:  stage &#34;application&#34; failed: … (runbook: https://stageset.projects.metio.wtf/runbooks/stagefailed/)
+</span></span></code></pre></div><h2 id="forcing-a-reconcile">Forcing a reconcile</h2>
+<p>The controller reconciles on its <code>spec.interval</code>, on source changes, and on
+demand. To trigger an out-of-band run, stamp the standard annotation — which is
+what <code>flux reconcile</code> and <a href="/cli/reconcile/"><code>stagesetctl reconcile</code></a>
+ do for you:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl annotate stageset my-app <span class="se">\
+</span></span></span><span class="line"><span class="cl">  reconcile.fluxcd.io/requestedAt<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>date -u +%FT%TZ<span class="k">)</span><span class="s2">&#34;</span> --overwrite
+</span></span></code></pre></div><p>The handled token is recorded in <code>status.lastHandledReconcileAt</code>.</p>
+<h2 id="drift-correction">Drift correction</h2>
+<p>On a steady-state reconcile the controller re-asserts the desired state, healing
+out-of-band changes to managed objects. Each correction emits a <code>DriftCorrected</code>
+event and increments <code>stageset_drift_corrected_total</code>. Tighten the cadence with
+<code>spec.driftDetectionInterval</code> when you need faster healing than <code>spec.interval</code>.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/operations" term="operations" label="operations"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/></entry><entry><title type="html">Reconcile latency high</title><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="related" type="text/html" title="Workqueue saturation"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><id>https://stageset.projects.metio.wtf/runbooks/reconcile-latency/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>Reconcile p99 latency for the StageSet controller is above threshold.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>controller_runtime_reconcile_time_seconds</code> p99 for <code>controller=&quot;stageset&quot;</code> exceeds
+the configured threshold; the <code>StageSetReconcileLatencyHigh</code> alert fires (see
+<a href="/running/operations/">operations</a>
+ for the alert set and its thresholds).</p>
+<h2 id="cause">Cause</h2>
+<p>A single reconcile does a lot of work — resolve and fetch every stage&rsquo;s artifact,
+kustomize-build, server-side apply, prune, verify readiness, and run actions — all
+impersonating the tenant <code>ServiceAccount</code>. Latency climbs when any of those is slow:</p>
+<ul>
+<li>large artifacts or slow artifact servers,</li>
+<li>many objects per stage (apply + prune scale with object count),</li>
+<li>readiness waits and <code>wait</code>/<code>http</code>/<code>job</code> actions with long timeouts,</li>
+<li>apiserver or tenant-authorization slowness.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller --tail<span class="o">=</span><span class="m">200</span> <span class="p">|</span> grep -i <span class="s1">&#39;slow\|timeout\|took&#39;</span>
+</span></span></code></pre></div><p>Break the latency down by stage count and artifact size; a single StageSet with
+many large stages dominates p99.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Split a very large StageSet into smaller ones, or fewer objects per stage.</li>
+<li>Tighten action <code>timeout</code>s so a slow gate fails fast instead of stretching the
+reconcile.</li>
+<li>Raise <code>spec.interval</code> where freshness isn&rsquo;t critical.</li>
+<li>Address upstream artifact-server or apiserver latency.</li>
+</ul>
+<p>If the queue itself is backing up, see <a href="/runbooks/workqueue-saturation/">workqueue saturation</a>
+.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry><entry><title type="html">Service level objectives</title><link href="https://stageset.projects.metio.wtf/observability/slos/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/observability/dashboard/?utm_source=atom_feed" rel="related" type="text/html" title="Dashboard"/><link href="https://stageset.projects.metio.wtf/gating/error-budget/?utm_source=atom_feed" rel="related" type="text/html" title="Error-budget freeze"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><id>https://stageset.projects.metio.wtf/observability/slos/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-19T09:16:22+02:00</updated><content type="html"><![CDATA[<blockquote>The StageSet controller&rsquo;s SLOs — reconcile availability and reconcile latency — with their SLIs, targets, error budget, the dashboard that shows them, and how to tune them.</blockquote><p>The StageSet controller tracks two service-level objectives. Each is an objective
+on a service-level indicator (SLI) computed from the
+<a href="/observability/metrics/">metrics</a>
+, measured over a rolling window. The published
+<a href="/observability/dashboard/">dashboard</a>
+ renders them, and the Helm chart can alert
+on them.</p>
+<h2 id="slo-1--reconcile-availability">SLO 1 — reconcile availability</h2>
+<p><strong>Objective:</strong> ≥ <strong>99%</strong> of syncing reconciles reach <code>Ready=True</code> (reason
+<code>Succeeded</code>), over a <strong>28-day</strong> window.</p>
+<p>The SLI counts only reconciles that were actually trying to sync. The intentional
+and upstream-waiting reasons are excluded from the failure half — a paused
+StageSet (<code>Suspended</code>), a rollout held by an update window (<code>UpdateDeferred</code>), and
+a wait on an upstream artifact or dependency (<code>SourceNotReady</code>,
+<code>DependencyNotReady</code>) are not failures and must not burn the budget:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">stageset_reconcile_total</span><span class="p">{</span><span class="nl">reason</span><span class="o">=</span><span class="p">&#34;</span><span class="s">Succeeded</span><span class="p">&#34;}[</span><span class="s">28d</span><span class="p">]</span><span class="o">))</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">/</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">(</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">stageset_reconcile_total</span><span class="p">{</span><span class="nl">reason</span><span class="o">=</span><span class="p">&#34;</span><span class="s">Succeeded</span><span class="p">&#34;}[</span><span class="s">28d</span><span class="p">]</span><span class="o">))</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="o">+</span><span class="w"> </span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">stageset_reconcile_total</span><span class="p">{</span><span class="nl">reason</span><span class="o">!~</span><span class="p">&#34;</span><span class="s">Succeeded|Suspended|UpdateDeferred|SourceNotReady|DependencyNotReady</span><span class="p">&#34;}[</span><span class="s">28d</span><span class="p">]</span><span class="o">))</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">)</span><span class="w">
+</span></span></span></code></pre></div><p>The <strong>error budget</strong> is the 1% of reconciles allowed to fail over the window.
+Remaining budget, normalised so <code>1</code> is full and <code>0</code> is exhausted:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="o">(&lt;</span><span class="nv">availability</span><span class="o">&gt;</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">0.99</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="o">(</span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">0.99</span><span class="o">)</span><span class="w">
+</span></span></span></code></pre></div><h2 id="slo-2--reconcile-latency">SLO 2 — reconcile latency</h2>
+<p><strong>Objective:</strong> the StageSet controller&rsquo;s <strong>p95</strong> reconcile duration stays
+<strong>below 30s</strong> over the window.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="kr">histogram_quantile</span><span class="o">(</span><span class="mf">0.95</span><span class="p">,</span><span class="w"> </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">le</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">controller_runtime_reconcile_time_seconds_bucket</span><span class="p">{</span><span class="nl">controller</span><span class="o">=</span><span class="p">&#34;</span><span class="s">stageset</span><span class="p">&#34;}[</span><span class="s">28d</span><span class="p">]</span><span class="o">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="o">))</span><span class="w">
+</span></span></span></code></pre></div><h2 id="see-the-slos-on-the-dashboard">See the SLOs on the dashboard</h2>
+<p>The published <a href="/observability/dashboard/">dashboard</a>
+ opens with an SLO band:
+current availability against its objective, error budget remaining, p95 latency
+against its objective, and an availability-versus-objective trend. The
+controller-internals panels below explain any movement.</p>
+<p>The objectives and window are top-level arguments, so you set them per environment
+when you render the dashboard through a JaaS <code>JsonnetSnippet</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tlas</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">datasource</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;prometheus&#34;</span><span class="p">]</span><span class="w">   </span><span class="c"># your Prometheus datasource UID</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">window</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;28d&#34;</span><span class="p">]</span><span class="w">              </span><span class="c"># SLO window</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">availabilityTarget</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;0.99&#34;</span><span class="p">]</span><span class="w"> </span><span class="c"># 99%</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">latencyTarget</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;30&#34;</span><span class="p">]</span><span class="w">        </span><span class="c"># seconds</span><span class="w">
+</span></span></span></code></pre></div><p>A short window is fine for a demo; a real <code>28d</code> SLI needs at least that much
+Prometheus retention. For long windows, precompute the SLI with a recording rule
+and point <code>window</code> at the recorded series instead of a raw <code>rate(...[28d])</code>.</p>
+<h2 id="alert-on-the-budget">Alert on the budget</h2>
+<p>The shipped <a href="/observability/alerting/">alerts</a>
+ already page on the <em>causes</em> of SLO
+loss (reconcile errors, latency, workqueue saturation). To alert on the objective
+itself, add an availability-SLO rule through the chart&rsquo;s <code>extraRules</code> passthrough —
+here it fires when recent availability drops below 99%:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">prometheusRule</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraRules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l">StageSetReconcileAvailabilityBelowSLO</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">          (
+</span></span></span><span class="line"><span class="cl"><span class="sd">            sum(rate(stageset_reconcile_total{reason=&#34;Succeeded&#34;}[1h]))
+</span></span></span><span class="line"><span class="cl"><span class="sd">            /
+</span></span></span><span class="line"><span class="cl"><span class="sd">            (
+</span></span></span><span class="line"><span class="cl"><span class="sd">              sum(rate(stageset_reconcile_total{reason=&#34;Succeeded&#34;}[1h]))
+</span></span></span><span class="line"><span class="cl"><span class="sd">              + sum(rate(stageset_reconcile_total{reason!~&#34;Succeeded|Suspended|UpdateDeferred|SourceNotReady|DependencyNotReady&#34;}[1h]))
+</span></span></span><span class="line"><span class="cl"><span class="sd">            )
+</span></span></span><span class="line"><span class="cl"><span class="sd">          ) &lt; 0.99</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l">1h</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l">warning</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="l">StageSet reconcile availability is below its 99% objective</span><span class="w">
+</span></span></span></code></pre></div><p>The alert measures a short recent window (<code>1h</code>) so it pages while the budget is
+actively burning; the dashboard&rsquo;s <code>window</code> shows the full SLO window. See
+<a href="/observability/alerting/">Alerting</a>
+ for the rest of the catalog.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/controller" term="controller" label="controller"/><category scheme="https://stageset.projects.metio.wtf/tags/slo" term="slo" label="slo"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/></entry><entry><title type="html">Workqueue saturation</title><link href="https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/reconcile-latency/?utm_source=atom_feed" rel="related" type="text/html" title="Reconcile latency high"/><link href="https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/?utm_source=atom_feed" rel="related" type="text/html" title="BudgetSourceUnavailable"/><link href="https://stageset.projects.metio.wtf/runbooks/controller-pod-down/?utm_source=atom_feed" rel="related" type="text/html" title="Controller pod down"/><link href="https://stageset.projects.metio.wtf/running/operations/?utm_source=atom_feed" rel="related" type="text/html" title="Operations"/><link href="https://stageset.projects.metio.wtf/runbooks/promotionblocked/?utm_source=atom_feed" rel="related" type="text/html" title="PromotionBlocked"/><id>https://stageset.projects.metio.wtf/runbooks/workqueue-saturation/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-06-26T15:53:52+02:00</updated><content type="html"><![CDATA[<blockquote>The controller cannot drain its reconcile queue fast enough.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>workqueue_depth{controller=&quot;stageset&quot;}</code> stays high; StageSets reconcile slowly or
+lag behind their <code>spec.interval</code>. The <code>StageSetControllerWorkqueueDepthHigh</code> alert
+fires (see <a href="/running/operations/">operations</a>
+ for the alert set and its
+thresholds).</p>
+<h2 id="cause">Cause</h2>
+<p>The controller is enqueuing reconcile requests faster than it completes them.
+Common causes:</p>
+<ul>
+<li><strong>apiserver slowness</strong> — applies, dry-runs, and status writes all block on the
+apiserver (or the impersonated tenant&rsquo;s authorization).</li>
+<li><strong>slow sources</strong> — a stage waiting on a large artifact fetch or a source that is
+slow to become Ready holds a worker.</li>
+<li><strong>a stuck stage</strong> — an action with a long timeout (a <code>wait</code>/<code>http</code>/<code>job</code> that
+never completes) pins a worker for the whole timeout.</li>
+<li><strong>too few workers for the StageSet count</strong> — many StageSets reconciling on short
+intervals.</li>
+</ul>
+<h2 id="diagnosis">Diagnosis</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># which StageSets are churning?</span>
+</span></span><span class="line"><span class="cl">kubectl get stagesets --all-namespaces --sort-by<span class="o">=</span>.status.observedGeneration
+</span></span><span class="line"><span class="cl"><span class="c1"># controller logs for slow operations / retries</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace stageset-system logs deploy/stageset-controller --tail<span class="o">=</span><span class="m">200</span>
+</span></span></code></pre></div><p>Correlate with <code>controller_runtime_reconcile_time_seconds</code> (see
+<a href="/runbooks/reconcile-latency/">reconcile latency</a>
+) and apiserver latency.</p>
+<h2 id="remediation">Remediation</h2>
+<ul>
+<li>Lengthen <code>spec.interval</code> on high-churn StageSets that don&rsquo;t need fast
+reconciliation.</li>
+<li>Cap long-running actions with a tighter <code>timeout</code> so a stuck action releases its
+worker.</li>
+<li>Adding replicas does <strong>not</strong> help: leader election means only the lease holder
+reconciles, so a second replica is failover, not added throughput
+(<a href="/running/production/#high-availability">production</a>
+). The controller has no
+reconcile-concurrency flag — the levers are reducing load (longer intervals, fewer
+StageSets, fewer objects per stage) and removing the slow operations below.</li>
+<li>Investigate apiserver / tenant-authorization latency if reconciles are uniformly
+slow.</li>
+</ul>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/metrics" term="metrics" label="metrics"/><category scheme="https://stageset.projects.metio.wtf/tags/alerts" term="alerts" label="alerts"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry></feed>
