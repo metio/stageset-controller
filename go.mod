@@ -20,7 +20,7 @@ require (
 	github.com/fluxcd/pkg/ssa v0.77.0
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/go-logr/logr v1.4.4
-	github.com/google/cel-go v0.29.2
+	github.com/google/cel-go v0.30.0
 	github.com/google/go-containerregistry v0.21.7
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
