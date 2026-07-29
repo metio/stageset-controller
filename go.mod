@@ -13,7 +13,7 @@ require (
 	github.com/fluxcd/cli-utils v1.2.2
 	github.com/fluxcd/pkg/apis/kustomize v1.20.0
 	github.com/fluxcd/pkg/apis/meta v1.31.0
-	github.com/fluxcd/pkg/auth v0.55.0
+	github.com/fluxcd/pkg/auth v0.56.0
 	github.com/fluxcd/pkg/envsubst v1.7.0
 	github.com/fluxcd/pkg/kustomize v1.39.0
 	github.com/fluxcd/pkg/runtime v0.111.0
