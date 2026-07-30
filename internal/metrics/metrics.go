@@ -68,14 +68,20 @@ var (
 	}, []string{"gvk"})
 
 	// TeardownForceDropTotal counts StageSets whose finalizer was force-dropped
-	// because teardown kept failing past --max-teardown-wait. A force-drop
-	// orphans whatever objects the failing stage's Delete could not remove, so
-	// sustained non-zero values flag a permanently-unreachable target cluster
-	// that operators must clean up by hand. See the teardown runbook.
+	// because teardown could not complete. A force-drop orphans whatever objects
+	// the failing stage's Delete could not remove, so sustained non-zero values
+	// flag a permanently-unreachable target cluster that operators must clean up
+	// by hand. See the teardown runbook.
+	//
+	// reason names the branch that decided: "timed_out" is --max-teardown-wait
+	// elapsing on a target that may merely be slow, while "permanent" and
+	// "unauthorized" are causes no retry can clear, which drop without waiting the
+	// bound out. The split is what lets an alert distinguish a cluster under
+	// strain from one a StageSet can no longer reach at all.
 	TeardownForceDropTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "stageset_teardown_force_drop_total",
-		Help: "StageSets whose finalizer was force-dropped after --max-teardown-wait of failing teardown. Sustained non-zero values flag an unreachable target and accumulating orphaned objects.",
-	}, []string{"namespace", "name"})
+		Help: "StageSets whose finalizer was force-dropped after teardown could not complete, by the reason that decided it. Sustained non-zero values flag an unreachable target and accumulating orphaned objects.",
+	}, []string{"namespace", "name", "reason"})
 
 	// InventorySkippedEntriesTotal counts malformed StageInventory entries that
 	// could not be parsed back into an ObjectRef. A skipped entry means the

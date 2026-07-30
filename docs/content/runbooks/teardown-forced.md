@@ -1,6 +1,6 @@
 ---
 title: TeardownForced
-description: A deleting StageSet's finalizer was force-dropped after teardown kept failing past --max-teardown-wait, possibly orphaning objects on the target cluster.
+description: A deleting StageSet's finalizer was force-dropped because teardown could not complete, possibly orphaning objects on the target cluster.
 tags: [runbooks, teardown, finalizer, troubleshooting]
 ---
 
@@ -15,13 +15,21 @@ Warning  TeardownForced  TeardownForced after 1h0m0s of failing teardown (delete
 finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: ...
 ```
 
-The `stageset_teardown_force_drop_total{namespace,name}` counter increments at the same time.
+The `stageset_teardown_force_drop_total{namespace,name,reason}` counter increments at the same time.
 
 ## Cause
 
 On deletion the controller tears the StageSet's applied objects down in reverse stage order, then drops the finalizer. While a teardown step keeps failing the finalizer is held and the delete retries — so a transient target-cluster outage heals on its own.
 
-But a permanently-unreachable target — a deleted `spec.kubeConfig` Secret, revoked tenant RBAC, or a decommissioned remote cluster — would wedge the StageSet in `Terminating` forever and block namespace teardown. `--max-teardown-wait` (default 1h) caps that wait: once the deletion has been pending longer than the bound, the finalizer is force-dropped so the object can be garbage-collected. Whatever objects the failing stage could not delete are left orphaned.
+But a permanently-unreachable target — a deleted `spec.kubeConfig` Secret, revoked tenant RBAC, or a decommissioned remote cluster — would wedge the StageSet in `Terminating` forever and block namespace teardown. Two things end that wait, and the counter's `reason` label says which:
+
+| `reason` | Meaning |
+|---|---|
+| `timed_out` | The deletion has been pending longer than `--max-teardown-wait` (default 1h). The target may merely be slow or intermittently unreachable, so it gets the full window first. |
+| `permanent` | The teardown failed with an error no retry clears — `Forbidden` on the delete, or a kind the target no longer serves. An operator has to act, and the StageSet already on its way out is not what they will act on. |
+| `unauthorized` | The tenant credential was refused even after the controller evicted it and minted a fresh one, so the `ServiceAccount` the objects would be deleted as is gone. The usual reason is that its own namespace is terminating — and holding the finalizer for that pins the namespace behind objects it is collecting anyway. |
+
+The last two drop immediately rather than waiting the bound out: the orphaned-object cost is identical either way, and an hour in `Terminating` first buys nothing. Whatever objects the failing stage could not delete are left orphaned.
 
 ## Diagnosis
 
@@ -40,4 +48,4 @@ If the target was a remote cluster (`spec.kubeConfig`), check that the kubeconfi
 1. Restore access to the target if it is meant to keep running (re-create the kubeConfig Secret, re-grant the tenant SA's RBAC), then delete the orphaned objects with the label selector above.
 2. If the target is genuinely gone, the orphaned objects went with it — nothing to clean up.
 
-To make the controller wait longer before force-dropping (for example, to ride out a planned multi-hour target outage), raise `--max-teardown-wait`. Setting it very high re-introduces the original wedge risk, so prefer fixing the target over disabling the escape hatch.
+To make the controller wait longer before force-dropping (for example, to ride out a planned multi-hour target outage), raise `--max-teardown-wait`. Setting it very high re-introduces the original wedge risk, so prefer fixing the target over disabling the escape hatch. It bounds the `timed_out` reason only — a `permanent` or `unauthorized` cause drops regardless, since waiting cannot change the outcome.

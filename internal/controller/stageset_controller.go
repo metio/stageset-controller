@@ -1997,19 +1997,69 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 	return ctrl.Result{}, nil
 }
 
-// teardownFailure handles a failed step of reverse-order teardown. While the
-// deletion has been pending less than --max-teardown-wait it returns the error
-// so the finalizer stays and controller-runtime retries. Past the bound it
-// force-drops the finalizer (Warning event + metric) so a permanently-broken
-// target can't pin the StageSet in Terminating indefinitely — at the cost of
-// orphaning whatever objects could not be deleted.
+// Drop reasons labelling stageset_teardown_force_drop_total. They name which
+// branch of teardownDropDecision force-dropped the finalizer, so an alert can
+// tell a target that is merely slow from one a StageSet can no longer reach.
+const (
+	dropReasonTimedOut     = "timed_out"
+	dropReasonPermanent    = "permanent"
+	dropReasonUnauthorized = "unauthorized"
+)
+
+// teardownDropDecision decides whether a failed teardown step force-drops the
+// finalizer, names the branch that decided (for the metric label), and returns
+// how long the deletion has been pending (for the event).
+//
+// Two things force a drop. --max-teardown-wait elapsing is the blunt bound: a
+// target that is slow, or unreachable in a way that might yet heal, gets the
+// full window before its objects are orphaned. A cause that cannot heal skips
+// that wait entirely — the orphan cost is identical whichever branch fires, and
+// spending an hour in Terminating first buys nothing:
+//
+//   - a permanent apiserver error (Forbidden on the delete, a kind the target no
+//     longer serves) needs an operator to act, and the StageSet already on its
+//     way out is not what they will act on.
+//   - an Unauthorized has already been through the tenant client's eviction and
+//     re-mint, so the ServiceAccount the objects would be deleted as is gone —
+//     usually because its own namespace is terminating. Holding the finalizer
+//     for that pins the namespace behind objects it is collecting anyway.
+func (r *StageSetReconciler) teardownDropDecision(ss *stagesv1.StageSet, cause error) (drop bool, reason string, elapsed time.Duration) {
+	if timedOut, waited := r.teardownTimedOut(ss); timedOut {
+		return true, dropReasonTimedOut, waited
+	}
+	switch {
+	case isPermanentAPIError(cause):
+		reason = dropReasonPermanent
+	case apierrors.IsUnauthorized(cause):
+		reason = dropReasonUnauthorized
+	default:
+		return false, "", 0
+	}
+	if ss.DeletionTimestamp.IsZero() {
+		return true, reason, 0
+	}
+	return true, reason, r.now().Sub(ss.DeletionTimestamp.Time)
+}
+
+// teardownFailure handles a failed step of reverse-order teardown. A cause that
+// retry could still clear keeps the finalizer on and returns the error so
+// controller-runtime backs off. Once teardownDropDecision says otherwise — the
+// bound elapsed, or the cause cannot heal — the finalizer is force-dropped
+// (Warning event + metric) so a broken target can't pin the StageSet in
+// Terminating, at the cost of orphaning whatever could not be deleted.
 func (r *StageSetReconciler) teardownFailure(ctx context.Context, ss *stagesv1.StageSet, op string, cause error) (ctrl.Result, error) {
-	timedOut, elapsed := r.teardownTimedOut(ss)
-	if !timedOut {
+	drop, reason, elapsed := r.teardownDropDecision(ss, cause)
+	if !drop {
 		return ctrl.Result{}, cause // retry; finalizer stays
 	}
-	msg := fmt.Sprintf("TeardownForced after %s of failing teardown (%s) — finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: %v",
-		elapsed.Round(time.Second), op, cause)
+	var msg string
+	if reason == dropReasonTimedOut {
+		msg = fmt.Sprintf("TeardownForced after %s of failing teardown (%s) — finalizer dropped; the target cluster may carry orphaned objects an operator must remove by hand. Last error: %v",
+			elapsed.Round(time.Second), op, cause)
+	} else {
+		msg = fmt.Sprintf("TeardownForced after %s — teardown (%s) failed with a cause no retry can clear, so the finalizer was dropped without waiting out --max-teardown-wait; the target cluster may carry orphaned objects an operator must remove by hand. Last error: %v",
+			elapsed.Round(time.Second), op, cause)
+	}
 	metrics.DeleteStageReady(ss.Namespace, ss.Name)
 	metrics.DeleteStageSetMetrics(ss.Namespace, ss.Name)
 	controllerutil.RemoveFinalizer(ss, FinalizerName)
@@ -2020,9 +2070,9 @@ func (r *StageSetReconciler) teardownFailure(ctx context.Context, ss *stagesv1.S
 		// not once per failed-Update retry (which would inflate the alert metric).
 		return ctrl.Result{}, err
 	}
-	log.FromContext(ctx).Error(cause, "force-dropped finalizer after --max-teardown-wait",
-		"elapsed", elapsed.String(), "op", op)
-	metrics.TeardownForceDropTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
+	log.FromContext(ctx).Error(cause, "force-dropped finalizer",
+		"reason", reason, "elapsed", elapsed.String(), "op", op)
+	metrics.TeardownForceDropTotal.WithLabelValues(ss.Namespace, ss.Name, reason).Inc()
 	r.event(ss, corev1.EventTypeWarning, "TeardownForced", msg)
 	r.forgetDeletedTenants(ctx, ss)
 	return ctrl.Result{}, nil

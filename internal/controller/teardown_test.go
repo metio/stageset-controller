@@ -49,7 +49,7 @@ func TestTeardownFailure_ForceDropMetricCountsOnceAcrossFailedUpdate(t *testing.
 	rec := &capturingRecorder{}
 	r := &StageSetReconciler{Client: c, Recorder: rec, MaxTeardownWait: time.Hour, Now: func() time.Time { return now }}
 	cause := errors.New("dial target: no route to host")
-	labels := []string{ss.Namespace, ss.Name}
+	labels := []string{ss.Namespace, ss.Name, dropReasonTimedOut}
 	before := testutil.ToFloat64(metrics.TeardownForceDropTotal.WithLabelValues(labels...))
 
 	// Round 1: the finalizer-removal Update fails → error returned, nothing emitted.
@@ -163,5 +163,70 @@ func TestTeardownFailure_PastWait_ForceDrops(t *testing.T) {
 		if controllerutil.ContainsFinalizer(&got, FinalizerName) {
 			t.Fatal("persisted object should have the finalizer removed")
 		}
+	}
+}
+
+// A cause no retry can clear drops the finalizer immediately rather than holding
+// the StageSet — and its namespace behind it — for the full --max-teardown-wait.
+// Both branches are one minute into a one-hour window, so only the classification
+// can be what force-drops them.
+func TestTeardownFailure_UnclearableCauseDropsWithoutWaitingOutTheBound(t *testing.T) {
+	forbidden := apierrors.NewForbidden(schema.GroupResource{Resource: "deployments"}, "web",
+		errors.New("serviceaccount cannot delete resource"))
+	for _, tc := range []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{"forbidden delete", forbidden, dropReasonPermanent},
+		{"unauthorized after a re-mint", apierrors.NewUnauthorized("Unauthorized"), dropReasonUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			ss := &stagesv1.StageSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:         "team-a",
+					Name:              "ss-" + tc.want,
+					Finalizers:        []string{FinalizerName},
+					DeletionTimestamp: &metav1.Time{Time: now.Add(-1 * time.Minute)},
+				},
+			}
+			c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(ss).Build()
+			rec := &capturingRecorder{}
+			r := &StageSetReconciler{Client: c, Recorder: rec, MaxTeardownWait: time.Hour, Now: func() time.Time { return now }}
+			labels := []string{ss.Namespace, ss.Name, tc.want}
+			before := testutil.ToFloat64(metrics.TeardownForceDropTotal.WithLabelValues(labels...))
+
+			if _, err := r.teardownFailure(context.Background(), ss, "delete stage \"s\" objects", tc.cause); err != nil {
+				t.Fatalf("force-drop should not return an error: %v", err)
+			}
+			if controllerutil.ContainsFinalizer(ss, FinalizerName) {
+				t.Fatal("finalizer survived a cause no retry can clear")
+			}
+			if !rec.has("TeardownForced") {
+				t.Fatal("force-drop should emit a Warning TeardownForced event")
+			}
+			if after := testutil.ToFloat64(metrics.TeardownForceDropTotal.WithLabelValues(labels...)); after-before != 1 {
+				t.Errorf("force-drop counter for reason %q moved by %v, want 1", tc.want, after-before)
+			}
+		})
+	}
+}
+
+// The early drop must stay tied to causes that cannot heal: an unreachable target
+// might come back, so it still gets the full window.
+func TestTeardownDropDecision_TransientCauseWaitsOutTheBound(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{
+		DeletionTimestamp: &metav1.Time{Time: now.Add(-1 * time.Minute)},
+	}}
+	r := &StageSetReconciler{MaxTeardownWait: time.Hour, Now: func() time.Time { return now }}
+
+	if drop, reason, _ := r.teardownDropDecision(ss, errors.New("dial target: no route to host")); drop {
+		t.Errorf("transient cause force-dropped as %q; it should wait out --max-teardown-wait", reason)
+	}
+	if drop, reason, _ := r.teardownDropDecision(ss, apierrors.NewConflict(schema.GroupResource{Resource: "deployments"}, "web", errors.New("conflict"))); drop {
+		t.Errorf("conflict force-dropped as %q; it should wait out --max-teardown-wait", reason)
 	}
 }

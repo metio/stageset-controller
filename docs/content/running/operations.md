@@ -25,7 +25,7 @@ metrics:
 | `stageset_drift_corrected_total` | counter | `namespace`, `name`, `stage` | Out-of-band drift re-asserted on a steady-state reconcile. |
 | `stageset_update_deferred_total` | counter | `namespace`, `name` | Rollouts held by a closed update window. |
 | `stageset_webhook_cert_renewal_failures_total` | counter | _(none)_ | Failed self-signed webhook cert renewals. |
-| `stageset_teardown_force_drop_total` | counter | `namespace`, `name` | Finalizers force-dropped after `--max-teardown-wait` of failing teardown; sustained non-zero values flag an unreachable target and orphaned objects. See [TeardownForced](/runbooks/teardown-forced/). |
+| `stageset_teardown_force_drop_total` | counter | `namespace`, `name`, `reason` | Finalizers force-dropped because teardown could not complete; sustained non-zero values flag an unreachable target and orphaned objects. `reason` is `timed_out` (`--max-teardown-wait` elapsed), `permanent`, or `unauthorized`. See [TeardownForced](/runbooks/teardown-forced/). |
 | `stageset_stage_ready` | gauge | `namespace`, `stageset`, `stage` | `1` when a stage is Ready, else `0` — for metric-based [progressive delivery](/guides/progressive-delivery/#argo-rollouts). |
 
 ## Alerts

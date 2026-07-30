@@ -81,7 +81,7 @@ func TestDeleteStageSetMetrics(t *testing.T) {
 	DriftCorrectedTotal.WithLabelValues(ns, name, "web").Inc()
 	UpdateDeferredTotal.WithLabelValues(ns, name).Inc()
 	InventorySkippedEntriesTotal.WithLabelValues(ns, name, "infra").Inc()
-	TeardownForceDropTotal.WithLabelValues(ns, name).Inc()
+	TeardownForceDropTotal.WithLabelValues(ns, name, "timed_out").Inc()
 	ReconcileTotal.WithLabelValues(ns, other, "Succeeded").Inc() // survivor
 
 	before := testutil.CollectAndCount(ReconcileTotal) + testutil.CollectAndCount(StageAppliedTotal) +
@@ -104,7 +104,7 @@ func TestDeleteStageSetMetrics(t *testing.T) {
 		t.Errorf("survivor series = %v, want 1 (over-deleted)", v)
 	}
 	// The force-drop counter is a deletion-time alert signal; it must survive.
-	if v := testutil.ToFloat64(TeardownForceDropTotal.WithLabelValues(ns, name)); v != 1 {
+	if v := testutil.ToFloat64(TeardownForceDropTotal.WithLabelValues(ns, name, "timed_out")); v != 1 {
 		t.Errorf("teardown force-drop series = %v, want 1 (must survive)", v)
 	}
 }
