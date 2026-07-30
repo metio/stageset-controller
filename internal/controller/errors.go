@@ -30,10 +30,13 @@ import (
 // (NotFound, Conflict, transient transport failures) stays on the default
 // "engage backoff" path.
 //
-// Schema-level rejections (IsInvalid / IsBadRequest) are deliberately NOT
-// treated as permanent here: an immutable-field apply conflict surfaces as
-// IsInvalid and is resolved by a per-stage conflictPolicy without a StageSet
-// spec change, so it must stay on the retryable StageFailed path.
+// Schema-level rejections (IsInvalid / IsBadRequest / IsMethodNotSupported) are
+// deliberately NOT treated as permanent here: an immutable-field apply conflict
+// surfaces as IsInvalid and is resolved by a per-stage conflictPolicy without a
+// StageSet spec change, so it must stay on the retryable StageFailed path. The
+// jaas operator's identically-named classifier does treat them as permanent,
+// which is right for a project with no apply path; the two must not be aligned
+// on this. TestIsPermanentAPIError pins each case.
 //
 // Caveat: IsForbidden keys off HTTP 403, which in Kubernetes practice is always
 // RBAC (quota → 429, admission rejection → 422). A degraded cluster could

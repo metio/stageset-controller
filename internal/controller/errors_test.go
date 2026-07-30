@@ -26,6 +26,14 @@ func noMatchErr() error {
 	return &apimeta.NoResourceMatchError{PartialResource: schema.GroupVersionResource{Group: "g", Version: "v", Resource: "things"}}
 }
 
+// The schema-rejection cases below are the whole reason this classifier must NOT
+// be aligned with the jaas operator's identically-named one, which does treat
+// IsInvalid / IsBadRequest / IsMethodNotSupported as permanent. jaas has no apply
+// path; here an immutable-field apply conflict surfaces as IsInvalid, and
+// failReason consults isPermanentAPIError first — so widening this list would
+// report every conflictPolicy-resolvable conflict as a terminal RBACDenied and
+// send operators to fix RBAC that is already correct. The three cases are pinned
+// individually so a well-meant "make the two repos match" trips here.
 func TestIsPermanentAPIError(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -39,8 +47,10 @@ func TestIsPermanentAPIError(t *testing.T) {
 		// retryable here, resolved by a conflictPolicy — not permanent.
 		{"invalid is retryable", apierrors.NewInvalid(schema.GroupKind{Kind: "X"}, "x", nil), false},
 		{"badrequest is retryable", apierrors.NewBadRequest("nope"), false},
+		{"methodnotsupported is retryable", apierrors.NewMethodNotSupported(schema.GroupResource{Resource: "x"}, "patch"), false},
 		{"notfound is transient", apierrors.NewNotFound(schema.GroupResource{Resource: "x"}, "x"), false},
 		{"conflict is transient", apierrors.NewConflict(schema.GroupResource{Resource: "x"}, "x", errors.New("c")), false},
+		{"unauthorized is not permanent here", apierrors.NewUnauthorized("Unauthorized"), false},
 		{"plain error is transient", errors.New("dial tcp: timeout"), false},
 		{"wrapped forbidden", fmt.Errorf("get ea: %w", forbiddenErr()), true},
 	}
