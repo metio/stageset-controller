@@ -17,6 +17,9 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
 // clusterTarget is a client plus the RESTMapper for the cluster it talks to.
@@ -72,10 +75,10 @@ type defaultRemoteConfigBuilder struct {
 // token is re-minted from the cloud STS per request.
 //
 // The tenant client for the LOCAL cluster is resolved here, and the recursion
-// terminates because that call passes kc=nil: targetCluster's remote branch (the
+// terminates because that call passes kc=nil: resolveTarget's remote branch (the
 // only caller of this method) is not re-entered. It must also stay outside
-// targetCluster's tenantMu — the nested call takes that lock itself, and a Go
-// mutex is not reentrant. targetCluster calls this before locking, which is what
+// resolveTarget's tenantMu — the nested call takes that lock itself, and a Go
+// mutex is not reentrant. resolveTarget calls this before locking, which is what
 // makes the ordering safe.
 func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta.KubeConfigReference, namespace, serviceAccount string) (*rest.Config, string, error) {
 	tenant, _, err := b.r.targetCluster(ctx, namespace, serviceAccount, nil)
@@ -152,7 +155,104 @@ func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta
 // remote clients per <namespace>/<sa>/<kubeConfig-identity> so a rotated
 // kubeconfig builds a fresh connection while an unchanged one reuses the
 // discovered RESTMapper.
+//
+// A minted-token target is handed back wrapped in retryUnauthorizedClient: the
+// token is bound to the ServiceAccount's UID while the cache is keyed by its
+// name, so a recreated ServiceAccount leaves a cached credential the apiserver
+// refuses. The wrapper turns each such 401 into an eviction plus one retry
+// instead of an hour of failing calls.
 func (r *StageSetReconciler) targetCluster(ctx context.Context, ns, sa string, kc *fluxmeta.KubeConfigReference) (client.Client, apimeta.RESTMapper, error) {
+	target, mapper, err := r.resolveTarget(ctx, ns, sa, kc)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !r.mintsTokenFor(sa, kc) {
+		return target, mapper, nil
+	}
+	return newRetryUnauthorizedClient(target, ns, sa, func(ctx context.Context) (client.Client, error) {
+		r.forgetTenant(ns, sa)
+		fresh, _, err := r.resolveTarget(ctx, ns, sa, nil)
+		return fresh, err
+	}), mapper, nil
+}
+
+// mintsTokenFor reports whether a target for sa authenticates with a token this
+// controller minted — the only case where evicting the cached credential and
+// re-minting can turn a 401 into a success. The controller's own client (no
+// tenant SA, or the envtest SkipImpersonation path) carries no minted
+// credential, and a remote spec.kubeConfig target authenticates with the
+// kubeconfig's own.
+func (r *StageSetReconciler) mintsTokenFor(sa string, kc *fluxmeta.KubeConfigReference) bool {
+	return kc == nil && sa != "" && !r.SkipImpersonation
+}
+
+// localTargetKey is the targets-map key for a local-cluster tenant connection.
+// forgetTenant and resolveTarget must agree on it, so it lives in one place.
+func localTargetKey(ns, sa string) string { return "local/" + ns + "/" + sa }
+
+// forgetTenant drops the cached credential for ns/sa and the connection built
+// around it, so the next resolve mints a fresh token and dials with it. The
+// token eviction alone would suffice — a targets entry is only reused while its
+// baked-in token matches the freshly minted one — but dropping the entry too
+// keeps the map bounded by the tenants that are actually live rather than by
+// every tenant the process has ever seen.
+func (r *StageSetReconciler) forgetTenant(ns, sa string) {
+	r.tokens.Forget(ns, sa)
+	r.tenantMu.Lock()
+	defer r.tenantMu.Unlock()
+	delete(r.targets, localTargetKey(ns, sa))
+}
+
+// forgetDeletedTenants evicts the credentials and connections a StageSet on its
+// way out was the last user of. targets holds one live transport per (namespace,
+// ServiceAccount) and tokens a credential for the same key, and neither is
+// bounded by anything but process lifetime — a cluster whose namespaces come and
+// go would otherwise accumulate a dead connection per tenant it ever applied
+// for.
+//
+// Another live StageSet in the namespace using the same ServiceAccount keeps the
+// entry: evicting it would only force that StageSet to re-mint on its next
+// reconcile. A List failure skips eviction entirely — an entry outliving its
+// tenant costs memory, nothing more, and the token's own TTL bounds the
+// credential regardless.
+func (r *StageSetReconciler) forgetDeletedTenants(ctx context.Context, ss *stagesv1.StageSet) {
+	used := map[string]struct{}{}
+	if sa := ss.Spec.ServiceAccountName; sa != "" {
+		used[sa] = struct{}{}
+	}
+	for i := range ss.Spec.Stages {
+		if sa := effectiveServiceAccount(ss, &ss.Spec.Stages[i]); sa != "" {
+			used[sa] = struct{}{}
+		}
+	}
+	if len(used) == 0 {
+		return
+	}
+	var others stagesv1.StageSetList
+	if err := r.List(ctx, &others, client.InNamespace(ss.Namespace)); err != nil {
+		log.FromContext(ctx).V(1).Info("skipping tenant credential eviction: listing StageSets failed", "error", err)
+		return
+	}
+	for i := range others.Items {
+		other := &others.Items[i]
+		if other.Name == ss.Name || !other.DeletionTimestamp.IsZero() {
+			continue
+		}
+		delete(used, other.Spec.ServiceAccountName)
+		for j := range other.Spec.Stages {
+			delete(used, effectiveServiceAccount(other, &other.Spec.Stages[j]))
+		}
+	}
+	for sa := range used {
+		r.forgetTenant(ss.Namespace, sa)
+	}
+}
+
+// resolveTarget is targetCluster without the 401-retry wrapper: it builds (or
+// returns the cached) raw connection. The wrapper's refresh calls back into it,
+// so keeping the two apart is what stops a refreshed client from being wrapped
+// a second time on every eviction.
+func (r *StageSetReconciler) resolveTarget(ctx context.Context, ns, sa string, kc *fluxmeta.KubeConfigReference) (client.Client, apimeta.RESTMapper, error) {
 	if kc == nil && sa == "" {
 		return r.Client, r.RESTMapper, nil
 	}
@@ -212,7 +312,7 @@ func (r *StageSetReconciler) targetCluster(ctx context.Context, ns, sa string, k
 		}
 		cfg = tenantRestConfig(r.Config, token)
 		baseMapper = r.RESTMapper // controller cluster: reuse the manager's mapper
-		key = "local/" + ns + "/" + sa
+		key = localTargetKey(ns, sa)
 	}
 
 	r.tenantMu.Lock()

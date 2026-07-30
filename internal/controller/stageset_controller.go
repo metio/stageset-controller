@@ -1936,6 +1936,11 @@ func stagePrune(stage *stagesv1.Stage) bool {
 // whatever objects couldn't be deleted orphaned for an operator to clean up).
 func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.StageSet) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(ss, FinalizerName) {
+		// On its way out without our finalizer — never adopted, or an earlier
+		// force-drop already cleared it. The apiserver GCs it either way; the
+		// tenant caches have to let go of it now or they hold a credential and a
+		// connection for a StageSet that no longer exists.
+		r.forgetDeletedTenants(ctx, ss)
 		return ctrl.Result{}, nil
 	}
 	// Teardown deletes each stage's objects under the same identity that applied
@@ -1983,7 +1988,13 @@ func (r *StageSetReconciler) reconcileDelete(ctx context.Context, ss *stagesv1.S
 	metrics.DeleteStageReady(ss.Namespace, ss.Name)
 	metrics.DeleteStageSetMetrics(ss.Namespace, ss.Name)
 	controllerutil.RemoveFinalizer(ss, FinalizerName)
-	return ctrl.Result{}, r.Update(ctx, ss)
+	if err := r.Update(ctx, ss); err != nil {
+		// The finalizer is still on, so the StageSet comes back for another
+		// reconcile and would have to re-mint what an eviction here dropped.
+		return ctrl.Result{}, err
+	}
+	r.forgetDeletedTenants(ctx, ss)
+	return ctrl.Result{}, nil
 }
 
 // teardownFailure handles a failed step of reverse-order teardown. While the
@@ -2013,6 +2024,7 @@ func (r *StageSetReconciler) teardownFailure(ctx context.Context, ss *stagesv1.S
 		"elapsed", elapsed.String(), "op", op)
 	metrics.TeardownForceDropTotal.WithLabelValues(ss.Namespace, ss.Name).Inc()
 	r.event(ss, corev1.EventTypeWarning, "TeardownForced", msg)
+	r.forgetDeletedTenants(ctx, ss)
 	return ctrl.Result{}, nil
 }
 

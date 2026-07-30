@@ -178,8 +178,11 @@ func (c *tokenCache) lookup(key string) (string, bool) {
 	return cached.token, true
 }
 
-// Forget evicts the cached token for namespace/serviceAccount so a later
-// call mints a fresh token rather than reusing a stale entry. nil-safe.
+// Forget evicts the cached token for namespace/serviceAccount so a later call
+// mints a fresh one rather than reusing a stale entry. Reached through
+// StageSetReconciler.forgetTenant on the two occasions a cached credential
+// stops being worth keeping: the apiserver rejecting it with a 401, and the
+// last StageSet using that ServiceAccount going away. nil-safe.
 func (c *tokenCache) Forget(namespace, serviceAccount string) {
 	if c == nil {
 		return
