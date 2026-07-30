@@ -42,4 +42,16 @@ Match the operation in the Message:
 - **verify timeout** — raise the stage `timeout`, or fix why the workload is not becoming Ready.
 - **action** — read the action's error; for `http`, confirm the host is in `--allowed-action-hosts`.
 
+### An apply that failed with `Unauthorized`
+
+`Unauthorized` is authentication, not authorization, so it is not an RBAC problem — checking the tenant `ServiceAccount`'s `Role` will send you down the wrong path. The controller applies as `spec.serviceAccountName` using a short-lived TokenRequest token, and that token is bound to the `ServiceAccount`'s UID. Deleting and recreating the `ServiceAccount` — which happens to every `ServiceAccount` in a namespace that is torn down and rebuilt — gives it the same name and a new UID, so a token minted before the rebuild authenticates as an object the apiserver no longer knows.
+
+The controller handles this: a `401` evicts the cached credential, mints a fresh one, and retries the call once. A message that names the `ServiceAccount` and says the fresh token was refused too means the retry did not help, so look at the `ServiceAccount` itself:
+
+```shell
+kubectl --namespace <namespace> get serviceaccount <sa-name>
+```
+
+A missing `ServiceAccount`, or a namespace in `Terminating`, is the answer. Recreate the `ServiceAccount` (or let the namespace finish terminating) and the next reconcile applies normally.
+
 Retries re-run the same pinned snapshot idempotently — actions already recorded in the stage's ledger do not re-fire. See [stages and sources](/defining-a-release/stages-and-sources/) for how a stage resolves and applies.
