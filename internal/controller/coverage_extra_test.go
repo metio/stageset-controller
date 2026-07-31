@@ -170,8 +170,8 @@ func TestStagePruneByName_Defaults(t *testing.T) {
 	}
 }
 
-// stageTimeout prefers the stage timeout, then the StageSet timeout, then the
-// 5-minute default; a non-positive value at either level falls through.
+// stageTimeout prefers the stage timeout, then the StageSet timeout, then
+// defaultStageTimeout; a non-positive value at either level falls through.
 func TestStageTimeout_Precedence(t *testing.T) {
 	t.Parallel()
 	dur := func(d time.Duration) *metav1.Duration { return &metav1.Duration{Duration: d} }
@@ -187,8 +187,8 @@ func TestStageTimeout_Precedence(t *testing.T) {
 	}
 
 	def := &stagesv1.StageSet{}
-	if got := stageTimeout(def, &stagesv1.Stage{}); got != 5*time.Minute {
-		t.Errorf("default timeout = %v, want 5m", got)
+	if got := stageTimeout(def, &stagesv1.Stage{}); got != defaultStageTimeout {
+		t.Errorf("default timeout = %v, want %v", got, defaultStageTimeout)
 	}
 }
 

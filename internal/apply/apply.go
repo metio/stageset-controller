@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fluxcd/cli-utils/pkg/kstatus/polling"
+	"github.com/fluxcd/cli-utils/pkg/kstatus/status"
 	"github.com/fluxcd/cli-utils/pkg/object"
 	"github.com/fluxcd/pkg/ssa"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -27,6 +28,10 @@ const FieldManager = "stageset-controller"
 // Applier applies and waits for a set of objects under a single owner identity.
 type Applier struct {
 	rm *ssa.ResourceManager
+	// client and mapper are kept alongside rm so Stalled can re-read an
+	// object's live status without going through a second poll session.
+	client client.Client
+	mapper meta.RESTMapper
 }
 
 // New builds an Applier. ownerGroup is the label prefix for the owner labels
@@ -35,7 +40,7 @@ type Applier struct {
 func New(c client.Client, mapper meta.RESTMapper, ownerGroup string) *Applier {
 	poller := polling.NewStatusPoller(c, mapper, polling.Options{})
 	rm := ssa.NewResourceManager(c, poller, ssa.Owner{Field: FieldManager, Group: ownerGroup})
-	return &Applier{rm: rm}
+	return &Applier{rm: rm, client: c, mapper: mapper}
 }
 
 // ConflictHandling selects, per object, how an immutable-field conflict is
@@ -69,6 +74,42 @@ func (a *Applier) Wait(ctx context.Context, set object.ObjMetadataSet, timeout t
 		Timeout:  timeout,
 		FailFast: true,
 	})
+}
+
+// Stalled reports whether any object in the set has reached a terminal kstatus
+// Failed state. It answers the question a failed Wait leaves open: did the
+// clock run out on objects that were still rolling out, or did the wait give up
+// on one that never will become ready?
+//
+// Wait runs with FailFast, so it already aborts the moment an object reaches
+// Failed — but that distinction reaches the caller only as a prefix on an
+// unwrapped error string, which is not something to branch a rollback on. This
+// recomputes the status from the live objects instead.
+//
+// An object that cannot be read (deleted underneath us, RBAC revoked mid-wait,
+// a kind the mapper no longer resolves) is NOT counted as stalled. Callers use
+// this to decide whether to undo a release, and a transient read failure is the
+// last thing that should trigger one.
+func (a *Applier) Stalled(ctx context.Context, set object.ObjMetadataSet) bool {
+	for _, id := range set {
+		mapping, err := a.mapper.RESTMapping(id.GroupKind)
+		if err != nil {
+			continue
+		}
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(mapping.GroupVersionKind)
+		if err := a.client.Get(ctx, client.ObjectKey{Namespace: id.Namespace, Name: id.Name}, u); err != nil {
+			continue
+		}
+		res, err := status.Compute(u)
+		if err != nil || res == nil {
+			continue
+		}
+		if res.Status == status.FailedStatus {
+			return true
+		}
+	}
+	return false
 }
 
 // Delete removes the given objects (background propagation). Used to prune the

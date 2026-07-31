@@ -661,6 +661,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// When a promotion gate's read is PERMANENTLY denied (RBAC), this carries
 	// the operator-actionable message for the errGateDenied handler.
 	var gateDeniedMsg string
+	// Set when a stage's verify wait ran out of time with every object still
+	// progressing and its onTimeout is Hold. The stage still fails and the run
+	// still halts; only rollbackOnFailure is held back, because restoring the
+	// previous manifests over a migration that is halfway through is worse than
+	// leaving a slow rollout alone.
+	var suppressRollback bool
 	stageBudgetFreeze := map[string]*stagesv1.BudgetFreeze{}
 	// The stage loop runs in a closure so a stage failure can be intercepted
 	// for rollbackOnFailure before it is finalized; failStage's returns become
@@ -954,8 +960,22 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			if len(waitSet) > 0 {
 				if err := rt.applier.Wait(ctx, waitSet, verifyTimeout); err != nil {
+					// The wait fails fast on a terminal kstatus failure, so if
+					// nothing is Failed the clock simply ran out on objects that
+					// were still progressing. Name the bound that was hit — the
+					// upstream message says only what it was waiting for, which
+					// sends operators to raise a client-side wait that can never
+					// help — and let onTimeout decide whether undoing a release
+					// that may still be mid-migration is the right answer.
+					cause := err
+					if !rt.applier.Stalled(ctx, waitSet) {
+						cause = fmt.Errorf("%w (waited %s: spec.stages[].timeout, else spec.timeout)", err, verifyTimeout)
+						if stageOnTimeout(&ss, stage) != "Rollback" {
+							suppressRollback = true
+						}
+					}
 					r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
-					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, led)
+					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", cause, stageStatuses, led)
 				}
 			}
 			if err := evalReadyExprs(ctx, rt.target, &ss, stage, objects, verifyTimeout); err != nil {
@@ -1175,7 +1195,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// A stage failed. failStage has already written the failure status. If
 		// rollbackOnFailure is set, restore the last-good snapshot; a snapshot
 		// no longer fetchable surfaces as a terminal PreviousRevisionUnavailable.
-		if ss.Spec.RollbackOnFailure {
+		// A verify timeout under onTimeout: Hold is the one failure that does not
+		// restore: the objects were still progressing, so the run halts with the
+		// new manifests in place and the next reconcile re-verifies them.
+		if ss.Spec.RollbackOnFailure && !suppressRollback {
 			rbCtx, rbSpan := observability.Tracer().Start(ctx, "stageset.rollback")
 			rbReason, rbMsg, rbErr := r.attemptRollback(rbCtx, &ss, runtimes, fetcher, recorder)
 			if rbErr != nil {
@@ -2306,7 +2329,32 @@ func stageTimeout(ss *stagesv1.StageSet, stage *stagesv1.Stage) time.Duration {
 	if ss.Spec.Timeout != nil && ss.Spec.Timeout.Duration > 0 {
 		return ss.Spec.Timeout.Duration
 	}
-	return 5 * time.Minute
+	return defaultStageTimeout
+}
+
+// defaultStageTimeout bounds a stage's verify wait when neither the stage nor
+// the StageSet sets one. It is the binding constraint on the whole verify phase
+// — nothing downstream can wait past it — and it is in force precisely when a
+// workload is least able to be quick: the first install, against an empty
+// database, running migrations and seed data before it serves.
+//
+// Fifteen minutes rather than something tighter because the wait fails fast: an
+// object that reaches a terminal kstatus failure aborts the wait immediately, so
+// the clock only ever runs out on objects that are still making progress.
+// Patience there costs almost nothing in how quickly a genuinely broken release
+// is detected, and buying it back would fail deploys that were going to succeed.
+const defaultStageTimeout = 15 * time.Minute
+
+// stageOnTimeout resolves what a verify timeout means for rollbackOnFailure:
+// the stage's own onTimeout, else the StageSet's, else Hold.
+func stageOnTimeout(ss *stagesv1.StageSet, stage *stagesv1.Stage) string {
+	if stage.OnTimeout != "" {
+		return stage.OnTimeout
+	}
+	if ss.Spec.OnTimeout != "" {
+		return ss.Spec.OnTimeout
+	}
+	return "Hold"
 }
 
 // resolvePostBuildVars assembles the substitution map from substituteFrom

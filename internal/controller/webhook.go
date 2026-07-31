@@ -115,6 +115,9 @@ func ValidateSpec(ss *stagesv1.StageSet) error {
 	if err := validateReadyChecks(ss); err != nil {
 		return err
 	}
+	if err := validateOnTimeout(ss); err != nil {
+		return err
+	}
 	if err := validateDependsOn(ss); err != nil {
 		return err
 	}
@@ -155,6 +158,26 @@ func validateReadyChecks(ss *stagesv1.StageSet) error {
 		}
 		if _, err := compileReadyExprs(stage); err != nil {
 			return fmt.Errorf("stage %q %w", stage.Name, err)
+		}
+	}
+	return nil
+}
+
+// validateOnTimeout rejects an unknown onTimeout at admission. The CRD's enum
+// already covers a typed apply, but the webhook says which stage carries it and
+// keeps the check alive for a client that bypasses schema validation.
+func validateOnTimeout(ss *stagesv1.StageSet) error {
+	switch ss.Spec.OnTimeout {
+	case "", "Hold", "Rollback":
+	default:
+		return fmt.Errorf("spec.onTimeout must be Hold or Rollback, got %q", ss.Spec.OnTimeout)
+	}
+	for i := range ss.Spec.Stages {
+		st := &ss.Spec.Stages[i]
+		switch st.OnTimeout {
+		case "", "Hold", "Rollback":
+		default:
+			return fmt.Errorf("stage %q onTimeout must be Hold or Rollback, got %q", st.Name, st.OnTimeout)
 		}
 	}
 	return nil

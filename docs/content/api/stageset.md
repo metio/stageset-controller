@@ -38,7 +38,8 @@ spec:
   interval: 5m                  # optional: reconcile cadence (default: --default-interval)
   retryInterval: 1m             # cadence after a failed run (default: interval)
   driftDetectionInterval: 2m    # faster drift correction than interval (optional)
-  timeout: 5m                   # default per-stage timeout (optional)
+  timeout: 15m                  # default per-stage timeout (optional, default 15m)
+  onTimeout: Hold               # Hold (default) or Rollback, when a stage's verify times out
   suspend: false                # pause reconciliation without deleting (default false)
 ```
 
@@ -50,7 +51,22 @@ spec:
 - **`driftDetectionInterval`** — a shorter cadence dedicated to healing out-of-band
   drift when you need it tighter than `interval`.
 - **`timeout`** — how long any one stage may take before it fails; override per
-  stage with `stages[].timeout`.
+  stage with `stages[].timeout`. **Defaults to `15m`.** It is the binding
+  constraint on the whole verify phase — nothing downstream waits past it — and
+  it applies to a first install just as much as to a re-roll, so it has to fit
+  the slowest thing an application ever does: coming up against an empty
+  database, running its migrations and seed data before it serves. Raise it for
+  a stage whose workload declares a long startup grace of its own (a
+  `startupProbe` with a high `failureThreshold`), so the two numbers agree.
+- **`onTimeout`** — what a verify timeout means for
+  [`rollbackOnFailure`](#rollback): `Hold` (default) or `Rollback`. Override per
+  stage with `stages[].onTimeout`. The verify wait fails fast when an object
+  reaches a terminal failure, so the clock only ever runs out on objects that
+  were still making progress — a workload that needed longer, not one that
+  broke. Under `Hold` the stage fails and the run halts, but the new manifests
+  stay in place and the next reconcile re-verifies them; restoring the previous
+  ones over a half-finished migration is the worse outcome. Choose `Rollback`
+  when a stage that overruns its budget is genuinely a release you want undone.
 - **`suspend`** — short-circuits to `Ready=False / Suspended`, leaving applied state
   running. Use [`stagesetctl reconcile --force`](/cli/reconcile/) to run once while
   suspended. See the [`Suspended` runbook](/runbooks/suspended/).
@@ -214,6 +230,7 @@ spec:
       serviceAccountName: payments-eu-deployer  # per-stage identity (default: spec.serviceAccountName)
       prune: true               # GC objects that leave the stage (default true)
       timeout: 3m               # per-stage timeout (default: spec.timeout)
+      onTimeout: Hold           # per-stage timeout policy (default: spec.onTimeout)
       force: false              # sugar for conflictPolicy.default: Recreate
       applyHelmHookResources: true  # apply helm.sh/hook objects as ordinary ones
       patches: []               # Kustomize patches applied after build

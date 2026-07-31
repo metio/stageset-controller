@@ -96,6 +96,36 @@ func TestValidateErrorBudget(t *testing.T) {
 	}
 }
 
+// onTimeout takes the same Hold/Rollback vocabulary as every other policy field,
+// at both the StageSet and the stage level. An unset value is the Hold default,
+// not a rejection.
+func TestValidateOnTimeout(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		spec, stage string
+		wantErr     bool
+	}{
+		{name: "both unset"},
+		{name: "spec Hold", spec: "Hold"},
+		{name: "spec Rollback", spec: "Rollback"},
+		{name: "stage Hold over spec Rollback", spec: "Rollback", stage: "Hold"},
+		{name: "unknown spec value", spec: "Wait", wantErr: true},
+		{name: "unknown stage value", stage: "hold", wantErr: true}, // case-sensitive
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ss := &stagesv1.StageSet{}
+			ss.Spec.OnTimeout = tc.spec
+			ss.Spec.Stages = []stagesv1.Stage{{Name: "one", OnTimeout: tc.stage}}
+			if err := validateOnTimeout(ss); (err != nil) != tc.wantErr {
+				t.Fatalf("validateOnTimeout err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestValidatePromotion covers stage.promotion.analysis shape: at least one
 // check, named unique checks, a usable source, a threshold bound, and known
 // onFailure/onSourceError values.

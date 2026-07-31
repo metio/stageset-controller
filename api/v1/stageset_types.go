@@ -33,6 +33,22 @@ type StageSetSpec struct {
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
+	// OnTimeout chooses what a stage's verify wait running out of time means
+	// for spec.rollbackOnFailure, and is overridable per stage: Hold (the
+	// default — the stage fails and the run halts, but no rollback is
+	// attempted) or Rollback (a timeout counts as any other failure).
+	//
+	// The wait fails fast when an object reaches a terminal failure, so the
+	// clock only ever runs out on objects that were still making progress —
+	// usually a workload that needed longer rather than one that broke.
+	// Rolling old manifests back over a half-finished database migration is
+	// the worse outcome, so Hold is the default; raise spec.timeout for such a
+	// stage rather than switching this to Rollback. An object that genuinely
+	// failed rolls back either way.
+	// +kubebuilder:validation:Enum=Hold;Rollback
+	// +optional
+	OnTimeout string `json:"onTimeout,omitempty"`
+
 	// Suspend pauses reconciliation.
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
@@ -263,6 +279,13 @@ type Stage struct {
 	// Timeout overrides the StageSet-level default for this stage.
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+
+	// OnTimeout overrides the StageSet-level default for this stage: Hold or
+	// Rollback. Set it per stage when one stage of a run migrates before it
+	// serves and the others do not.
+	// +kubebuilder:validation:Enum=Hold;Rollback
+	// +optional
+	OnTimeout string `json:"onTimeout,omitempty"`
 
 	// Force recreates objects on immutable-field conflicts.
 	// +optional

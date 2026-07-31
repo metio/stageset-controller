@@ -1606,6 +1606,24 @@ spec:
                   - name
                   type: object
                 type: array
+              onTimeout:
+                description: |-
+                  OnTimeout chooses what a stage's verify wait running out of time means
+                  for spec.rollbackOnFailure, and is overridable per stage: Hold (the
+                  default — the stage fails and the run halts, but no rollback is
+                  attempted) or Rollback (a timeout counts as any other failure).
+
+                  The wait fails fast when an object reaches a terminal failure, so the
+                  clock only ever runs out on objects that were still making progress —
+                  usually a workload that needed longer rather than one that broke.
+                  Rolling old manifests back over a half-finished database migration is
+                  the worse outcome, so Hold is the default; raise spec.timeout for such a
+                  stage rather than switching this to Rollback. An object that genuinely
+                  failed rolls back either way.
+                enum:
+                - Hold
+                - Rollback
+                type: string
               retryInterval:
                 description: RetryInterval overrides Interval after a failed run.
                 type: string
@@ -3036,6 +3054,15 @@ spec:
                       description: Name of the stage; unique within the StageSet,
                         used as inventory key.
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    onTimeout:
+                      description: |-
+                        OnTimeout overrides the StageSet-level default for this stage: Hold or
+                        Rollback. Set it per stage when one stage of a run migrates before it
+                        serves and the others do not.
+                      enum:
+                      - Hold
+                      - Rollback
                       type: string
                     patches:
                       description: Patches are Kustomize patches applied post-build.
