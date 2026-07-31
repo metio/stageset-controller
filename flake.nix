@@ -96,10 +96,26 @@
             ];
             text = builtins.readFile ./scripts/serve.sh;
           };
+          # Every correctness gate CI runs, in one command, so a local "green"
+          # cannot differ from the merge queue's by an omitted tool.
+          verify = pkgs.writeShellApplication {
+            name = "verify";
+            runtimeInputs =
+              goTools
+              ++ devshell.lib.lintTools pkgs
+              ++ devshell.lib.lintCommands pkgs
+              ++ (with pkgs; [
+                gnugrep
+                git # markdown lints the tracked checkout, via git ls-files
+                findutils # xargs
+              ]);
+            text = builtins.readFile ./scripts/verify.sh;
+          };
           commands = [
             generate
             website
             serve
+            verify
           ];
         in
         {
@@ -114,7 +130,8 @@
               echo "stageset — go + static suite (staticcheck, gofumpt, gosec, govulncheck,"
               echo "  arch-go, modernize), envtest assets wired, plus the docs/dashboards"
               echo "  tools (jsonnet, hugo, htmltest, biome, vale, helm-schema, cosign)."
-              echo "  Commands: generate (controller-gen deepcopy + CRDs + RBAC + webhook),"
+              echo "  Commands: verify (every CI correctness gate, one command),"
+              echo "  generate (controller-gen deepcopy + CRDs + RBAC + webhook),"
               echo "  website (one-shot site build), serve (live site on :1313)."
             '';
           };
