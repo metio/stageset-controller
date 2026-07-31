@@ -9,6 +9,90 @@ release that needs action gets a section below, headed by its calendar version; 
 release with no section needs no migration — a plain upgrade (bump the chart's
 `appVersion` or pull the new image tag) suffices.
 
+## After 2026.7.31184504
+
+Five gates changed. Two now cover ground they were documented to cover and did
+not, so a rollout they used to let through can stop; two became more forgiving,
+so a rollout they used to block can proceed; one refuses a configuration it
+previously accepted and silently stalled on. Nothing needs action before
+upgrading, but three are worth checking against your specs first.
+
+### Image policies: `skip` no longer disarms other policies
+
+An image named under any matching `ImageVerificationPolicy`'s `skip` used to be
+exempt from **every** matching policy. A `skip` now exempts an image only from
+the policy that declares it; another policy naming the same image under `images`
+still verifies it.
+
+Where several cluster-scoped policies overlap, an image that was passing
+unverified may now be verified — and hold its stage under
+[`ImageUnverified`](/runbooks/imageunverified/) if it has no signature. Review
+overlapping policies before upgrading:
+
+```shell
+kubectl get imageverificationpolicies -o custom-columns=NAME:.metadata.name,IMAGES:.spec.images,SKIP:.spec.skip
+```
+
+An image every matching policy skips stays exempt, including under
+`--require-image-verification`.
+
+### Migration ladders: `down` actions count towards the http allowlist
+
+A ladder from `spec.migrationsSourceRef` may only use `http` actions when the
+controller runs with `--allowed-action-hosts`. That check previously read only
+each migration's `actions`, so a ladder whose http call sat in `down` was
+accepted. It now reads both.
+
+A sourced ladder with an http action in `down`, on a controller with no
+allowlist, is refused with `InvalidSpec`. Set `--allowed-action-hosts` to the
+hosts those actions legitimately call.
+
+### Rollback verifies images
+
+A rollback re-applies through the image-verification gate, so a revert can no
+longer land an image the forward apply would have refused. A previous revision
+whose images no longer verify reports
+[`ImageUnverified`](/runbooks/imageunverified/) instead of reverting; the stage
+holds at its failed state rather than reverting to something unverified.
+
+### Restart gates measure since the last promotion
+
+`promotion.restartGate` compared `maxRestarts` against the lifetime restart
+totals of the pods it watches. Pods routinely outlive a rollout, so a workload
+carrying restarts from weeks earlier failed the gate the next time it shipped —
+permanently, since a lifetime total never falls.
+
+The gate now counts only restarts observed since the stage was last promoted,
+recorded in `status.stages[].promotionState.restartBaseline`. A stage stuck on
+this reason clears on the next reconcile after upgrading. A stage that legitimately
+breached still breaches. No spec change is needed.
+
+### CEL ready-checks honour `inProgress`
+
+`readyChecks.exprs[].inProgress` was accepted and ignored. It now decides what a
+verify timeout means: an object that is not `current` but still reports
+`inProgress` holds the stage under
+[`StageProgressing`](/runbooks/stageprogressing/) and is re-verified, instead of
+failing it — and, with `spec.rollbackOnFailure`, instead of reverting an install
+that was going to succeed.
+
+A check that declares no `inProgress` keeps the old behaviour, so anything
+matching on `StageFailed` only sees less where you have written one. Set
+`onTimeout: Rollback` on the stage to keep reverting on timeout.
+
+### FleetRollout wave gates
+
+A wave `gate` is now bounded by `--allowed-action-hosts`, like every other
+outbound call the controller makes. If you run with an allowlist, add the host
+your fleet gates query or they will report the source as unavailable and hold.
+
+A gate whose `source` names a `secretRef` is now refused with `GateUnsupported`.
+That credential could never be resolved — a FleetRollout is cluster-scoped, so
+there is no namespace to read the Secret from — and the rollout used to stall
+with nothing on its condition explaining why. Expose the fleet-wide metric
+without authentication, or move the authenticated query to a StageSet-level
+source, which has both a namespace and a ServiceAccount to read it under.
+
 ## 2026.7.31184504
 
 A stage that is still coming up no longer reports as a failure, and the
