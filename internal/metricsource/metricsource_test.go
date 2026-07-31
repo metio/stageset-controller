@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/fluxcd/pkg/apis/meta"
@@ -400,4 +402,162 @@ func TestQuery_AllowedHostsBoundsBothProviders(t *testing.T) {
 			t.Error("secret was read for a host outside the allowlist")
 		}
 	})
+}
+
+// --- redirect policy -------------------------------------------------------
+//
+// These exercise the DEFAULT client (HTTPClient left nil) because CheckRedirect
+// lives on it; a test that injects srv.Client() would not see the guard at all.
+
+// scalarServer answers any path with a fixed scalar result.
+func scalarServer(t *testing.T, value string, seenAuth *string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if seenAuth != nil {
+			*seenAuth = r.Header.Get("Authorization")
+		}
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"scalar","result":[0,"` + value + `"]}}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// redirectServer sends every request on to target.
+func redirectServer(t *testing.T, target string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// sameAddrAs renders srv's address under a different host spelling, so a test
+// can cross a HOST boundary while still reaching a loopback listener.
+func sameAddrAs(t *testing.T, srv *httptest.Server, host string) string {
+	t.Helper()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse %q: %v", srv.URL, err)
+	}
+	return "http://" + net.JoinHostPort(host, u.Port())
+}
+
+// A source may not redirect the query to a host outside the allowlist: the
+// allowlist bounds where the query ends up, not merely where it starts.
+func TestQuery_RedirectOffAllowlistIsRefused(t *testing.T) {
+	off := scalarServer(t, "42", nil)
+	entry := redirectServer(t, sameAddrAs(t, off, "localhost")+"/api/v1/query")
+
+	q := New(nil, PermissiveIP, []string{"127.0.0.1"}) // "localhost" is NOT allowed
+	_, err := q.Query(context.Background(), "ns", "sa",
+		stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: entry.URL, Query: "up"}})
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+	}
+	if !strings.Contains(err.Error(), "allowed-action-hosts") {
+		t.Fatalf("err = %v, want it to name the allowlist", err)
+	}
+}
+
+// A redirect that stays inside the allowlist is followed, so the guard bounds
+// the destination without breaking a source that legitimately redirects.
+func TestQuery_RedirectWithinAllowlistIsFollowed(t *testing.T) {
+	target := scalarServer(t, "42", nil)
+	entry := redirectServer(t, sameAddrAs(t, target, "localhost")+"/api/v1/query")
+
+	q := New(nil, PermissiveIP, []string{"127.0.0.1", "localhost"})
+	got, err := q.Query(context.Background(), "ns", "sa",
+		stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: entry.URL, Query: "up"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if got != 42 {
+		t.Fatalf("value = %v, want 42", got)
+	}
+}
+
+// A query carrying a bearer token refuses to follow a host change even when both
+// hosts are allow-listed: Go forwards Authorization to a subdomain of the
+// original, so the allowlist alone would not keep the tenant's token off a host
+// the operator never meant to hand it to.
+func TestQuery_CrossHostRedirectWithTokenIsRefused(t *testing.T) {
+	var reachedAuth string
+	target := scalarServer(t, "42", &reachedAuth)
+	entry := redirectServer(t, sameAddrAs(t, target, "localhost")+"/api/v1/query")
+
+	q := New(
+		func(context.Context, string, string, string) (map[string][]byte, error) {
+			return map[string][]byte{"token": []byte("s3cr3t")}, nil
+		},
+		PermissiveIP,
+		[]string{"127.0.0.1", "localhost"}, // both allowed; the credential is the bar
+	)
+	_, err := q.Query(context.Background(), "ns", "sa", stagesv1.MetricSource{
+		Prometheus: &stagesv1.PrometheusSource{
+			Address: entry.URL, Query: "up", SecretRef: &meta.LocalObjectReference{Name: "tok"},
+		},
+	})
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+	}
+	if reachedAuth != "" {
+		t.Fatalf("the redirect target saw Authorization %q; it must never be reached", reachedAuth)
+	}
+}
+
+// The credential guard is about crossing hosts, not about redirects: a source
+// that redirects within its own host still carries the token, which is what
+// configuring one is for.
+func TestQuery_SameHostRedirectKeepsToken(t *testing.T) {
+	var gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/query", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/moved", http.StatusFound)
+	})
+	mux.HandleFunc("/moved", func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"scalar","result":[0,"7"]}}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	q := New(
+		func(context.Context, string, string, string) (map[string][]byte, error) {
+			return map[string][]byte{"token": []byte("s3cr3t")}, nil
+		},
+		PermissiveIP, nil,
+	)
+	got, err := q.Query(context.Background(), "ns", "sa", stagesv1.MetricSource{
+		Prometheus: &stagesv1.PrometheusSource{
+			Address: srv.URL, Query: "up", SecretRef: &meta.LocalObjectReference{Name: "tok"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if got != 7 || gotAuth != "Bearer s3cr3t" {
+		t.Fatalf("value=%v auth=%q, want 7 and the token forwarded", got, gotAuth)
+	}
+}
+
+// Declaring CheckRedirect removes Go's own cap, so the chain bound has to be
+// ours. A source looping on itself must terminate rather than spin.
+func TestQuery_RedirectChainIsBounded(t *testing.T) {
+	var hops int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hops++
+		http.Redirect(w, r, "/again", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	q := New(nil, PermissiveIP, nil)
+	_, err := q.Query(context.Background(), "ns", "sa",
+		stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{Address: srv.URL, Query: "up"}})
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("err = %v, want ErrSourceUnavailable", err)
+	}
+	if hops > maxRedirects+1 {
+		t.Fatalf("served %d hops, want the chain capped near %d", hops, maxRedirects)
+	}
 }

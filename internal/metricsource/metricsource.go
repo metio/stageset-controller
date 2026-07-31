@@ -241,11 +241,47 @@ func (q *HTTPQuerier) httpClient() *http.Client {
 	}
 	q.clientOnce.Do(func() {
 		q.client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: &http.Transport{DialContext: q.safeDialContext},
+			Timeout:       30 * time.Second,
+			Transport:     &http.Transport{DialContext: q.safeDialContext},
+			CheckRedirect: q.checkRedirect,
 		}
 	})
 	return q.client
+}
+
+// maxRedirects bounds a redirect chain. Go applies its own limit only while
+// CheckRedirect is unset, so declaring one makes the cap ours to enforce.
+const maxRedirects = 10
+
+// checkRedirect re-applies the outbound policy to every hop of a redirect chain.
+// allowedHost sees only the address the spec names, so without this a permitted
+// source could 302 the query to anywhere the dial-time pin allows, and
+// --allowed-action-hosts would bound the first request of a chain rather than
+// where it ends up. It is the same guard the http action carries.
+//
+// via[0] is the original request, which holds both facts this needs: the host
+// the allowlist was checked against, and whether a bearer token was stamped on
+// it. Taking them from via rather than from per-request state is what lets one
+// client stay shared across every concurrent query.
+func (q *HTTPQuerier) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("%w: stopped after %d redirects", ErrSourceUnavailable, maxRedirects)
+	}
+	if err := q.allowedHost(req.URL.Hostname()); err != nil {
+		return err
+	}
+	// Go drops Authorization when a redirect crosses to a different domain, but
+	// counts a subdomain of the original as the same one — so a source able to
+	// redirect within its own domain could still collect the tenant's token at a
+	// host nobody allow-listed. When the query carries a credential, refuse to
+	// follow a host change at all. Same-host redirects (a path, or http→https)
+	// still carry it, which is the point of configuring one.
+	orig := via[0]
+	if orig.Header.Get("Authorization") != "" && req.URL.Host != orig.URL.Host {
+		return fmt.Errorf("%w: refusing a cross-host redirect to %q; the source's bearer token must not be sent to a different host",
+			ErrSourceUnavailable, req.URL.Host)
+	}
+	return nil
 }
 
 // safeDialContext resolves the host once, refuses the connection if any resolved

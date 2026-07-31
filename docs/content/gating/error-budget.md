@@ -85,10 +85,19 @@ Prometheus usually lives) are allowed. And when the controller runs with
 `--allowed-action-hosts`, the source's host must match one of its patterns —
 leave the flag unset to reach any host the SSRF guard permits.
 
+Both guards follow redirects: a source that answers with a 30x has its new host
+checked against the allowlist again, so the flag bounds where a query ends up
+rather than only where it starts.
+
 The `secretRef` bearer token is read as the StageSet's `spec.serviceAccountName`,
 in the StageSet's own namespace, so grant that ServiceAccount `get` on the Secret
 you reference. The token reaches only endpoints your ServiceAccount's own
 credentials could already reach.
+
+A query carrying that token will not follow a redirect to a **different host** at
+all, even an allow-listed one — a source that could redirect within its own domain
+would otherwise collect the token at a host you never named. Redirects within the
+same host (a path, or `http`→`https`) still carry it.
 
 ## Reading from a SaaS SLO API (webhook)
 

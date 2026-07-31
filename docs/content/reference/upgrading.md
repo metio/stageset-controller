@@ -80,6 +80,25 @@ A check that declares no `inProgress` keeps the old behaviour, so anything
 matching on `StageFailed` only sees less where you have written one. Set
 `onTimeout: Rollback` on the stage to keep reverting on timeout.
 
+### Metric sources apply their guards to redirects
+
+`--allowed-action-hosts` was checked against the address a metric source names
+and then not again, so a permitted source could redirect the query to any host
+the SSRF guard allows. Every hop is now checked, which bounds where a query ends
+up rather than only where it starts. This covers `spec.errorBudget`, a stage's
+`promotion.analysis` and `promotion.fastTrack`, and FleetRollout wave gates.
+
+If you run with an allowlist and a source legitimately redirects — a load
+balancer sending the query to a regional endpoint, say — add the destination host
+alongside the entry one.
+
+A query carrying a `secretRef` bearer token now refuses a redirect to a different
+host outright, allow-listed or not. Go forwards `Authorization` to a subdomain of
+the original, so the allowlist alone could not keep a tenant's token off a host
+nobody named. Redirects within the same host still carry it. A source that
+depended on a cross-host redirect to deliver its token was already only working
+by that quirk; point the address at the final host instead.
+
 ### FleetRollout wave gates
 
 A wave `gate` is now bounded by `--allowed-action-hosts`, like every other
