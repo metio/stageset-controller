@@ -1264,7 +1264,13 @@ type CustomHealthCheck struct {
 	// +optional
 	Current string `json:"current,omitempty"`
 
-	// InProgress is the CEL expression for the progressing state.
+	// InProgress is the CEL expression for the progressing state: the object is
+	// not Current yet but is still converging towards it. It decides what a verify
+	// timeout means — an object that still reports itself in progress holds the
+	// stage under StageProgressing and is re-verified next reconcile, while one
+	// that is neither Current nor InProgress is stuck and fails the stage. Leave
+	// it unset for a kind with no meaningful in-between state; every timeout is
+	// then a failure. Overridden by onTimeout: Rollback.
 	// +optional
 	InProgress string `json:"inProgress,omitempty"`
 

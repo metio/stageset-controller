@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -137,6 +138,14 @@ func compileReadyExprs(stage *stagesv1.Stage) ([]compiledHealthCheck, error) {
 	return out, nil
 }
 
+// errReadyExprsProgressing marks a readyChecks.exprs timeout that ran out while
+// at least one not-yet-ready object's InProgress expression held: the object is
+// still converging, not stuck. It is the CEL counterpart of the kstatus wait's
+// "nothing is Failed, the clock simply ran out" verdict, and routes the caller to
+// the same progressing hold rather than failing — and possibly rolling back — a
+// stage that is merely slow.
+var errReadyExprsProgressing = errors.New("readyChecks.exprs objects are still progressing")
+
 // evalReadyExprs polls the stage's CEL health checks until every Current
 // expression holds (or a Failed expression trips, or the timeout elapses),
 // matching the kstatus wait's gate-then-fail semantics so a not-yet-ready
@@ -144,6 +153,13 @@ func compileReadyExprs(stage *stagesv1.Stage) ([]compiledHealthCheck, error) {
 // is evaluated against the live state (on the target cluster) of the stage's
 // applied objects whose group+kind matches; a check matching no applied object
 // is a no-op (it gates only objects of that kind in the stage).
+//
+// The three expressions divide the outcome the way kustomize-controller's
+// healthCheckExprs do: Failed is terminal, Current means ready, and InProgress
+// says a not-yet-ready object is on its way. Only the timeout consults
+// InProgress — while there is time left the poll simply keeps waiting either way
+// — and a check that declares none keeps the plain failure, so expressing
+// nothing costs nothing.
 func evalReadyExprs(ctx context.Context, target client.Client, ss *stagesv1.StageSet, stage *stagesv1.Stage, applied []*unstructured.Unstructured, timeout time.Duration) error {
 	checks, err := compileReadyExprs(stage)
 	if err != nil {
@@ -153,8 +169,12 @@ func evalReadyExprs(ctx context.Context, target client.Client, ss *stagesv1.Stag
 		return nil
 	}
 
+	// Whether the final poll saw a not-yet-ready object reporting itself
+	// in progress. Read only after the wait returns, on the timeout path.
+	progressing := false
 	poll := func(ctx context.Context) (bool, error) {
 		ready := true
+		inFlight := false
 		for i := range checks {
 			c := &checks[i]
 			for _, o := range applied {
@@ -166,7 +186,8 @@ func evalReadyExprs(ctx context.Context, target client.Client, ss *stagesv1.Stag
 				live.SetGroupVersionKind(gvk)
 				key := client.ObjectKey{Namespace: o.GetNamespace(), Name: o.GetName()}
 				if err := target.Get(ctx, key, live); err != nil {
-					// The object isn't observable yet; keep waiting.
+					// The object isn't observable yet; keep waiting. An object we
+					// cannot read is not evidence of progress, so inFlight stays put.
 					ready = false
 					continue
 				}
@@ -181,15 +202,28 @@ func evalReadyExprs(ctx context.Context, target client.Client, ss *stagesv1.Stag
 				if c.current != nil {
 					if cur, cerr := c.current.EvalBool(live.Object); cerr != nil || !cur {
 						ready = false
+						if c.inProgress != nil {
+							if ip, ierr := c.inProgress.EvalBool(live.Object); ierr == nil && ip {
+								inFlight = true
+							}
+						}
 					}
 				}
 			}
 		}
+		progressing = inFlight
 		return ready, nil
 	}
 
-	if err := wait.PollUntilContextTimeout(ctx, readyCheckInterval, timeout, true, poll); err != nil {
-		return fmt.Errorf("readyChecks.exprs not satisfied within %s: %w", timeout, err)
+	werr := wait.PollUntilContextTimeout(ctx, readyCheckInterval, timeout, true, poll)
+	if werr == nil {
+		return nil
 	}
-	return nil
+	out := fmt.Errorf("readyChecks.exprs not satisfied within %s: %w", timeout, werr)
+	// Only a genuine timeout can be a progress hold. A Failed expression comes
+	// back as its own error, which must stay a failure.
+	if progressing && wait.Interrupted(werr) {
+		return fmt.Errorf("%w: %w", errReadyExprsProgressing, out)
+	}
+	return out
 }

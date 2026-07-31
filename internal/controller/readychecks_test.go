@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -188,7 +189,70 @@ func TestEvalReadyExprs_FailedTrips(t *testing.T) {
 		{APIVersion: "apps/v1", Kind: "Deployment", Current: "status.readyReplicas == spec.replicas", Failed: "status.unavailableReplicas > 0"},
 	}})
 	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
-	if err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, time.Second); err == nil {
+	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, time.Second)
+	if err == nil {
 		t.Fatal("a tripped Failed expression should fail the check, got nil")
+	}
+	if errors.Is(err, errReadyExprsProgressing) {
+		t.Fatal("a tripped Failed expression is a failure, never a progress hold")
+	}
+}
+
+// An object that is not yet Current but reports itself InProgress is still
+// converging, so the timeout is a hold rather than a failure — the same verdict
+// the kstatus wait reaches when nothing has reached a terminal state.
+func TestEvalReadyExprs_InProgressTimesOutAsProgressing(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(builderScheme(t)).WithObjects(deploymentWith("web", 3, 1, 0)).Build()
+	stage := readyChecksStage(&stagesv1.ReadyChecks{Exprs: []stagesv1.CustomHealthCheck{{
+		APIVersion: "apps/v1",
+		Kind:       "Deployment",
+		Current:    "status.readyReplicas == spec.replicas",
+		InProgress: "status.readyReplicas < spec.replicas",
+	}}})
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, 200*time.Millisecond)
+	if err == nil {
+		t.Fatal("a not-yet-Current check should not become ready, want a timeout")
+	}
+	if !errors.Is(err, errReadyExprsProgressing) {
+		t.Fatalf("a timeout with InProgress holding must report as progressing, got %v", err)
+	}
+}
+
+// A check that declares no InProgress keeps the plain failure: expressing
+// nothing about progress must not silently start holding stages that used to
+// fail.
+func TestEvalReadyExprs_NoInProgressStaysAFailure(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(builderScheme(t)).WithObjects(deploymentWith("web", 3, 1, 0)).Build()
+	stage := readyChecksStage(&stagesv1.ReadyChecks{Exprs: []stagesv1.CustomHealthCheck{
+		{APIVersion: "apps/v1", Kind: "Deployment", Current: "status.readyReplicas == spec.replicas"},
+	}})
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, 200*time.Millisecond)
+	if err == nil {
+		t.Fatal("a not-yet-Current check should not become ready, want a timeout")
+	}
+	if errors.Is(err, errReadyExprsProgressing) {
+		t.Fatal("without an InProgress expression the timeout must stay a failure")
+	}
+}
+
+// InProgress that does NOT hold means the object is neither ready nor visibly
+// converging — stuck, so the timeout is a failure.
+func TestEvalReadyExprs_InProgressFalseStaysAFailure(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(builderScheme(t)).WithObjects(deploymentWith("web", 3, 1, 0)).Build()
+	stage := readyChecksStage(&stagesv1.ReadyChecks{Exprs: []stagesv1.CustomHealthCheck{{
+		APIVersion: "apps/v1",
+		Kind:       "Deployment",
+		Current:    "status.readyReplicas == spec.replicas",
+		InProgress: "status.readyReplicas == 0",
+	}}})
+	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, 200*time.Millisecond)
+	if err == nil {
+		t.Fatal("a not-yet-Current check should not become ready, want a timeout")
+	}
+	if errors.Is(err, errReadyExprsProgressing) {
+		t.Fatal("an object whose InProgress does not hold is stuck, not progressing")
 	}
 }

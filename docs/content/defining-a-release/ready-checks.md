@@ -75,6 +75,25 @@ expressions are portable.
             failed: "status.phase == 'Failed'"
 ```
 
+The three expressions divide the outcome:
+
+| Expression | Meaning |
+|---|---|
+| `current` | the object is ready and the stage may advance |
+| `inProgress` | the object is not ready **yet** but is still converging |
+| `failed` | the object will not become ready; the stage fails immediately |
+
+`inProgress` decides what a timeout means. A stage whose objects are still
+converging when the verify timeout elapses reports
+[`StageProgressing`](/runbooks/stageprogressing/) and is re-verified on the next
+reconcile — a slow provision converges unattended and is never rolled back. An
+object that is neither `current` nor `inProgress` is stuck, so the timeout fails
+the stage. Omit `inProgress` and every timeout is a failure, which is the right
+default for a resource that has no meaningful in-between state.
+
+`onTimeout: Rollback` overrides the hold: set it on the stage (or the StageSet)
+when a slow object should be reverted rather than waited out.
+
 ## Opting out
 
 To apply a stage without waiting for readiness (fire-and-forget), disable the

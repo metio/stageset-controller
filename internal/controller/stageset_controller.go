@@ -951,6 +951,22 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// CEL ReadyChecks.Exprs then gate on the live state of matching
 			// applied objects. All three share the stage's verify timeout.
 			verifyTimeout := stageTimeout(&ss, stage)
+			// holdForProgress parks a stage that is applied and still converging:
+			// the objects stay applied, the next reconcile re-verifies them, and
+			// nothing is rolled back over work that is halfway through. Both verify
+			// gates reach it — the kstatus wait when nothing is Failed, the CEL
+			// exprs when an InProgress expression still holds — so "still coming up"
+			// reads the same however a stage describes its readiness.
+			holdForProgress := func(cause error) (ctrl.Result, error) {
+				stageStatuses = append(stageStatuses, led.stamp(stagesv1.StageStatus{
+					Name:            stage.Name,
+					Phase:           stagesv1.StageVerifying,
+					AppliedRevision: ra.Revision,
+					Message:         fmt.Sprintf("verify: %v", cause),
+				}))
+				progressHoldMsg = fmt.Sprintf("stage %q is applied and still becoming ready: %v", stage.Name, cause)
+				return ctrl.Result{RequeueAfter: r.retryInterval(&ss)}, errHoldForProgress
+			}
 			waitSet := readyCheckObjects(rt.mapper, &ss, stage)
 			if !disableWait(stage) {
 				waitSet = append(changeSet.ToObjMetadataSet(), waitSet...)
@@ -968,26 +984,22 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					if progressing {
 						cause = fmt.Errorf("%w (waited %s: stage readyChecks.timeout, else stages[].timeout, else spec.timeout)", err, verifyTimeout)
 					}
-					// Still progressing, under the default onTimeout: this is a
-					// hold, not a failure. The objects stay applied and the next
-					// reconcile re-verifies them, so a workload that is merely
-					// slow converges on its own — and nothing is rolled back over
-					// a migration that is halfway through.
+					// Still progressing, under the default onTimeout: a hold, not a
+					// failure, so a workload that is merely slow converges on its own.
 					if progressing && stageOnTimeout(&ss, stage) != "Rollback" {
-						stageStatuses = append(stageStatuses, led.stamp(stagesv1.StageStatus{
-							Name:            stage.Name,
-							Phase:           stagesv1.StageVerifying,
-							AppliedRevision: ra.Revision,
-							Message:         fmt.Sprintf("verify: %v", cause),
-						}))
-						progressHoldMsg = fmt.Sprintf("stage %q is applied and still becoming ready: %v", stage.Name, cause)
-						return ctrl.Result{RequeueAfter: r.retryInterval(&ss)}, errHoldForProgress
+						return holdForProgress(cause)
 					}
 					r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
 					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", cause, stageStatuses, led)
 				}
 			}
 			if err := evalReadyExprs(ctx, rt.target, &ss, stage, objects, verifyTimeout); err != nil {
+				// A CEL-gated object that says it is still in progress gets the same
+				// treatment as a kstatus object that is not Failed: hold, unless the
+				// stage asked for a rollback on timeout.
+				if errors.Is(err, errReadyExprsProgressing) && stageOnTimeout(&ss, stage) != "Rollback" {
+					return holdForProgress(err)
+				}
 				r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, led)
 			}
