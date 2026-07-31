@@ -82,14 +82,12 @@ func TestReconcile_ConcurrentStageSetsAreRaceFree(t *testing.T) {
 	var done sync.WaitGroup
 	errs := make([]error, len(reqs))
 	for i, req := range reqs {
-		done.Add(1)
-		go func() {
-			defer done.Done()
+		done.Go(func() {
 			start.Wait()
 			// driveReconcile, because the first reconcile of a fresh StageSet
 			// only adds the finalizer and requeues.
 			_, errs[i] = driveReconcile(r, req)
-		}()
+		})
 	}
 	start.Done()
 	done.Wait()
