@@ -2345,6 +2345,23 @@ func stageTimeout(ss *stagesv1.StageSet, stage *stagesv1.Stage) time.Duration {
 	return defaultStageTimeout
 }
 
+// concurrentReconciles is how many StageSets the controller reconciles at once.
+//
+// It is deliberately not configurable. A stage's verify wait blocks its worker
+// for the whole stage timeout — fifteen minutes by default, and a workload that
+// migrates before it serves is why that number is what it is — so at a
+// concurrency of one, a single tenant coming up slowly stalls every other
+// tenant's reconcile behind it. That is a property no operator would choose,
+// which makes it a bad default rather than a knob.
+//
+// Four matches what the Flux controllers a StageSet sits alongside
+// (kustomize-controller, helm-controller) run at, so a cluster hosting both
+// behaves consistently. Everything a reconcile shares — the token cache, the
+// per-tenant client cache, the producer-watch maps, the metric querier's lazily
+// built HTTP client — is guarded for concurrent use; see
+// TestReconcile_ConcurrentStageSetsAreRaceFree.
+const concurrentReconciles = 4
+
 // defaultStageTimeout bounds a stage's verify wait when neither the stage nor
 // the StageSet sets one. It is the binding constraint on the whole verify phase
 // — nothing downstream can wait past it — and it is in force precisely when a
@@ -2481,6 +2498,7 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	jitter.SetGlobalIntervalJitter(defaultIntervalJitterFraction, nil)
 
 	b := ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentReconciles}).
 		For(&stagesv1.StageSet{}, crbuilder.WithPredicates(
 			// Wake on a spec change (generation bump), a fresh
 			// reconcile.fluxcd.io/requestedAt token (whole-object force

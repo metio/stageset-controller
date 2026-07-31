@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
@@ -82,7 +83,8 @@ type HTTPQuerier struct {
 	// same allowlist governs it.
 	AllowedHosts []string
 
-	client *http.Client
+	clientOnce sync.Once
+	client     *http.Client
 }
 
 // New builds an HTTPQuerier with a secret reader, optional IP validator, and
@@ -226,16 +228,23 @@ func (q *HTTPQuerier) fetch(req *http.Request) ([]byte, error) {
 	return body, nil
 }
 
+// httpClient returns the client a query runs through, building the default one
+// on first use.
+//
+// One Querier is shared by every reconcile in the process, and reconciles run
+// concurrently, so the lazy build has to be a sync.Once rather than a
+// check-then-assign: two goroutines racing that check would each construct a
+// client and one would publish a pointer the other is reading.
 func (q *HTTPQuerier) httpClient() *http.Client {
 	if q.HTTPClient != nil {
 		return q.HTTPClient
 	}
-	if q.client == nil {
+	q.clientOnce.Do(func() {
 		q.client = &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: &http.Transport{DialContext: q.safeDialContext},
 		}
-	}
+	})
 	return q.client
 }
 
