@@ -1605,9 +1605,21 @@ type PromotionState struct {
 	// +optional
 	RestartCheck string `json:"restartCheck,omitempty"`
 
-	// ObservedRestarts is the restart total the breaching RestartCheck observed.
+	// ObservedRestarts is the restart count the breaching RestartCheck observed
+	// for this revision — the excess over RestartBaseline, not the pods' lifetime
+	// total.
 	// +optional
 	ObservedRestarts int32 `json:"observedRestarts,omitempty"`
+
+	// RestartBaseline records, per promotion.restartGate check, the lifetime
+	// restart total its pods carried at the stage's last promotion. maxRestarts is
+	// measured against the excess over it, so the gate judges what has happened
+	// since the stage was last known good rather than everything the selected pods
+	// have ever accumulated — pods commonly survive a rollout and carry their whole
+	// history with them. It deliberately spans revisions: a promotion resets it, a
+	// new revision does not.
+	// +optional
+	RestartBaseline []RestartCheckBaseline `json:"restartBaseline,omitempty"`
 
 	// EventCheck names the promotion.eventGate check whose pods exceeded their
 	// maxEvents, when a Warning-event breach is what blocks the rollout.
@@ -1631,6 +1643,18 @@ type PromotionState struct {
 	// operator sees each check's observed value and verdict.
 	// +optional
 	LastAnalysis *AnalysisResult `json:"lastAnalysis,omitempty"`
+}
+
+// RestartCheckBaseline is one restart check's starting point: the lifetime
+// restart total its selected pods carried at the stage's last promotion.
+type RestartCheckBaseline struct {
+	// Name is the promotion.restartGate check this baseline belongs to.
+	// +required
+	Name string `json:"name"`
+
+	// Restarts is the lifetime restart total observed at the baseline instant.
+	// +optional
+	Restarts int32 `json:"restarts,omitempty"`
 }
 
 // AnalysisResult is the outcome of one promotion-analysis evaluation.

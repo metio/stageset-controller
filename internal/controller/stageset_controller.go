@@ -1050,8 +1050,10 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				fastTrackOK = r.evaluateFastTrack(ctx, &ss, stage)
 			}
 			var restart *restartVerdict
+			var restarts restartObservation
 			if stage.Promotion != nil && stage.Promotion.RestartGate != nil {
-				rv, rerr := r.evaluateRestartChecks(ctx, r.gateReader(rt.target), &ss, stage)
+				obs, rerr := r.evaluateRestartChecks(ctx, r.gateReader(rt.target), &ss, stage, priorStages[stage.Name])
+				restarts = obs
 				if rerr != nil {
 					// Can't read the watched pods: never advance blind — the gate
 					// fails closed. The stage applied successfully, so this is not
@@ -1067,7 +1069,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					}
 					return ctrl.Result{}, fmt.Errorf("%w: %w", errGateUnevaluable, rerr)
 				}
-				restart = rv
+				restart = obs.verdict
 			}
 			var event *eventVerdict
 			if stage.Promotion != nil && stage.Promotion.EventGate != nil {
@@ -1087,6 +1089,17 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				event = ev
 			}
 			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK, restart, event)
+			// Carry the restart-gate baseline onto whichever state the gate produced.
+			// A stage that promotes adopts the live totals, so the next window starts
+			// from the state it was last known good in; one that holds keeps measuring
+			// against the same baseline. Stamped here rather than inside gatePromotion
+			// because every branch it takes needs it and none of them decide it.
+			if promoState != nil && restarts.baseline != nil {
+				promoState.RestartBaseline = restarts.baseline
+				if promoted {
+					promoState.RestartBaseline = restarts.totals
+				}
+			}
 			appliedRevision := ra.Revision
 			if rollback {
 				// A promotion gate with onFailure=Rollback (analysis or a restart

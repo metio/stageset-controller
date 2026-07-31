@@ -53,6 +53,14 @@ A soak waits, but a bare soak only re-checks readiness — and a Deployment can 
 closes that gap with no external dependency: each check watches a group of pods by
 label and blocks the promotion if their container restarts exceed `maxRestarts`.
 
+`maxRestarts` bounds the restarts observed **since the stage was last promoted**,
+not the lifetime totals its pods carry. Pods routinely outlive a rollout — a stage
+that only patches a ConfigMap replaces none of them, and a StatefulSet's may survive
+many revisions — so counting their whole history would fail a release over restarts
+that happened weeks earlier. The count is recorded in
+`status.stages[].promotionState.restartBaseline` and reset each time the stage
+promotes.
+
 ```yaml
     - name: staging
       sourceRef:

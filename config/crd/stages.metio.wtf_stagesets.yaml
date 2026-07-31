@@ -4440,13 +4440,42 @@ spec:
                           format: int32
                           type: integer
                         observedRestarts:
-                          description: ObservedRestarts is the restart total the breaching
-                            RestartCheck observed.
+                          description: |-
+                            ObservedRestarts is the restart count the breaching RestartCheck observed
+                            for this revision — the excess over RestartBaseline, not the pods' lifetime
+                            total.
                           format: int32
                           type: integer
                         phase:
                           description: Phase is the current promotion phase.
                           type: string
+                        restartBaseline:
+                          description: |-
+                            RestartBaseline records, per promotion.restartGate check, the lifetime
+                            restart total its pods carried at the stage's last promotion. maxRestarts is
+                            measured against the excess over it, so the gate judges what has happened
+                            since the stage was last known good rather than everything the selected pods
+                            have ever accumulated — pods commonly survive a rollout and carry their whole
+                            history with them. It deliberately spans revisions: a promotion resets it, a
+                            new revision does not.
+                          items:
+                            description: |-
+                              RestartCheckBaseline is one restart check's starting point: the lifetime
+                              restart total its selected pods carried at the stage's last promotion.
+                            properties:
+                              name:
+                                description: Name is the promotion.restartGate check
+                                  this baseline belongs to.
+                                type: string
+                              restarts:
+                                description: Restarts is the lifetime restart total
+                                  observed at the baseline instant.
+                                format: int32
+                                type: integer
+                            required:
+                            - name
+                            type: object
+                          type: array
                         restartCheck:
                           description: |-
                             RestartCheck names the promotion.restartChecks entry whose pods exceeded
