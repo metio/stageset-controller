@@ -43,8 +43,20 @@ func TestEvaluateEventChecks(t *testing.T) {
 		}
 	}
 	r := &StageSetReconciler{}
+	// The gate lists Events with the two field selectors the apiserver indexes for
+	// them. The fake client emulates a field selector only against an index it was
+	// given, so register the same two here — otherwise these tests would pass
+	// against a List the real apiserver never performs.
 	build := func(objs ...client.Object) client.Client {
-		return fake.NewClientBuilder().WithScheme(builderScheme(t)).WithObjects(objs...).Build()
+		return fake.NewClientBuilder().
+			WithScheme(builderScheme(t)).
+			WithIndex(&corev1.Event{}, "type", func(o client.Object) []string {
+				return []string{o.(*corev1.Event).Type}
+			}).
+			WithIndex(&corev1.Event{}, "involvedObject.kind", func(o client.Object) []string {
+				return []string{o.(*corev1.Event).InvolvedObject.Kind}
+			}).
+			WithObjects(objs...).Build()
 	}
 	apiPod := pod("api-1", "uid-api", map[string]string{"app": "api"})
 

@@ -89,16 +89,24 @@ func podWarningEventTotal(ctx context.Context, target client.Reader, namespace s
 		allowed[reason] = struct{}{}
 	}
 
+	// Filter server-side on the two fields the apiserver indexes for Events. A
+	// namespace under load carries far more Events than pod warnings, and this
+	// list runs once per check on every reconcile of a gated stage — the reasons
+	// stay client-side because a field selector cannot express "one of these".
 	var events corev1.EventList
-	if err := target.List(ctx, &events, client.InNamespace(namespace)); err != nil {
+	if err := target.List(
+		ctx, &events,
+		client.InNamespace(namespace),
+		client.MatchingFields{
+			"type":                corev1.EventTypeWarning,
+			"involvedObject.kind": "Pod",
+		},
+	); err != nil {
 		return 0, fmt.Errorf("list events: %w", err)
 	}
 	var total int32
 	for i := range events.Items {
 		e := &events.Items[i]
-		if e.Type != corev1.EventTypeWarning || e.InvolvedObject.Kind != "Pod" {
-			continue
-		}
 		if _, ok := uids[e.InvolvedObject.UID]; !ok {
 			continue
 		}
