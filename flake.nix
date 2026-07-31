@@ -104,11 +104,7 @@
               goTools
               ++ devshell.lib.lintTools pkgs
               ++ devshell.lib.lintCommands pkgs
-              ++ (with pkgs; [
-                gnugrep
-                git # markdown lints the tracked checkout, via git ls-files
-                findutils # xargs
-              ]);
+              ++ (with pkgs; [ gnugrep ]);
             text = builtins.readFile ./scripts/verify.sh;
           };
           commands = [

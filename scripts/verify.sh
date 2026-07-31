@@ -9,9 +9,9 @@
 # queue.
 #
 # Mirrors metio/ci's reusable golang.yml (test / lint-go / vulnerabilities /
-# architecture) plus this repo's own reuse, yaml, markdown and typos jobs. The
-# text linters go through the shared ci-* wrappers, which pin the exact CI
-# invocation, so those arguments are not spelled a second time here.
+# architecture) plus this repo's own reuse, yaml, markdown and typos jobs. Every
+# text linter goes through a shared ci-* wrapper, which pins the exact CI
+# invocation, so no argument is spelled a second time here.
 #
 # The checks that need a browser, a registry, or a cluster are NOT here — the
 # container scan, the kind smoke gate, and the docs-lint job's htmltest/biome
@@ -68,17 +68,12 @@ step reuse ci-reuse
 step yaml ci-yaml
 step actionlint ci-actionlint
 step typos ci-typos
-
-# The markdown the checkout TRACKS, which is what CI's `**/*.md` amounts to
-# there: a fresh checkout has no untracked files and no submodule content. On a
-# working clone that glob also reaches into docs/themes/metio — a separate repo
-# with its own gate — and into anything git ignores, so it reports findings in
-# files nobody here can fix. A gate that only passes on a machine with nothing
-# checked out is a gate nobody runs before pushing.
-echo "== markdown"
-if ! git ls-files -z -- '*.md' '*.markdown' | xargs -0 -r markdownlint-cli2; then
-  failed="${failed} markdown"
-fi
+# ci-markdown lints the markdown the checkout TRACKS. That is what CI's `**/*.md`
+# amounts to there — a fresh checkout has no untracked files and no submodule
+# content — while on a working clone the glob also reaches into
+# docs/themes/metio, a separate repo with its own gate, and into anything git
+# ignores.
+step markdown ci-markdown
 
 # ----------------------------------------------------------------------------
 
