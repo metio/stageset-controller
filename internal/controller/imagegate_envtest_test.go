@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +107,51 @@ func reconcileWithImageVerifier(t *testing.T, c client.Client, ss *stagesv1.Stag
 	}
 	if _, err := driveReconcile(r, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
+	}
+}
+
+// TestReconcile_ImageVerification_GatesRollback proves a rollback cannot land an
+// image the forward apply would have refused. The producer re-fetch path rebuilds
+// from the artifact, so the previous revision's images arrive unverified and
+// unpinned; verifying them keeps the "a stage never applies an unverified image"
+// invariant true on the way back as well as the way forward.
+func TestReconcile_ImageVerification_GatesRollback(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	imagePolicy(t, c, "rb-pol", "regrb.io/**")
+	servedArtifact(t, c, ns, "ea-a", "", map[string]string{"deploy.yaml": deploymentManifest(ns, "app", "regrb.io/app:1.0")})
+	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj-b")})
+
+	ss := &stagesv1.StageSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-verify"},
+		Spec: stagesv1.StageSetSpec{
+			Interval:          metav1.Duration{Duration: 5 * time.Minute},
+			RollbackOnFailure: true,
+			Stages: []stagesv1.Stage{
+				{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea-a"}, ReadyChecks: &stagesv1.ReadyChecks{DisableWait: true}},
+				{Name: "stage-b", SourceRef: stagesv1.SourceReference{Name: "ea-b"}, ReadyChecks: &stagesv1.ReadyChecks{DisableWait: true}},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), ss); err != nil {
+		t.Fatalf("create StageSet: %v", err)
+	}
+
+	// A good run: the image verifies, so a rollback snapshot is recorded.
+	good := &fakeImageVerifier{digest: "regrb.io/app@sha256:" + strings.Repeat("a", 64)}
+	reconcileWithImageVerifier(t, c, ss, good, false)
+	if r := readyReason(getStageSet(t, c, ns, "rb-verify")); r != ReasonReady {
+		t.Fatalf("first run Ready reason = %q, want %q", r, ReasonReady)
+	}
+
+	// Stage B now renders a manifest the apiserver rejects, failing the run after
+	// stage A applied — and the image no longer verifies, so the revert of stage A
+	// must be refused rather than re-applying an unverified image.
+	repointArtifact(t, c, ns, "ea-b", map[string]string{"cm.yaml": cmValManifest(ns, "Bad_Name", "x")})
+	reconcileWithImageVerifier(t, c, ss, &fakeImageVerifier{err: fmt.Errorf("signature revoked")}, false)
+
+	if r := readyReason(getStageSet(t, c, ns, "rb-verify")); r != ReasonImageUnverified {
+		t.Fatalf("Ready reason = %q, want %q — a rollback whose images fail verification must be refused", r, ReasonImageUnverified)
 	}
 }
 

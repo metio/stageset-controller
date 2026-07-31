@@ -1088,7 +1088,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				} else if promoState != nil && promoState.EventCheck != "" {
 					cause = fmt.Sprintf("event check %q", promoState.EventCheck)
 				}
-				reverted, ok, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, rt.applier, fetcher, recorder)
+				reverted, ok, why, rerr := r.rollbackStageToSnapshot(ctx, &ss, stage, i, rt.applier, fetcher, recorder)
 				if rerr != nil {
 					// Transient revert failure: back off. Not a stage failure — the
 					// sentinel keeps the handler from also running attemptRollback.
@@ -1107,7 +1107,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					r.runOnRollback(ctx, &ss, fetcher, runtimes)
 				} else {
 					r.event(&ss, corev1.EventTypeWarning, ReasonPromotionBlocked,
-						fmt.Sprintf("stage %q %s failed and onFailure=Rollback, but no last-good revision is available to roll back to (enable spec.rollbackOnFailure); holding", stage.Name, cause))
+						fmt.Sprintf("stage %q %s failed and onFailure=Rollback, but the stage could not be reverted: %s; holding", stage.Name, cause, why))
 				}
 			}
 			applied[ra.Key()] = ra.Revision

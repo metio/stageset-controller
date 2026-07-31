@@ -230,7 +230,7 @@ func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stage
 		case found:
 			objects, derr := decodeObjects(data)
 			if derr == nil {
-				return objects, "", "", nil
+				return r.verifiedRollbackObjects(ctx, ss, ref.Stage, objects)
 			}
 			// Corrupt snapshot: the bytes are unusable. Event it and fall
 			// through to the producer re-fetch — the producer may still hold
@@ -274,6 +274,29 @@ func (r *StageSetReconciler) rollbackStageObjects(ctx context.Context, ss *stage
 	if berr != nil {
 		return nil, ReasonPreviousRevisionUnavailable,
 			fmt.Sprintf("cannot roll back stage %q: rebuilding the previous revision failed (%v)", ref.Stage, berr), nil
+	}
+	return r.verifiedRollbackObjects(ctx, ss, ref.Stage, objects)
+}
+
+// verifiedRollbackObjects runs the image-verification gate over the objects a
+// rollback is about to apply, and digest-pins them, exactly as the forward apply
+// does. Without it a revert is a way around the gate: the producer re-fetch path
+// rebuilds from the artifact, so the images arrive as whatever tags the manifests
+// carry — unverified, unpinned, and under --require-image-verification not even
+// governed by a policy the forward apply would have demanded.
+//
+// The store-backed path is checked too. Those objects were pinned when they were
+// stored, so they normally pass unchanged, but a policy that has tightened since
+// then must still be honored — the question is whether the image may run NOW, not
+// whether it could when the snapshot was taken.
+//
+// A failure is terminal for the rollback (ReasonImageUnverified): re-running the
+// same verification against the same digests gets the same answer, so the stage
+// holds at its failed state rather than reverting to something unverified.
+func (r *StageSetReconciler) verifiedRollbackObjects(ctx context.Context, ss *stagesv1.StageSet, stage string, objects []*unstructured.Unstructured) ([]*unstructured.Unstructured, string, string, error) {
+	if err := r.verifyStageImages(ctx, ss, stage, objects); err != nil {
+		return nil, ReasonImageUnverified,
+			fmt.Sprintf("cannot roll back stage %q: its previous revision references an image that fails verification now (%v)", stage, err), nil
 	}
 	return objects, "", "", nil
 }

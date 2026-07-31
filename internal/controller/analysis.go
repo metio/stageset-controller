@@ -165,11 +165,14 @@ func rollbackAborted(ss *stagesv1.StageSet, stage *stagesv1.Stage, prior stagesv
 
 // rollbackStageToSnapshot reverts a single stage to its last-good revision from
 // status.lastAppliedSnapshot, reusing the rollback render+apply helper. It is
-// scoped to this stage only — earlier promoted stages are untouched. A missing
-// snapshot (rollbackOnFailure never recorded one) returns ok=false so the caller
-// falls back to holding the stage instead. The returned revision is the
-// last-good one now live, for the stage status.
-func (r *StageSetReconciler) rollbackStageToSnapshot(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, position int, applier *apply.Applier, fetcher *artifact.Fetcher, recorder *stageinv.Recorder) (revision string, ok bool, err error) {
+// scoped to this stage only — earlier promoted stages are untouched. The returned
+// revision is the last-good one now live, for the stage status.
+//
+// When the revert cannot happen, ok is false and why explains it in operator
+// terms — no snapshot was recorded, the revision is no longer fetchable, its
+// images no longer verify — so the caller's event names the actual obstacle
+// instead of guessing at the most common one.
+func (r *StageSetReconciler) rollbackStageToSnapshot(ctx context.Context, ss *stagesv1.StageSet, stage *stagesv1.Stage, position int, applier *apply.Applier, fetcher *artifact.Fetcher, recorder *stageinv.Recorder) (revision string, ok bool, why string, err error) {
 	var ref *stagesv1.StageArtifactRef
 	for i := range ss.Status.LastAppliedSnapshot {
 		if ss.Status.LastAppliedSnapshot[i].Stage == stage.Name {
@@ -178,31 +181,31 @@ func (r *StageSetReconciler) rollbackStageToSnapshot(ctx context.Context, ss *st
 		}
 	}
 	if ref == nil {
-		return "", false, nil
+		return "", false, "no last-good revision is available to roll back to (enable spec.rollbackOnFailure)", nil
 	}
 	dec, derr := r.buildDecryptor(ctx, ss)
 	if derr != nil {
-		return "", false, derr
+		return "", false, "", derr
 	}
-	objects, rbReason, _, rbErr := r.rollbackStageObjects(ctx, ss, stage, *ref, fetcher, dec)
+	objects, rbReason, rbMsg, rbErr := r.rollbackStageObjects(ctx, ss, stage, *ref, fetcher, dec)
 	if rbErr != nil {
-		return "", false, rbErr
+		return "", false, "", rbErr
 	}
 	if rbReason != "" {
-		// The snapshot's revision is no longer fetchable / reproducible. Can't
-		// revert; the caller holds instead.
-		return "", false, nil
+		// The snapshot is unusable — unfetchable, unreproducible, or carrying an
+		// image that no longer verifies. Can't revert; the caller holds instead.
+		return "", false, rbMsg, nil
 	}
 	apply.StampStageLabel(objects, stagesv1.StageLabel, stage.Name)
 	if _, aerr := applier.Apply(ctx, ss.Name, ss.Namespace, objects, apply.ConflictHandling{}); aerr != nil {
-		return "", false, aerr
+		return "", false, "", aerr
 	}
 	refs := make([]inventory.ObjectRef, 0, len(objects))
 	for _, o := range objects {
 		refs = append(refs, stageinv.RefOf(o))
 	}
 	if werr := recorder.Write(ctx, ss, stage.Name, position, refs); werr != nil {
-		return "", false, werr
+		return "", false, "", werr
 	}
-	return ref.Revision, true, nil
+	return ref.Revision, true, "", nil
 }
