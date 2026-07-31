@@ -138,6 +138,19 @@ const (
 	// run halts at that stage; later stages do not run.
 	ReasonStageFailed = "StageFailed"
 
+	// ReasonStageProgressing: a stage's verify wait ran out of time with every
+	// object still making progress — nothing reached a terminal failure, the
+	// workload is simply taking longer than the stage's timeout allows. The run
+	// halts at that stage with its objects applied, and re-verifies on the next
+	// reconcile, so a workload that is merely slow converges without anyone
+	// intervening. rollbackOnFailure does NOT engage; onTimeout: Rollback opts
+	// back into treating the timeout as a failure.
+	//
+	// Distinct from ReasonStageFailed on purpose: a portal or a fleet gate
+	// watching Ready has to be able to tell a release that is still coming up
+	// from one that broke, and "eventually converges" from "needs a human".
+	ReasonStageProgressing = "StageProgressing"
+
 	// ReasonImageUnverified: a stage referenced an image that fails an
 	// ImageVerificationPolicy — unsigned, the wrong identity, or missing a required
 	// attestation — or (under --require-image-verification) matches no policy. The
@@ -218,6 +231,7 @@ var AllReasons = []string{
 	ReasonPreviousRevisionUnavailable,
 	ReasonUpdateDeferred,
 	ReasonStageFailed,
+	ReasonStageProgressing,
 	ReasonImageUnverified,
 	ReasonRBACDenied,
 	ReasonSoaking,

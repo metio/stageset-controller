@@ -16,7 +16,7 @@ A stage failed during execution. By operation:
 - **apply RBAC / missing CRD** — a `Forbidden` apply, or a manifest whose kind the apiserver doesn't know, is reported as [`RBACDenied`](/runbooks/rbacdenied/) (terminal), not `StageFailed`.
 - **build** — kustomize build or post-build substitution failed (a missing `substituteFrom` source, an invalid patch, a malformed manifest).
 - **apply** — the server-side apply was rejected: an immutable-field conflict, or an **RBAC denial** under the impersonated `serviceAccountName`.
-- **verify** — applied objects did not become Ready within the stage timeout (kstatus).
+- **verify** — an applied object reached a terminal state (kstatus `Failed`), which aborts the wait immediately. A stage whose objects were still *progressing* when the timeout elapsed is reported as [`StageProgressing`](/runbooks/stageprogressing/) instead, and converges on its own.
 - **pre/post action** — a `patch`/`http`/`wait`/`job`/`delete`/`apply` action failed or timed out.
 - **connect to target cluster** — a `spec.kubeConfig` Secret was missing, unparseable, or used the unsupported cloud-provider `configMapRef`.
 
@@ -39,7 +39,7 @@ Match the operation in the Message:
 - **build** — validate the manifests/patches locally; ensure every `substituteFrom` ConfigMap/Secret exists.
 - **apply RBAC** — grant the impersonated `serviceAccountName` (or the controller) the verbs it was denied; the Message names the resource.
 - **apply immutable conflict** — set a per-stage [`conflictPolicy`](/defining-a-release/conflict-policies/) (or `force: true`, its blunt `Recreate`-everything form) so the controller deletes and recreates the conflicting object; for objects holding data (`PersistentVolumeClaim`/`PersistentVolume`) a `Recreate` rule additionally requires `allowDataLoss: true`. Alternatively, use content-hash-suffixed names so a change is a new object rather than a mutation.
-- **verify timeout** — raise the stage `timeout`, or fix why the workload is not becoming Ready.
+- **verify** — an object reached a terminal failure; fix why, rather than raising the timeout. (A timeout on a still-progressing object is [`StageProgressing`](/runbooks/stageprogressing/), where raising the timeout *is* the answer.)
 - **action** — read the action's error; for `http`, confirm the host is in `--allowed-action-hosts`.
 
 ### An apply that failed with `Unauthorized`

@@ -661,12 +661,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// When a promotion gate's read is PERMANENTLY denied (RBAC), this carries
 	// the operator-actionable message for the errGateDenied handler.
 	var gateDeniedMsg string
-	// Set when a stage's verify wait ran out of time with every object still
-	// progressing and its onTimeout is Hold. The stage still fails and the run
-	// still halts; only rollbackOnFailure is held back, because restoring the
-	// previous manifests over a migration that is halfway through is worse than
-	// leaving a slow rollout alone.
-	var suppressRollback bool
+	// Carries the message for the errHoldForProgress handler: which stage is
+	// still becoming ready, and what the wait was still waiting on.
+	var progressHoldMsg string
 	stageBudgetFreeze := map[string]*stagesv1.BudgetFreeze{}
 	// The stage loop runs in a closure so a stage failure can be intercepted
 	// for rollbackOnFailure before it is finalized; failStage's returns become
@@ -965,14 +962,26 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					// were still progressing. Name the bound that was hit — the
 					// upstream message says only what it was waiting for, which
 					// sends operators to raise a client-side wait that can never
-					// help — and let onTimeout decide whether undoing a release
-					// that may still be mid-migration is the right answer.
+					// help.
 					cause := err
-					if !rt.applier.Stalled(ctx, waitSet) {
+					progressing := !rt.applier.Stalled(ctx, waitSet)
+					if progressing {
 						cause = fmt.Errorf("%w (waited %s: stage readyChecks.timeout, else stages[].timeout, else spec.timeout)", err, verifyTimeout)
-						if stageOnTimeout(&ss, stage) != "Rollback" {
-							suppressRollback = true
-						}
+					}
+					// Still progressing, under the default onTimeout: this is a
+					// hold, not a failure. The objects stay applied and the next
+					// reconcile re-verifies them, so a workload that is merely
+					// slow converges on its own — and nothing is rolled back over
+					// a migration that is halfway through.
+					if progressing && stageOnTimeout(&ss, stage) != "Rollback" {
+						stageStatuses = append(stageStatuses, led.stamp(stagesv1.StageStatus{
+							Name:            stage.Name,
+							Phase:           stagesv1.StageVerifying,
+							AppliedRevision: ra.Revision,
+							Message:         fmt.Sprintf("verify: %v", cause),
+						}))
+						progressHoldMsg = fmt.Sprintf("stage %q is applied and still becoming ready: %v", stage.Name, cause)
+						return ctrl.Result{RequeueAfter: r.retryInterval(&ss)}, errHoldForProgress
 					}
 					r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
 					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", cause, stageStatuses, led)
@@ -1176,6 +1185,28 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		return loopResult, loopErr
 	}
+	if errors.Is(loopErr, errHoldForProgress) {
+		// A stage's verify wait ran out of time with every object still making
+		// progress. The stage is applied; nothing failed and nothing is rolled
+		// back. Report it as its own reason so a portal can tell "still coming
+		// up" from "broken", persist the pass's progress (the action ledgers this
+		// pass recorded must not re-run on the retry), and requeue on
+		// spec.retryInterval — a bound the operator sets, rather than workqueue
+		// backoff climbing towards its 1000s cap on a rollout that is fine.
+		//
+		// The next reconcile re-applies and re-verifies, and the wait returns the
+		// moment kstatus sees the workload ready, so this converges unattended.
+		ss.Status.Stages = mergeStageStatuses(&ss, stageStatuses)
+		publishStageReady(&ss)
+		ss.Status.ObservedGeneration = ss.Generation
+		prevReady := readyConditionSnapshot(&ss)
+		r.setReady(&ss, metav1.ConditionFalse, ReasonStageProgressing, progressHoldMsg)
+		metrics.ReconcileTotal.WithLabelValues(ss.Namespace, ss.Name, ReasonStageProgressing).Inc()
+		r.emitReadyEvent(&ss, prevReady, metav1.ConditionFalse, ReasonStageProgressing, progressHoldMsg)
+		logger.Info("stage still becoming ready past its verify timeout; holding",
+			"requeueAfter", loopResult.RequeueAfter.String())
+		return loopResult, r.patchStatus(ctx, patchHelper, &ss)
+	}
 	if errors.Is(loopErr, errGateDenied) {
 		// A promotion gate's read is PERMANENTLY denied (the tenant SA lost
 		// pods/events read, a kind is missing). Backoff can't heal it and
@@ -1195,10 +1226,9 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// A stage failed. failStage has already written the failure status. If
 		// rollbackOnFailure is set, restore the last-good snapshot; a snapshot
 		// no longer fetchable surfaces as a terminal PreviousRevisionUnavailable.
-		// A verify timeout under onTimeout: Hold is the one failure that does not
-		// restore: the objects were still progressing, so the run halts with the
-		// new manifests in place and the next reconcile re-verifies them.
-		if ss.Spec.RollbackOnFailure && !suppressRollback {
+		// A verify timeout on a still-progressing stage never reaches here: the
+		// errHoldForProgress handler above returns before it.
+		if ss.Spec.RollbackOnFailure {
 			rbCtx, rbSpan := observability.Tracer().Start(ctx, "stageset.rollback")
 			rbReason, rbMsg, rbErr := r.attemptRollback(rbCtx, &ss, runtimes, fetcher, recorder)
 			if rbErr != nil {
@@ -1702,6 +1732,12 @@ func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.He
 // retry can't fix the cause (an RBAC denial, a digest mismatch, an oversized
 // tarball). The reconcile's loop-error handler unwraps it back to a nil error.
 var errTerminalStageFailure = errors.New("terminal stage failure")
+
+// errHoldForProgress halts the stage loop when a verify wait ran out of time
+// with every object still making progress and the stage's onTimeout is Hold.
+// The post-loop handler reports ReasonStageProgressing and requeues on
+// spec.retryInterval; it is not a failure, so rollbackOnFailure never sees it.
+var errHoldForProgress = errors.New("hold: stage still becoming ready")
 
 // runOnFailure runs a stage's onFailure actions best-effort (failures are
 // evented, never blocking the failure report). The ledger gates them so a

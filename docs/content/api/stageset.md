@@ -67,10 +67,16 @@ spec:
   stage with `stages[].onTimeout`. The verify wait fails fast when an object
   reaches a terminal failure, so the clock only ever runs out on objects that
   were still making progress — a workload that needed longer, not one that
-  broke. Under `Hold` the stage fails and the run halts, but the new manifests
-  stay in place and the next reconcile re-verifies them; restoring the previous
-  ones over a half-finished migration is the worse outcome. Choose `Rollback`
-  when a stage that overruns its budget is genuinely a release you want undone.
+  broke. Under `Hold` the run halts at that stage and reports
+  [`StageProgressing`](/runbooks/stageprogressing/) — a reason of its own, not
+  `StageFailed`, so a portal or a fleet gate can tell a release that is still
+  coming up from one that broke. The objects stay applied, the next reconcile
+  re-verifies them, and the wait returns as soon as the workload reports ready,
+  so a slow rollout converges with nobody intervening. The re-check is paced by
+  `retryInterval` (falling back to `interval`), not by workqueue backoff.
+  Choose `Rollback` when a stage that overruns its budget is genuinely a release
+  you want undone; restoring the previous manifests over a half-finished
+  migration is why that is not the default.
 - **`suspend`** — short-circuits to `Ready=False / Suspended`, leaving applied state
   running. Use [`stagesetctl reconcile --force`](/cli/reconcile/) to run once while
   suspended. See the [`Suspended` runbook](/runbooks/suspended/).
