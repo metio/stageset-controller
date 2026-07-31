@@ -16,6 +16,13 @@ health for resources kstatus doesn't understand (`exprs`, [CEL](https://github.c
 bound the wait (`timeout`), or skip it entirely (`disableWait`). `checks` and
 `exprs` may be set together.
 
+`readyChecks.timeout` is the most specific timeout a stage can carry: it wins
+over `stages[].timeout`, `spec.timeout`, and the built-in 15-minute default, and
+it bounds the whole verify phase — the kstatus wait, the explicit `checks`, and
+the `exprs` evaluated after them. Set it on the one stage whose readiness needs
+the patience; use the coarser levels when every stage of a run needs the same
+bound.
+
 ## Explicit objects
 
 Wait for named objects only — useful when a stage applies many objects but only a
@@ -28,7 +35,7 @@ spec:
       sourceRef:
         name: platform
       readyChecks:
-        timeout: 5m
+        timeout: 20m
         checks:
           - apiVersion: apiextensions.k8s.io/v1
             kind: CustomResourceDefinition

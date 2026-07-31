@@ -1214,7 +1214,16 @@ type ConflictTarget struct {
 // ReadyChecks gate stage completion. Purely observational; active steps are
 // actions.
 type ReadyChecks struct {
-	// Timeout for readiness evaluation.
+	// Timeout bounds this stage's whole verify phase — the kstatus wait over the
+	// applied objects and Checks, and the Exprs evaluated after it. It is the
+	// most specific level of the timeout ladder, taking precedence over the
+	// stage's own timeout, the StageSet's, and the built-in default. A
+	// non-positive value falls through to the next level rather than expiring
+	// at once.
+	//
+	// Reach for it when one stage's readiness is what needs the patience — a
+	// workload that migrates before it serves — and for the coarser levels when
+	// every stage of a run needs the same bound.
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 

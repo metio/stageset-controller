@@ -969,7 +969,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					// that may still be mid-migration is the right answer.
 					cause := err
 					if !rt.applier.Stalled(ctx, waitSet) {
-						cause = fmt.Errorf("%w (waited %s: spec.stages[].timeout, else spec.timeout)", err, verifyTimeout)
+						cause = fmt.Errorf("%w (waited %s: stage readyChecks.timeout, else stages[].timeout, else spec.timeout)", err, verifyTimeout)
 						if stageOnTimeout(&ss, stage) != "Rollback" {
 							suppressRollback = true
 						}
@@ -2318,11 +2318,24 @@ func isReady(ss *stagesv1.StageSet) bool {
 	return c != nil && c.Status == metav1.ConditionTrue
 }
 
+// stageTimeout resolves the bound on a stage's whole verify phase — the kstatus
+// wait over the applied objects and the explicit checks, and the CEL readiness
+// expressions that follow it — from most specific to least: the stage's
+// readyChecks.timeout, then its own timeout, then the StageSet's, then
+// defaultStageTimeout.
+//
+// readyChecks.timeout leads because it is the narrowest thing an author can
+// say: this stage's readiness, specifically, takes this long. The two coarser
+// levels remain the ones to reach for when every stage of a run needs the same
+// patience.
 func stageTimeout(ss *stagesv1.StageSet, stage *stagesv1.Stage) time.Duration {
 	// A non-positive timeout is treated as unset, not "expire immediately": a
 	// zero duration would make the verify wait's context expire at once and fail
 	// every wait-enabled stage instantly. Fall through to the next level so an
 	// explicit 0s means "use the default" as operators expect.
+	if rc := stage.ReadyChecks; rc != nil && rc.Timeout != nil && rc.Timeout.Duration > 0 {
+		return rc.Timeout.Duration
+	}
 	if stage.Timeout != nil && stage.Timeout.Duration > 0 {
 		return stage.Timeout.Duration
 	}

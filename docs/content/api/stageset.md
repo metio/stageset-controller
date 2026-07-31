@@ -50,9 +50,13 @@ spec:
 - **`retryInterval`** — retry cadence after a failure; falls back to `interval`.
 - **`driftDetectionInterval`** — a shorter cadence dedicated to healing out-of-band
   drift when you need it tighter than `interval`.
-- **`timeout`** — how long any one stage may take before it fails; override per
-  stage with `stages[].timeout`. **Defaults to `15m`.** It is the binding
-  constraint on the whole verify phase — nothing downstream waits past it — and
+- **`timeout`** — how long any one stage may take before it fails. **Defaults to
+  `15m`.** Three levels override it, most specific first:
+  `stages[].readyChecks.timeout`, then `stages[].timeout`, then this. A
+  non-positive value at any level falls through to the next rather than expiring
+  at once. It is the binding constraint on the whole verify phase — the kstatus
+  wait, the explicit checks, and the CEL expressions after them, with nothing
+  downstream able to wait past it — and
   it applies to a first install just as much as to a re-roll, so it has to fit
   the slowest thing an application ever does: coming up against an empty
   database, running its migrations and seed data before it serves. Raise it for
@@ -343,7 +347,7 @@ Gate when the stage counts as complete:
 
 ```yaml
       readyChecks:
-        timeout: 5m
+        timeout: 20m                   # most specific timeout level; see spec.timeout
         disableWait: false             # true = apply without waiting for readiness
         checks:                        # explicit objects, evaluated with kstatus
           - apiVersion: apiextensions.k8s.io/v1
@@ -359,6 +363,13 @@ Gate when the stage counts as complete:
 
 Health expressions use [CEL](https://github.com/google/cel-spec). See
 [ready checks](/defining-a-release/ready-checks/).
+
+- **`timeout`** — bounds this stage's whole verify phase: the kstatus wait over
+  the applied objects and `checks`, plus the `exprs` evaluated after it. It is
+  the most specific level of the [timeout ladder](#scheduling), ahead of
+  `stages[].timeout` and `spec.timeout`. Reach for it when one stage's readiness
+  is what needs the patience — a workload that migrates before it serves — and
+  for the coarser levels when every stage of a run needs the same bound.
 
 ---
 
