@@ -682,13 +682,47 @@ func TestCheckMigrationSourcePinned(t *testing.T) {
 
 func TestLadderHasHTTP(t *testing.T) {
 	t.Parallel()
-	no := []stagesv1.Migration{{Name: "a", Actions: []stagesv1.Action{{Name: "x", Delete: &stagesv1.DeleteAction{}}}}}
-	yes := []stagesv1.Migration{{Name: "a", Actions: []stagesv1.Action{{Name: "x", HTTP: &stagesv1.HTTPAction{}}}}}
-	if ladderHasHTTP(no) {
-		t.Fatal("no http action but reported true")
+	cases := []struct {
+		name   string
+		ladder []stagesv1.Migration
+		want   bool
+	}{
+		{
+			name:   "no http anywhere",
+			ladder: []stagesv1.Migration{{Name: "a", Actions: []stagesv1.Action{{Name: "x", Delete: &stagesv1.DeleteAction{}}}}},
+		},
+		{
+			name:   "http in actions",
+			ladder: []stagesv1.Migration{{Name: "a", Actions: []stagesv1.Action{{Name: "x", HTTP: &stagesv1.HTTPAction{}}}}},
+			want:   true,
+		},
+		{
+			// A downgrade runs `down` through the same executor, so an http action
+			// hidden there needs the allowlist just as much as one in `actions`.
+			name: "http only in down",
+			ladder: []stagesv1.Migration{{
+				Name:    "a",
+				Actions: []stagesv1.Action{{Name: "x", Delete: &stagesv1.DeleteAction{}}},
+				Down:    []stagesv1.Action{{Name: "y", HTTP: &stagesv1.HTTPAction{}}},
+			}},
+			want: true,
+		},
+		{
+			name: "http in down of a later migration",
+			ladder: []stagesv1.Migration{
+				{Name: "a", Actions: []stagesv1.Action{{Name: "x", Wait: &stagesv1.WaitAction{}}}},
+				{Name: "b", Down: []stagesv1.Action{{Name: "y", HTTP: &stagesv1.HTTPAction{}}}},
+			},
+			want: true,
+		},
 	}
-	if !ladderHasHTTP(yes) {
-		t.Fatal("http action present but reported false")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ladderHasHTTP(c.ladder); got != c.want {
+				t.Fatalf("ladderHasHTTP = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 

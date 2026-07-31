@@ -333,12 +333,18 @@ func (r *StageSetReconciler) resolveMigrationLadder(ctx context.Context, ss *sta
 	return ladder, &ra, "", "", nil
 }
 
-// ladderHasHTTP reports whether any migration in the ladder uses an http action.
+// ladderHasHTTP reports whether any migration in the ladder uses an http action,
+// in EITHER direction. A `down` action is executed by the same executor, from the
+// same network position, with the same access to a spec-named Secret — so an http
+// call reachable only on a downgrade needs the allowlist exactly as much as one on
+// the way up.
 func ladderHasHTTP(ladder []stagesv1.Migration) bool {
 	for i := range ladder {
-		for j := range ladder[i].Actions {
-			if ladder[i].Actions[j].HTTP != nil {
-				return true
+		for _, acts := range [][]stagesv1.Action{ladder[i].Actions, ladder[i].Down} {
+			for j := range acts {
+				if acts[j].HTTP != nil {
+					return true
+				}
 			}
 		}
 	}
