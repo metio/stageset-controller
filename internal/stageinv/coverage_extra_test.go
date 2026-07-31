@@ -141,9 +141,10 @@ func TestDeleteObsoleteShards_DeleteErrorPropagates(t *testing.T) {
 	}
 }
 
-// A shard whose index label is unparsable is skipped rather than deleted, so a
-// keep of 0 leaves it untouched.
-func TestDeleteObsoleteShards_SkipsUnparsableShardIndex(t *testing.T) {
+// A shard whose index label is unparsable is swept: Write stamps that label from
+// a loop counter, so the object is not a shard the current set needs, and leaving
+// it would keep its entries in every later prune diff with nothing reclaiming it.
+func TestDeleteObsoleteShards_SweepsUnparsableShardIndex(t *testing.T) {
 	t.Parallel()
 	weird := &stagesv1.StageInventory{
 		ObjectMeta: metav1.ObjectMeta{
@@ -164,8 +165,8 @@ func TestDeleteObsoleteShards_SkipsUnparsableShardIndex(t *testing.T) {
 	if err := r.Client.List(context.Background(), &list); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(list.Items) != 1 {
-		t.Fatalf("the unparsable-index shard was deleted; want it skipped, items=%d", len(list.Items))
+	if len(list.Items) != 0 {
+		t.Fatalf("the unparsable-index shard should be swept, items=%d", len(list.Items))
 	}
 }
 

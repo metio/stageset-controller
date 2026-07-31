@@ -266,6 +266,42 @@ func TestWrite_MigratesNonCanonicalShardName(t *testing.T) {
 	}
 }
 
+// TestWrite_SweepsShardWithUnparseableIndex proves a shard whose index label is
+// not a number is reclaimed rather than left behind. Write stamps that label from
+// a loop counter, so such an object cannot be a shard the current set needs — and
+// leaving it would keep feeding its entries into every later prune diff while
+// nothing ever reported it.
+func TestWrite_SweepsShardWithUnparseableIndex(t *testing.T) {
+	t.Parallel()
+	ss := stageSet("app", "ns")
+	bad := &stagesv1.StageInventory{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-deploy-xx",
+			Namespace: "ns",
+			Labels: map[string]string{
+				stagesv1.StageSetLabel: "app",
+				stagesv1.StageLabel:    "deploy",
+				stagesv1.ShardLabel:    "not-a-number",
+			},
+		},
+		Spec: stagesv1.StageInventorySpec{Entries: []stagesv1.InventoryEntry{{ID: ref("orphan").ID(), V: "v1"}}},
+	}
+	r := newRecorder(t, 0, ss, bad)
+	ctx := context.Background()
+
+	if err := r.Write(ctx, ss, "deploy", 0, []inventory.ObjectRef{ref("new")}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	var check stagesv1.StageInventory
+	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: "ns", Name: "app-deploy-xx"}, &check); !apierrors.IsNotFound(err) {
+		t.Errorf("a shard with an unparseable index label should be swept, got err=%v", err)
+	}
+	if got := sortedNames(mustStored(t, r, "app", "ns", "deploy")); len(got) != 1 || got[0] != "new" {
+		t.Errorf("stored = %v, want [new] — the swept shard must not linger in the prune diff", got)
+	}
+}
+
 func mustStored(t *testing.T, r *Recorder, ssName, ns, stage string) []inventory.ObjectRef {
 	t.Helper()
 	stored, err := r.Stored(context.Background(), ssName, ns, stage)

@@ -172,11 +172,14 @@ func (r *Recorder) deleteObsoleteShards(ctx context.Context, namespace, ssName, 
 		return fmt.Errorf("list StageInventory for cleanup: %w", err)
 	}
 	for i := range list.Items {
+		// A shard whose index label will not parse is not one this write produced —
+		// Write stamps it from a loop counter — so it cannot be a shard the current
+		// set still needs. Skipping it would leave an object carrying the stage's
+		// labels that nothing ever reclaims and nothing ever reports, and Stored
+		// would keep feeding its entries into the prune diff. Sweep it with the rest
+		// of the obsolete set.
 		idx, err := strconv.Atoi(list.Items[i].Labels[stagesv1.ShardLabel])
-		if err != nil {
-			continue
-		}
-		if idx < keep && list.Items[i].Name == inventory.ShardName(ssName, stage, idx) {
+		if err == nil && idx < keep && list.Items[i].Name == inventory.ShardName(ssName, stage, idx) {
 			continue
 		}
 		if err := r.Client.Delete(ctx, &list.Items[i]); err != nil && client.IgnoreNotFound(err) != nil {
