@@ -79,6 +79,15 @@ Each wave is a label selector over the members. A member that matches `selector`
 no wave fails the rollout closed (`MembersUnassigned`) rather than being silently
 skipped.
 
+A wave `gate` queries an endpoint the controller reaches directly, so the hosts it
+may reach are bounded by `--allowed-action-hosts` exactly as an
+[error-budget source](/gating/error-budget/) is. The gate cannot carry a
+`secretRef` bearer token: a FleetRollout is cluster-scoped, so there is no
+namespace to resolve that Secret in, and a gate naming one is refused with
+`GateUnsupported`. Expose the fleet-wide metric without authentication, or put the
+authenticated query on a StageSet-level source, which has a namespace and a
+ServiceAccount to read it under.
+
 **Deriving vs. pinning the version.** With no `targetVersion` (above), the fleet reads
 each held member's `status.pendingVersion` — the advance its own source is offering —
 and approves *that*, so you never restate a version the source already declares and

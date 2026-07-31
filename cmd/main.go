@@ -199,7 +199,8 @@ func run(ctx context.Context, args, env []string, stderr io.Writer) int {
 	}
 
 	if err = (&controller.FleetRolloutReconciler{
-		Client: mgr.GetClient(),
+		Client:             mgr.GetClient(),
+		AllowedActionHosts: []string(*c.AllowedActionHosts),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error("unable to create controller", "error", err, "controller", "FleetRollout")
 		return 1

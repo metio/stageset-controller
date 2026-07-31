@@ -5,9 +5,11 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -556,5 +558,63 @@ func TestFleetRollout_UnassignedMemberIsFlagged(t *testing.T) {
 	}
 	if got := memberApproved(t, c, ns, "orphan"); got != "" {
 		t.Fatalf("an unassigned member must not be approved, got %q", got)
+	}
+}
+
+// TestFleetRollout_GateSecretRefRefused proves a wave gate naming a bearer-token
+// Secret is refused on the condition instead of opening the wave on an
+// unauthenticated query — a cluster-scoped rollout has no namespace to resolve
+// that Secret in.
+func TestFleetRollout_GateSecretRefRefused(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	const app = "gatesecret"
+	fleetMember(t, c, ns, "w0", app, "0")
+
+	fr := &stagesv1.FleetRollout{
+		ObjectMeta: metav1.ObjectMeta{Name: "fleet-gate-secret"},
+		Spec: stagesv1.FleetRolloutSpec{
+			TargetVersion: "2.0.0",
+			Selector:      appSelector(app),
+			Waves: []stagesv1.FleetWave{{
+				Name:     "canary",
+				Selector: ringSelector("0"),
+				Gate: &stagesv1.FleetWaveGate{
+					Threshold: maxThreshold("0.01"),
+					Source: stagesv1.MetricSource{Prometheus: &stagesv1.PrometheusSource{
+						Address:   "http://prometheus.monitoring:9090",
+						Query:     "up",
+						SecretRef: &fluxmeta.LocalObjectReference{Name: "prom-token"},
+					}},
+				},
+			}},
+		},
+	}
+	if err := c.Create(context.Background(), fr); err != nil {
+		t.Fatalf("create FleetRollout: %v", err)
+	}
+	reconcileFleet(t, c, "fleet-gate-secret")
+
+	got := getFleet(t, c, "fleet-gate-secret")
+	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != ReasonFleetGateUnsupported {
+		t.Fatalf("Ready condition = %+v, want False/GateUnsupported", cond)
+	}
+	if got := memberApproved(t, c, ns, "w0"); got != "" {
+		t.Fatalf("a rollout with an unresolvable gate credential must not open a wave, got %q", got)
+	}
+}
+
+// TestFleetRolloutQuerierHonoursAllowedHosts proves the default wave-gate querier
+// is built with the --allowed-action-hosts allowlist, so a gate is bounded by the
+// same flag that bounds a StageSet's metric sources and http actions.
+func TestFleetRolloutQuerierHonoursAllowedHosts(t *testing.T) {
+	t.Parallel()
+	q := metricsource.New(nil, nil, []string{"prometheus.monitoring"})
+	_, err := q.Query(context.Background(), "", "", stagesv1.MetricSource{
+		Prometheus: &stagesv1.PrometheusSource{Address: "http://elsewhere.invalid:9090", Query: "up"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "allowed-action-hosts") {
+		t.Fatalf("a host outside the allowlist must be refused, got %v", err)
 	}
 }

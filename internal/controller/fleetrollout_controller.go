@@ -46,6 +46,10 @@ const (
 	// ReasonFleetHalted: a wave failed its health gate or a settled member
 	// regressed; no further waves open until the cause clears.
 	ReasonFleetHalted = "Halted"
+	// ReasonFleetGateUnsupported: a wave gate asks for something this surface
+	// cannot provide — currently a bearer-token secretRef, which a cluster-scoped
+	// rollout has no namespace to resolve in.
+	ReasonFleetGateUnsupported = "GateUnsupported"
 )
 
 // Wave health-gate verdicts recorded in FleetWaveStatus.Health.
@@ -72,6 +76,10 @@ type FleetRolloutReconciler struct {
 	// MetricQuerier resolves a wave gate's MetricSource to a scalar. Defaulted in
 	// SetupWithManager; tests substitute a fake.
 	MetricQuerier metricsource.Querier
+	// AllowedActionHosts is the global --allowed-action-hosts flag. A wave gate is
+	// an outbound call to a URL the rollout's author chose, so the same allowlist
+	// that bounds a StageSet's metric sources and http actions bounds it.
+	AllowedActionHosts []string
 	// Recorder emits Events on halt and completion; nil disables them.
 	Recorder events.EventRecorder
 	// Now returns the current time for soak timing; nil defaults to time.Now.
@@ -137,6 +145,15 @@ func (r *FleetRolloutReconciler) reconcile(ctx context.Context, fr *stagesv1.Fle
 		if serr != nil {
 			r.setFleetReady(fr, metav1.ConditionFalse, ReasonFleetInvalid,
 				fmt.Sprintf("wave %q selector: %v", fr.Spec.Waves[i].Name, serr))
+			return ctrl.Result{}, nil
+		}
+		// A gate whose credential can never be resolved would query unauthenticated
+		// (or, once the source refuses it, hold the wave forever on an unreadable
+		// metric). Refuse the spec instead, so the cause is on the condition rather
+		// than in a rollout that silently stops advancing.
+		if ref := gateSecretRef(fr.Spec.Waves[i].Gate); ref != "" {
+			r.setFleetReady(fr, metav1.ConditionFalse, ReasonFleetGateUnsupported,
+				fmt.Sprintf("wave %q gate %s: a FleetRollout is cluster-scoped, so it has no namespace to resolve a bearer-token Secret in; expose the metric without authentication, or gate the rollout on a StageSet-level source that carries one", fr.Spec.Waves[i].Name, ref))
 			return ctrl.Result{}, nil
 		}
 		waveSelectors[i] = sel
@@ -549,10 +566,14 @@ func (r *FleetRolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.Recorder = mgr.GetEventRecorder("fleetrollout-controller")
 	}
 	if r.MetricQuerier == nil {
-		// A fleet gate is a controller-identity query; the client-backed secret
-		// reader resolves bearer-token auth when the gate names a secret, and the
-		// production IP denylist (nil validator) still guards against SSRF.
-		r.MetricQuerier = metricsource.New(r.readSecret, nil, nil)
+		// A fleet gate is a controller-identity query with NO secret reader: a
+		// FleetRollout is cluster-scoped, so a gate has no namespace to resolve a
+		// Secret in, and the controller deliberately holds no cluster-wide secrets
+		// read. gateSecretRef refuses such a gate up front; passing nil here keeps
+		// the refusal true even if a gate ever reached the querier. The production
+		// IP denylist (nil validator) still guards against SSRF, and the allowlist
+		// bounds which hosts a gate may reach at all.
+		r.MetricQuerier = metricsource.New(nil, nil, r.AllowedActionHosts)
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&stagesv1.FleetRollout{}).
@@ -560,12 +581,27 @@ func (r *FleetRolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// readSecret is the SecretReader for the default metric querier: it reads a
-// Secret's data by name in the namespace the query supplies.
-func (r *FleetRolloutReconciler) readSecret(ctx context.Context, namespace, _ string, name string) (map[string][]byte, error) {
-	var s corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &s); err != nil {
-		return nil, err
+// gateSecretRef names the bearer-token reference a wave gate carries, or "" when
+// it needs no credential.
+//
+// A MetricSource's secretRef is a LOCAL reference — it names a Secret in the
+// owning object's namespace. A FleetRollout is cluster-scoped, so there is no
+// such namespace, and the controller holds no cluster-wide secrets read to fall
+// back on (the multi-tenant ClusterRole grants none, deliberately: every Secret
+// this controller reads is one an author named in a spec, so it is read under
+// that tenant's own identity — and a cluster-scoped rollout has no tenant to be
+// bounded by). The credential is therefore unresolvable rather than merely
+// awkward, so the rollout says so instead of querying an unauthenticated source
+// or holding the wave forever on a source it can never read.
+func gateSecretRef(g *stagesv1.FleetWaveGate) string {
+	if g == nil {
+		return ""
 	}
-	return s.Data, nil
+	switch {
+	case g.Source.Prometheus != nil && g.Source.Prometheus.SecretRef != nil:
+		return "source.prometheus.secretRef"
+	case g.Source.Webhook != nil && g.Source.Webhook.SecretRef != nil:
+		return "source.webhook.secretRef"
+	}
+	return ""
 }
