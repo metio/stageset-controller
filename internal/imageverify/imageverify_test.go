@@ -141,4 +141,18 @@ func TestMatch(t *testing.T) {
 			t.Fatalf("an unrelated image matches nothing, got %d matched, skipped=%v", len(matched), skipped)
 		}
 	})
+	// Skip is scoped to the policy that declares it. A second policy covering the
+	// same image still governs it, so adding a narrow exemption to one policy
+	// cannot disarm another.
+	t.Run("skip does not exempt an image another policy governs", func(t *testing.T) {
+		withStrict := append(append([]stagesv1.ImageVerificationPolicy{}, policies...),
+			pol("strict-base", []string{"reg.io/base/**"}, nil))
+		matched, skipped := Match(withStrict, "reg.io/base/distroless:1")
+		if !skipped {
+			t.Fatal("the skipping policy should still report the exemption")
+		}
+		if len(matched) != 1 {
+			t.Fatalf("the non-skipping policy must still govern the image, got %d matched", len(matched))
+		}
+	})
 }

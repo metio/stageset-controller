@@ -48,15 +48,20 @@ func (r *StageSetReconciler) verifyStageImages(ctx context.Context, ss *stagesv1
 	pins := map[string]string{}
 	for _, ref := range imageverify.ExtractImages(objects) {
 		matched, skipped := imageverify.Match(policies, ref)
-		if skipped {
-			continue // an audited policy Skip exemption
-		}
 		if len(matched) == 0 {
+			// Nothing governs the image. A policy that named it under Skip meant to
+			// exempt it, so deny-by-default does not second-guess that; an image no
+			// policy mentions at all is the case the flag exists to catch.
+			if skipped {
+				continue // an audited policy Skip exemption
+			}
 			if r.RequireImageVerification {
 				return fmt.Errorf("image %q matches no ImageVerificationPolicy", ref)
 			}
 			continue // ungoverned, and not deny-by-default
 		}
+		// A skip in some OTHER policy does not excuse the image from the policies
+		// that do govern it — an enforcing policy is never disarmed from outside.
 		var digest string
 		for i := range matched {
 			p := &matched[i]

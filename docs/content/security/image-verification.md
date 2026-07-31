@@ -103,6 +103,13 @@ spec:
 
 A skipped image is recorded, never silently passed.
 
+`skip` exempts an image from **this policy's** authorities only. Policies are
+cluster-scoped and several may cover the same image; another policy that names it
+under `images` without skipping it still verifies it, so a narrow exemption cannot
+disarm someone else's enforcement. An image every matching policy skips is exempt,
+and stays exempt under `--require-image-verification` — the exemption is a
+deliberate statement, not the oversight that flag exists to catch.
+
 ## Deny images no policy governs
 
 By default an image that matches no policy applies unchanged — verification covers

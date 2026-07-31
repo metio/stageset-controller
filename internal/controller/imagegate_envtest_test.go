@@ -59,10 +59,16 @@ spec:
 
 func imagePolicy(t *testing.T, c client.Client, name string, imageGlob string) {
 	t.Helper()
+	imagePolicyWithSkip(t, c, name, imageGlob, nil)
+}
+
+func imagePolicyWithSkip(t *testing.T, c client.Client, name, imageGlob string, skip []string) {
+	t.Helper()
 	p := &stagesv1.ImageVerificationPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: stagesv1.ImageVerificationPolicySpec{
 			Images:      []string{imageGlob},
+			Skip:        skip,
 			Authorities: []stagesv1.VerificationAuthority{{Keyless: &stagesv1.KeylessAuthority{Issuer: "https://ci", Subject: "builder"}}},
 		},
 	}
@@ -70,6 +76,37 @@ func imagePolicy(t *testing.T, c client.Client, name string, imageGlob string) {
 		t.Fatalf("create ImageVerificationPolicy: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Delete(context.Background(), p) })
+}
+
+// TestReconcile_ImageVerification_SkipIsPerPolicy proves a Skip in one policy
+// does not exempt the image from a second policy that governs it. Policies are
+// cluster-scoped, so an author adding a narrow exemption to their own policy must
+// not be able to disarm someone else's enforcement over the same image.
+func TestReconcile_ImageVerification_SkipIsPerPolicy(t *testing.T) {
+	c := testClient(t)
+	ns := newNamespace(t, c)
+	// One broad policy that exempts the base images, one strict policy that
+	// governs exactly those base images.
+	imagePolicyWithSkip(t, c, "skip-broad", "regskip.io/**", []string{"regskip.io/base/**"})
+	imagePolicy(t, c, "skip-strict", "regskip.io/base/**")
+
+	servedArtifact(t, c, ns, "ea", "", map[string]string{
+		"deploy.yaml": deploymentManifest(ns, "app", "regskip.io/base/distroless:1.0"),
+	})
+	ss := newStageSetNoWait(t, c, ns, "skipapp", stagesv1.SourceReference{Name: "ea"})
+
+	v := &fakeImageVerifier{err: fmt.Errorf("no signature")}
+	reconcileWithImageVerifier(t, c, ss, v, false)
+
+	if v.calls == 0 {
+		t.Fatal("the strict policy governs this image, so it must still be verified despite the broad policy's skip")
+	}
+	if r := readyReason(getStageSet(t, c, ns, "skipapp")); r != ReasonImageUnverified {
+		t.Fatalf("Ready reason = %q, want %q", r, ReasonImageUnverified)
+	}
+	if _, applied := deployedImage(t, c, ns, "app"); applied {
+		t.Fatal("an image rejected by a governing policy must not be applied")
+	}
 }
 
 // newStageSetNoWait creates a single-stage StageSet whose stage opts out of the

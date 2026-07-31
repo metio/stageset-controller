@@ -131,9 +131,16 @@ func podSpecPath(kind string) []string {
 }
 
 // Match reports the policies that govern imageRef — those whose Images glob matches
-// the ref (without its tag/digest) — and whether a matching policy explicitly skips
-// it. A skipped image is exempt (the caller records the exemption); an image with no
-// matching policy is governed by the caller's deny-by-default posture.
+// the ref (without its tag/digest) and whose own Skip does not — and whether some
+// policy explicitly skipped it.
+//
+// Skip is scoped to the policy that declares it: a policy exempts an image from
+// ITS OWN authorities, never from another policy's. Otherwise adding a narrow skip
+// to one policy would silently disarm every other policy covering the same image,
+// which is the opposite of what an author adding an exemption expects. The skipped
+// flag therefore only matters when nothing else governs the ref, where it tells the
+// caller the exemption was deliberate rather than an oversight its deny-by-default
+// posture should catch.
 func Match(policies []stagesv1.ImageVerificationPolicy, imageRef string) (matched []stagesv1.ImageVerificationPolicy, skipped bool) {
 	name := refName(imageRef)
 	for i := range policies {
