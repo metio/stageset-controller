@@ -201,6 +201,11 @@ type StageSetReconciler struct {
 	// to time.Now. Tests inject a fixed clock.
 	Now func() time.Time
 
+	// deletionPoll is how often a blocking verify wait re-reads its StageSet to
+	// notice a deletion; zero uses deletionPollInterval. Tests shorten it so the
+	// mid-wait deletion path runs in milliseconds.
+	deletionPoll time.Duration
+
 	// remoteConfig builds the rest.Config for a spec.kubeConfig target (secretRef
 	// kubeconfig or configMapRef cloud-provider auth). Defaulted to
 	// defaultRemoteConfigBuilder in SetupWithManager; tests inject a fake that
@@ -307,6 +312,16 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	span.SetAttributes(attribute.Int64("stageset.generation", ss.Generation))
+
+	// Entry marker. Every other line in a pass is conditional on what the pass
+	// found, so without this one the log cannot distinguish "the reconciler was
+	// never invoked" from "it was invoked and returned early" — and that is the
+	// first question asked of a StageSet that appears to have stopped moving.
+	logger.V(1).Info("reconciling StageSet",
+		"generation", ss.Generation,
+		"observedGeneration", ss.Status.ObservedGeneration,
+		"deleting", !ss.DeletionTimestamp.IsZero(),
+		"suspended", ss.Spec.Suspend)
 
 	if !ss.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &ss)
@@ -946,10 +961,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return r.failStage(ctx, patchHelper, &ss, stage.Name, "record inventory", werr, stageStatuses, led)
 			}
 
-			// Verify readiness. The kstatus wait covers the stage's applied
-			// objects (unless DisableWait) plus any explicit ReadyChecks.Checks;
-			// CEL ReadyChecks.Exprs then gate on the live state of matching
-			// applied objects. All three share the stage's verify timeout.
+			// Verify readiness: see verifyStage for the gates and the bound they
+			// share.
 			verifyTimeout := stageTimeout(&ss, stage)
 			// holdForProgress parks a stage that is applied and still converging:
 			// the objects stay applied, the next reconcile re-verifies them, and
@@ -971,37 +984,20 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			if !disableWait(stage) {
 				waitSet = append(changeSet.ToObjMetadataSet(), waitSet...)
 			}
-			if len(waitSet) > 0 {
-				if err := rt.applier.Wait(ctx, waitSet, verifyTimeout); err != nil {
-					// The wait fails fast on a terminal kstatus failure, so if
-					// nothing is Failed the clock simply ran out on objects that
-					// were still progressing. Name the bound that was hit — the
-					// upstream message says only what it was waiting for, which
-					// sends operators to raise a client-side wait that can never
-					// help.
-					cause := err
-					progressing := !rt.applier.Stalled(ctx, waitSet)
-					if progressing {
-						cause = fmt.Errorf("%w (waited %s: stage readyChecks.timeout, else stages[].timeout, else spec.timeout)", err, verifyTimeout)
-					}
-					// Still progressing, under the default onTimeout: a hold, not a
-					// failure, so a workload that is merely slow converges on its own.
-					if progressing && stageOnTimeout(&ss, stage) != "Rollback" {
-						return holdForProgress(cause)
-					}
-					r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
-					return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", cause, stageStatuses, led)
-				}
-			}
-			if err := evalReadyExprs(ctx, rt.target, &ss, stage, objects, verifyTimeout); err != nil {
-				// A CEL-gated object that says it is still in progress gets the same
-				// treatment as a kstatus object that is not Failed: hold, unless the
-				// stage asked for a rollback on timeout.
-				if errors.Is(err, errReadyExprsProgressing) && stageOnTimeout(&ss, stage) != "Rollback" {
-					return holdForProgress(err)
-				}
+			switch v := r.verifyStage(ctx, &ss, stage, rt.applier, rt.target, waitSet, objects, verifyTimeout); {
+			case v.deleted:
+				// The StageSet was deleted while this stage was still becoming
+				// ready. Nothing else in this pass is worth finishing: abandon it so
+				// the reconcile that tears the StageSet down is not queued behind
+				// the remainder of the verify timeout.
+				return ctrl.Result{Requeue: true}, errAbortForDeletion
+			case v.cause != nil && v.progressing && stageOnTimeout(&ss, stage) != "Rollback":
+				// Still progressing, under the default onTimeout: a hold, not a
+				// failure, so a workload that is merely slow converges on its own.
+				return holdForProgress(v.cause)
+			case v.cause != nil:
 				r.runOnFailure(ctx, &ss, stage, rt.executor, led.doneSet(), record)
-				return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", err, stageStatuses, led)
+				return r.failStage(ctx, patchHelper, &ss, stage.Name, "verify", v.cause, stageStatuses, led)
 			}
 
 			// POST actions: the stage (and any downstream gate) is Ready only once
@@ -1157,6 +1153,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		return ctrl.Result{}, nil
 	}()
+	if errors.Is(loopErr, errAbortForDeletion) {
+		// A stage's verify wait saw the StageSet deleted. Its status is going away
+		// with it, so nothing is written here.
+		logger.Info("StageSet deleted while a stage was still becoming ready; abandoning the pass so teardown can run")
+		return ctrl.Result{Requeue: true}, nil
+	}
 	if errors.Is(loopErr, errHoldForPromotion) {
 		// A promotion gate is holding the rollout at promoteHoldStage. Persist the
 		// stage statuses (so the soak clock + handled token survive), set the held
@@ -1763,6 +1765,12 @@ var errTerminalStageFailure = errors.New("terminal stage failure")
 // The post-loop handler reports ReasonStageProgressing and requeues on
 // spec.retryInterval; it is not a failure, so rollbackOnFailure never sees it.
 var errHoldForProgress = errors.New("hold: stage still becoming ready")
+
+// errAbortForDeletion halts the stage loop when the StageSet acquired a
+// deletionTimestamp mid-pass. The post-loop handler writes no status — the
+// object is on its way out, and the pass's remaining work would only delay the
+// teardown queued behind it — and requeues so the deletion branch runs next.
+var errAbortForDeletion = errors.New("abort: StageSet is being deleted")
 
 // runOnFailure runs a stage's onFailure actions best-effort (failures are
 // evented, never blocking the failure report). The ledger gates them so a
@@ -2505,6 +2513,31 @@ func (r *StageSetReconciler) resolvePostBuildVars(ctx context.Context, ss *stage
 	return vars, nil
 }
 
+// stageSetWatchPredicate selects the Update events worth a reconcile: a spec
+// change (generation bump), a fresh reconcile.fluxcd.io/requestedAt token
+// (whole-object force reconcile), a stages.metio.wtf/reconcile-stage change
+// (single-stage force reconcile), a migration approval, or a promote request.
+// Filtering out the status-only updates the reconciler writes itself keeps the
+// workqueue from churning on its own condition/observedGeneration stamps;
+// spec.interval (jittered RequeueAfter) drives the steady-state reconcile, and
+// the StageInventory / dependsOn / ExternalArtifact watches drive
+// dependency-triggered runs.
+//
+// A deletion arrives here too: the apiserver bumps metadata.generation when it
+// stamps deletionTimestamp on a finalizer-held object, so the generation term
+// carries it. TestStageSetWatchPredicate_WakesOnDeletion pins that against a
+// real apiserver, since a filtered deletion would leave a StageSet in
+// Terminating until an unrelated event woke it.
+func stageSetWatchPredicate() predicate.Predicate {
+	return predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		fluxpredicates.ReconcileRequestedPredicate{},
+		reconcileStageRequestedPredicate{},
+		migrationApprovalPredicate{},
+		promoteRequestedPredicate{},
+	)
+}
+
 // SetupWithManager wires the watches: the StageSet itself, owned
 // StageInventory shards, StageSet dependents (dependsOn wake-ups), and — when
 // the ExternalArtifact kind is installed — ExternalArtifact changes mapped back
@@ -2560,24 +2593,7 @@ func (r *StageSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	b := ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentReconciles}).
-		For(&stagesv1.StageSet{}, crbuilder.WithPredicates(
-			// Wake on a spec change (generation bump), a fresh
-			// reconcile.fluxcd.io/requestedAt token (whole-object force
-			// reconcile), or a stages.metio.wtf/reconcile-stage change
-			// (single-stage force reconcile). Filtering out the status-only
-			// updates the reconciler writes itself keeps the workqueue from
-			// churning on its own condition/observedGeneration stamps;
-			// spec.interval (jittered RequeueAfter) drives the steady-state
-			// reconcile, and the StageInventory / dependsOn / ExternalArtifact
-			// watches drive dependency-triggered runs.
-			predicate.Or(
-				predicate.GenerationChangedPredicate{},
-				fluxpredicates.ReconcileRequestedPredicate{},
-				reconcileStageRequestedPredicate{},
-				migrationApprovalPredicate{},
-				promoteRequestedPredicate{},
-			),
-		)).
+		For(&stagesv1.StageSet{}, crbuilder.WithPredicates(stageSetWatchPredicate())).
 		Owns(&stagesv1.StageInventory{}).
 		Watches(&stagesv1.StageSet{}, handler.EnqueueRequestsFromMapFunc(r.mapStageSetDependents)).
 		// A StageLedger is not owned (retain-always), so Owns won't wake its

@@ -47,6 +47,21 @@ A pod that is `Running` with no restarts and a startup probe still failing is mi
 
 If the condition keeps reappearing on every reconcile, the workload takes longer than its stage timeout allows on **every** attempt, so the run never advances past it.
 
+### What the log shows while a stage is waiting
+
+A verify wait blocks for as long as the stage's timeout allows, so a slow stage means a long stretch with no state change to report. For every wait that outlasts a minute, the controller reports in once a minute:
+
+```text
+stage is still becoming ready; verify wait continues
+  stage=server elapsed=6m0s timeout=15m0s deadline=2026-08-02T00:17:27Z
+```
+
+Rollouts that become ready inside the first minute log nothing extra, so these lines appear only where they explain something. Their absence, on a StageSet that has not reached `Ready`, means the controller is not in a verify wait — start from [controller pod down](/runbooks/controller-pod-down/) and [workqueue saturation](/runbooks/workqueue-saturation/) instead of raising the timeout.
+
+### Deleting a StageSet that is waiting
+
+Deletion is acted on within seconds: the wait is abandoned as soon as the `deletionTimestamp` lands, and reverse-order teardown starts without waiting out the rest of the timeout. A stage that never becomes ready is exactly the one you are most likely to tear down and retry, so it does not cost you the stage's timeout to do so.
+
 ## Remediation
 
 Nothing, if the workload converges — the rollout resumes by itself and `Ready` goes true.

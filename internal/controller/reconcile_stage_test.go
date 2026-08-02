@@ -11,28 +11,22 @@ import (
 	"time"
 
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
-	fluxpredicates "github.com/fluxcd/pkg/runtime/predicates"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
-// The watch predicate is predicate.Or(GenerationChanged, ReconcileRequested,
-// reconcileStageRequested). The single-stage reconcile-stage annotation bumps
-// neither generation nor the Flux requestedAt token, so without the third term
-// the force-stage Update event would be dropped — this pins that it survives,
-// and that status-only / unrelated-annotation churn does not.
+// The single-stage reconcile-stage annotation bumps neither generation nor the
+// Flux requestedAt token, so without its own term the force-stage Update event
+// would be dropped — this pins that it survives, and that status-only /
+// unrelated-annotation churn does not. It runs the production predicate rather
+// than a copy of it, so a term added to the watch cannot go unexercised here.
 func TestWatchPredicate_WakesOnExpectedChanges(t *testing.T) {
 	t.Parallel()
-	pred := predicate.Or(
-		predicate.GenerationChangedPredicate{},
-		fluxpredicates.ReconcileRequestedPredicate{},
-		reconcileStageRequestedPredicate{},
-	)
+	pred := stageSetWatchPredicate()
 
 	base := func() *stagesv1.StageSet {
 		return &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{
@@ -45,12 +39,22 @@ func TestWatchPredicate_WakesOnExpectedChanges(t *testing.T) {
 		s.Annotations = map[string]string{k: v}
 		return s
 	}
+	// A deletion the apiserver stamps on a finalizer-held object: timestamp set,
+	// generation bumped. TestStageSetWatchPredicate_WakesOnDeletion pins that the
+	// apiserver really does both.
+	deleting := func() *stagesv1.StageSet {
+		s := withGen(2)
+		s.Finalizers = []string{FinalizerName}
+		s.DeletionTimestamp = &metav1.Time{Time: time.Unix(0, 0)}
+		return s
+	}
 
 	cases := map[string]struct {
 		oldObj, newObj *stagesv1.StageSet
 		want           bool
 	}{
 		"generation bump (spec change)":   {base(), withGen(2), true},
+		"deletion of a held StageSet":     {base(), deleting(), true},
 		"reconcile-stage annotation set":  {base(), withAnn(reconcileStageAnnotation, "stage-a@t1"), true},
 		"reconcile-stage token changed":   {withAnn(reconcileStageAnnotation, "stage-a@t1"), withAnn(reconcileStageAnnotation, "stage-a@t2"), true},
 		"flux requestedAt token set":      {base(), withAnn(fluxmeta.ReconcileRequestAnnotation, "now"), true},

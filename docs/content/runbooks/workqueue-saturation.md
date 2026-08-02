@@ -21,7 +21,11 @@ Common causes:
 - **slow sources** — a stage waiting on a large artifact fetch or a source that is
   slow to become Ready holds a worker.
 - **a stuck stage** — an action with a long timeout (a `wait`/`http`/`job` that
-  never completes) pins a worker for the whole timeout.
+  never completes) pins a worker for the whole timeout. So does a stage's verify
+  wait: a workload that never reports ready holds its worker until the stage
+  timeout elapses (15 minutes by default), and every event for that StageSet —
+  including its own deletion — waits behind it, since a key reconciles one at a
+  time.
 - **too few workers for the StageSet count** — many StageSets reconciling on short
   intervals.
 
@@ -36,6 +40,11 @@ kubectl --namespace stageset-system logs deploy/stageset-controller --tail=200
 
 Correlate with `controller_runtime_reconcile_time_seconds` (see
 [reconcile latency](/runbooks/reconcile-latency/)) and apiserver latency.
+
+`workqueue_longest_running_processor_seconds{name="stageset"}` answers the
+question the log cannot: a value climbing towards a stage timeout means a worker
+is parked inside a reconcile, not that the controller has stopped. Zero, with a
+non-empty `workqueue_depth`, points elsewhere.
 
 ## Remediation
 
