@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Health on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/health/</link><description>Recent content in Health on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/health/index.xml" rel="self" type="application/rss+xml"/><item><title>Ready checks</title><link>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</guid><description>&lt;p&gt;Ready checks decide when a stage is healthy enough to let the next stage start.
+They are purely observational — the controller waits and reports, but takes no
+action (active steps are &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+).&lt;/p&gt;
+&lt;p&gt;By default, with no &lt;code&gt;readyChecks&lt;/code&gt; block, the controller waits for &lt;strong&gt;every&lt;/strong&gt; object
+the stage applied to report ready via
+&lt;a href="https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus"&gt;kstatus&lt;/a&gt;
+.
+&lt;code&gt;readyChecks&lt;/code&gt; lets you narrow that to specific objects (&lt;code&gt;checks&lt;/code&gt;), add custom
+health for resources kstatus doesn&amp;rsquo;t understand (&lt;code&gt;exprs&lt;/code&gt;, &lt;a href="https://github.com/google/cel-spec"&gt;CEL&lt;/a&gt;
+),
+bound the wait (&lt;code&gt;timeout&lt;/code&gt;), or skip it entirely (&lt;code&gt;disableWait&lt;/code&gt;). &lt;code&gt;checks&lt;/code&gt; and
+&lt;code&gt;exprs&lt;/code&gt; may be set together.&lt;/p&gt;</description></item><item><title>Succeeded</title><link>https://stageset.projects.metio.wtf/runbooks/succeeded/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/succeeded/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=True&lt;/code&gt;, &lt;code&gt;REASON=Succeeded&lt;/code&gt;. The Message names the applied revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is the healthy steady state: every stage&amp;rsquo;s artifact resolved, built, applied, and passed its readiness checks, and &lt;code&gt;status.lastAppliedRevisions&lt;/code&gt; matches &lt;code&gt;status.lastAttemptedRevisions&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="remediation"&gt;Remediation&lt;/h2&gt;
+&lt;p&gt;Nothing to remediate.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;The controller keeps reconciling at &lt;code&gt;spec.interval&lt;/code&gt;; a re-render upstream (a new &lt;code&gt;ExternalArtifact&lt;/code&gt; revision) re-applies automatically and the condition stays &lt;code&gt;Succeeded&lt;/code&gt; once the new revision converges.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;status.stages[]&lt;/code&gt; reports per-stage &lt;code&gt;appliedRevision&lt;/code&gt; and inventory entry counts to confirm what each stage owns.&lt;/li&gt;
+&lt;/ul&gt;</description></item></channel></rss>

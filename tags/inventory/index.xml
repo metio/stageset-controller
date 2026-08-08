@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Inventory on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/inventory/</link><description>Recent content in Inventory on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/inventory/index.xml" rel="self" type="application/rss+xml"/><item><title>Backup and disaster recovery</title><link>https://stageset.projects.metio.wtf/running/disaster-recovery/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/disaster-recovery/</guid><description>&lt;p&gt;Back up the small set of state the controller cannot reconstruct, then rebuild a
+lost cluster by restoring that state in the right order. Most of what a &lt;code&gt;StageSet&lt;/code&gt;
+manages is recomputed on the next reconcile from your Git repository and your Flux
+sources, so it needs no backup of its own. Three things are the exception, and
+losing any of them causes silent data damage rather than a clean failure.&lt;/p&gt;</description></item><item><title>Inventory and pruning</title><link>https://stageset.projects.metio.wtf/defining-a-release/inventory/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/inventory/</guid><description>&lt;p&gt;Every time a stage applies, the controller records the exact set of objects it
+applied, so it can &lt;strong&gt;prune&lt;/strong&gt; what a later revision no longer renders and tear a
+StageSet down in reverse stage order. That record is the &lt;strong&gt;&lt;code&gt;StageInventory&lt;/code&gt;&lt;/strong&gt; — a
+controller-owned resource you never author (its fields are in the
+&lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/"&gt;API reference&lt;/a&gt;
+).&lt;/p&gt;
+&lt;h2 id="what-the-inventory-records"&gt;What the inventory records&lt;/h2&gt;
+&lt;p&gt;For each stage, the controller writes a &lt;code&gt;StageInventory&lt;/code&gt; listing every object the
+stage owns — group, kind, namespace, name. On the next reconcile it diffs the new
+render against that record and prunes the objects that dropped out, honoring
+&lt;code&gt;prune: false&lt;/code&gt; and the &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/"&gt;conflict policy&lt;/a&gt;
+. On deletion it
+walks the stages in reverse, so a later stage&amp;rsquo;s objects are removed before the
+earlier stages they depend on.&lt;/p&gt;</description></item></channel></rss>
