@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Timeout on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/timeout/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/timeout/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/timeout/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-08-22T05:12:14+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/timeout/</id><entry><title type="html">StageProgressing</title><link href="https://stageset.projects.metio.wtf/runbooks/stageprogressing/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/runbooks/awaitingpromotion/?utm_source=atom_feed" rel="related" type="text/html" title="AwaitingPromotion"/><link href="https://stageset.projects.metio.wtf/runbooks/dependencynotready/?utm_source=atom_feed" rel="related" type="text/html" title="DependencyNotReady"/><link href="https://stageset.projects.metio.wtf/runbooks/migrationstagenotfound/?utm_source=atom_feed" rel="related" type="text/html" title="MigrationStageNotFound"/><link href="https://stageset.projects.metio.wtf/runbooks/soaking/?utm_source=atom_feed" rel="related" type="text/html" title="Soaking"/><link href="https://stageset.projects.metio.wtf/runbooks/stagefailed/?utm_source=atom_feed" rel="related" type="text/html" title="StageFailed"/><id>https://stageset.projects.metio.wtf/runbooks/stageprogressing/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-08-02T21:00:14+02:00</updated><content type="html"><![CDATA[<blockquote>A stage&rsquo;s verify wait ran out of time while its objects were still coming up, so the run is holding rather than failing — it converges on its own.</blockquote><h2 id="symptom">Symptom</h2>
+<p><code>READY=False</code>, <code>REASON=StageProgressing</code>. The Message names the stage and what the wait was still waiting on:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; describe stageset &lt;name&gt;
+</span></span><span class="line"><span class="cl">...
+</span></span><span class="line"><span class="cl">Status:
+</span></span><span class="line"><span class="cl">  Conditions:
+</span></span><span class="line"><span class="cl">    Reason:  StageProgressing
+</span></span><span class="line"><span class="cl">    Status:  False
+</span></span><span class="line"><span class="cl">    Type:    Ready
+</span></span><span class="line"><span class="cl">    Message: stage &#34;server&#34; is applied and still becoming ready: timeout waiting for:
+</span></span><span class="line"><span class="cl">             [Deployment/&lt;ns&gt;/server status: &#39;InProgress&#39;] (waited 15m: stage
+</span></span><span class="line"><span class="cl">             readyChecks.timeout, else stages[].timeout, else spec.timeout)
+</span></span></code></pre></div><p>The stage&rsquo;s objects are applied and the stage shows <code>Verifying</code> in <code>status.stages</code>.</p>
+<p><strong>This is not a failure, and it does not need you.</strong> The next reconcile re-verifies, and the wait returns the moment the workload reports ready. Read on only if it is not converging.</p>
+<h2 id="cause">Cause</h2>
+<p>The verify wait fails fast: an object that reaches a terminal state — an image that cannot be pulled, a container crash-looping past its threshold — aborts the wait immediately and reports <a href="/runbooks/stagefailed/"><code>StageFailed</code></a>
+. So the timeout is only ever reached by objects that were <em>still making progress</em> when the clock ran out.</p>
+<p>That is almost always a workload that needs longer than its stage allows: a first install against an empty database, running migrations and seed data before it serves.</p>
+<p>Because nothing failed, <code>spec.rollbackOnFailure</code> deliberately does <strong>not</strong> engage — restoring the previous manifests over a half-finished migration is worse than letting a slow rollout finish. See <a href="/api/stageset/#scheduling"><code>onTimeout</code></a>
+ to change that.</p>
+<h2 id="diagnosis">Diagnosis</h2>
+<p>Confirm the workload is actually progressing rather than wedged:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; rollout status deployment/&lt;name&gt; --timeout<span class="o">=</span><span class="m">0</span>
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; get pods --selector <span class="nv">app</span><span class="o">=</span>&lt;name&gt;
+</span></span><span class="line"><span class="cl">kubectl --namespace &lt;ns&gt; logs deployment/&lt;name&gt; --tail<span class="o">=</span><span class="m">50</span>
+</span></span></code></pre></div><p>A pod that is <code>Running</code> with no restarts and a startup probe still failing is mid-startup — the normal case here. A pod stuck <code>Pending</code> (unschedulable, unbound PVC) or restarting repeatedly is not progressing, and the stage will eventually be reported as <code>StageFailed</code> instead.</p>
+<p>If the condition keeps reappearing on every reconcile, the workload takes longer than its stage timeout allows on <strong>every</strong> attempt, so the run never advances past it.</p>
+<h3 id="what-the-log-shows-while-a-stage-is-waiting">What the log shows while a stage is waiting</h3>
+<p>A verify wait blocks for as long as the stage&rsquo;s timeout allows, so a slow stage means a long stretch with no state change to report. For every wait that outlasts a minute, the controller reports in once a minute:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">stage is still becoming ready; verify wait continues
+</span></span><span class="line"><span class="cl">  stage=server elapsed=6m0s timeout=15m0s deadline=2026-08-02T00:17:27Z
+</span></span></code></pre></div><p>Rollouts that become ready inside the first minute log nothing extra, so these lines appear only where they explain something. Their absence, on a StageSet that has not reached <code>Ready</code>, means the controller is not in a verify wait — start from <a href="/runbooks/controller-pod-down/">controller pod down</a>
+ and <a href="/runbooks/workqueue-saturation/">workqueue saturation</a>
+ instead of raising the timeout.</p>
+<h3 id="deleting-a-stageset-that-is-waiting">Deleting a StageSet that is waiting</h3>
+<p>Deletion is acted on within seconds: the wait is abandoned as soon as the <code>deletionTimestamp</code> lands, and reverse-order teardown starts without waiting out the rest of the timeout. A stage that never becomes ready is exactly the one you are most likely to tear down and retry, so it does not cost you the stage&rsquo;s timeout to do so.</p>
+<h2 id="remediation">Remediation</h2>
+<p>Nothing, if the workload converges — the rollout resumes by itself and <code>Ready</code> goes true.</p>
+<p>Where it repeats, raise the stage&rsquo;s budget so a single attempt can finish, most specific level first:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">stages</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readyChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">30m         </span><span class="w"> </span><span class="c"># this stage&#39;s readiness only</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># timeout: 30m          # or: this whole stage</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># timeout: 30m              # or: every stage in the run</span><span class="w">
+</span></span></span></code></pre></div><p>Make it at least as long as the workload&rsquo;s own declared startup budget — a <code>startupProbe</code>&rsquo;s <code>failureThreshold × periodSeconds</code> plus <code>initialDelaySeconds</code> — so the two numbers agree instead of the shorter one winning.</p>
+<p>The retry cadence between attempts is <code>spec.retryInterval</code> (falling back to <code>spec.interval</code>), so shorten that if you want the re-check sooner.</p>
+<h2 id="why-this-is-not-stagefailed">Why this is not StageFailed</h2>
+<p>A portal or a fleet gate watching <code>Ready</code> has to tell a release that is still coming up from one that broke: the first converges unattended, the second needs someone. Reporting both as <code>StageFailed</code> made every slow first install look like an outage. The split is what makes &ldquo;wait&rdquo; and &ldquo;page someone&rdquo; different answers.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/runbooks" term="runbooks" label="runbooks"/><category scheme="https://stageset.projects.metio.wtf/tags/stages" term="stages" label="stages"/><category scheme="https://stageset.projects.metio.wtf/tags/timeout" term="timeout" label="timeout"/><category scheme="https://stageset.projects.metio.wtf/tags/troubleshooting" term="troubleshooting" label="troubleshooting"/></entry></feed>

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://gohugo.io/" version="0.163.3">Hugo</generator><title type="html">Upgrade on StageSet Controller</title><link href="https://stageset.projects.metio.wtf/tags/upgrade/" rel="alternate" type="text/html" title="html"/><link href="https://stageset.projects.metio.wtf/tags/upgrade/index.xml" rel="alternate" type="application/rss+xml" title="rss"/><link href="https://stageset.projects.metio.wtf/tags/upgrade/atom.xml" rel="self" type="application/atom+xml" title="atom"/><updated>2026-08-22T05:12:14+00:00</updated><author><name>metio.wtf</name></author><id>https://stageset.projects.metio.wtf/tags/upgrade/</id><entry><title type="html">Upgrading</title><link href="https://stageset.projects.metio.wtf/reference/upgrading/?utm_source=atom_feed" rel="alternate" type="text/html"/><link href="https://stageset.projects.metio.wtf/reference/configuration/?utm_source=atom_feed" rel="related" type="text/html" title="Configuration reference"/><link href="https://stageset.projects.metio.wtf/reference/helm-values/?utm_source=atom_feed" rel="related" type="text/html" title="Helm chart values"/><link href="https://stageset.projects.metio.wtf/get-started/kubernetes/?utm_source=atom_feed" rel="related" type="text/html" title="Install on Kubernetes"/><link href="https://stageset.projects.metio.wtf/reference/verifying-releases/?utm_source=atom_feed" rel="related" type="text/html" title="Verifying releases"/><id>https://stageset.projects.metio.wtf/reference/upgrading/</id><published>0001-01-01T00:00:00+00:00</published><updated>2026-07-31T23:15:46+02:00</updated><content type="html"><![CDATA[<blockquote>The actions required when upgrading stageset-controller, one section per release that needs migration steps.</blockquote><p>This page lists the actions required when upgrading stageset-controller. Each
+release that needs action gets a section below, headed by its calendar version; a
+release with no section needs no migration — a plain upgrade (bump the chart&rsquo;s
+<code>appVersion</code> or pull the new image tag) suffices.</p>
+<h2 id="after-2026731184504">After 2026.7.31184504</h2>
+<p>Five gates changed. Two now cover ground they were documented to cover and did
+not, so a rollout they used to let through can stop; two became more forgiving,
+so a rollout they used to block can proceed; one refuses a configuration it
+previously accepted and silently stalled on. Nothing needs action before
+upgrading, but three are worth checking against your specs first.</p>
+<h3 id="image-policies-skip-no-longer-disarms-other-policies">Image policies: <code>skip</code> no longer disarms other policies</h3>
+<p>An image named under any matching <code>ImageVerificationPolicy</code>&rsquo;s <code>skip</code> used to be
+exempt from <strong>every</strong> matching policy. A <code>skip</code> now exempts an image only from
+the policy that declares it; another policy naming the same image under <code>images</code>
+still verifies it.</p>
+<p>Where several cluster-scoped policies overlap, an image that was passing
+unverified may now be verified — and hold its stage under
+<a href="/runbooks/imageunverified/"><code>ImageUnverified</code></a>
+ if it has no signature. Review
+overlapping policies before upgrading:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl get imageverificationpolicies -o custom-columns<span class="o">=</span>NAME:.metadata.name,IMAGES:.spec.images,SKIP:.spec.skip
+</span></span></code></pre></div><p>An image every matching policy skips stays exempt, including under
+<code>--require-image-verification</code>.</p>
+<h3 id="migration-ladders-down-actions-count-towards-the-http-allowlist">Migration ladders: <code>down</code> actions count towards the http allowlist</h3>
+<p>A ladder from <code>spec.migrationsSourceRef</code> may only use <code>http</code> actions when the
+controller runs with <code>--allowed-action-hosts</code>. That check previously read only
+each migration&rsquo;s <code>actions</code>, so a ladder whose http call sat in <code>down</code> was
+accepted. It now reads both.</p>
+<p>A sourced ladder with an http action in <code>down</code>, on a controller with no
+allowlist, is refused with <code>InvalidSpec</code>. Set <code>--allowed-action-hosts</code> to the
+hosts those actions legitimately call.</p>
+<h3 id="rollback-verifies-images">Rollback verifies images</h3>
+<p>A rollback re-applies through the image-verification gate, so a revert can no
+longer land an image the forward apply would have refused. A previous revision
+whose images no longer verify reports
+<a href="/runbooks/imageunverified/"><code>ImageUnverified</code></a>
+ instead of reverting; the stage
+holds at its failed state rather than reverting to something unverified.</p>
+<h3 id="restart-gates-measure-since-the-last-promotion">Restart gates measure since the last promotion</h3>
+<p><code>promotion.restartGate</code> compared <code>maxRestarts</code> against the lifetime restart
+totals of the pods it watches. Pods routinely outlive a rollout, so a workload
+carrying restarts from weeks earlier failed the gate the next time it shipped —
+permanently, since a lifetime total never falls.</p>
+<p>The gate now counts only restarts observed since the stage was last promoted,
+recorded in <code>status.stages[].promotionState.restartBaseline</code>. A stage stuck on
+this reason clears on the next reconcile after upgrading. A stage that legitimately
+breached still breaches. No spec change is needed.</p>
+<h3 id="cel-ready-checks-honour-inprogress">CEL ready-checks honour <code>inProgress</code></h3>
+<p><code>readyChecks.exprs[].inProgress</code> was accepted and ignored. It now decides what a
+verify timeout means: an object that is not <code>current</code> but still reports
+<code>inProgress</code> holds the stage under
+<a href="/runbooks/stageprogressing/"><code>StageProgressing</code></a>
+ and is re-verified, instead of
+failing it — and, with <code>spec.rollbackOnFailure</code>, instead of reverting an install
+that was going to succeed.</p>
+<p>A check that declares no <code>inProgress</code> keeps the old behaviour, so anything
+matching on <code>StageFailed</code> only sees less where you have written one. Set
+<code>onTimeout: Rollback</code> on the stage to keep reverting on timeout.</p>
+<h3 id="metric-sources-apply-their-guards-to-redirects">Metric sources apply their guards to redirects</h3>
+<p><code>--allowed-action-hosts</code> was checked against the address a metric source names
+and then not again, so a permitted source could redirect the query to any host
+the SSRF guard allows. Every hop is now checked, which bounds where a query ends
+up rather than only where it starts. This covers <code>spec.errorBudget</code>, a stage&rsquo;s
+<code>promotion.analysis</code> and <code>promotion.fastTrack</code>, and FleetRollout wave gates.</p>
+<p>If you run with an allowlist and a source legitimately redirects — a load
+balancer sending the query to a regional endpoint, say — add the destination host
+alongside the entry one.</p>
+<p>A query carrying a <code>secretRef</code> bearer token now refuses a redirect to a different
+host outright, allow-listed or not. Go forwards <code>Authorization</code> to a subdomain of
+the original, so the allowlist alone could not keep a tenant&rsquo;s token off a host
+nobody named. Redirects within the same host still carry it. A source that
+depended on a cross-host redirect to deliver its token was already only working
+by that quirk; point the address at the final host instead.</p>
+<h3 id="fleetrollout-wave-gates">FleetRollout wave gates</h3>
+<p>A wave <code>gate</code> is now bounded by <code>--allowed-action-hosts</code>, like every other
+outbound call the controller makes. If you run with an allowlist, add the host
+your fleet gates query or they will report the source as unavailable and hold.</p>
+<p>A gate whose <code>source</code> names a <code>secretRef</code> is now refused with <code>GateUnsupported</code>.
+That credential could never be resolved — a FleetRollout is cluster-scoped, so
+there is no namespace to read the Secret from — and the rollout used to stall
+with nothing on its condition explaining why. Expose the fleet-wide metric
+without authentication, or move the authenticated query to a StageSet-level
+source, which has both a namespace and a ServiceAccount to read it under.</p>
+<h2 id="2026731184504">2026.7.31184504</h2>
+<p>A stage that is still coming up no longer reports as a failure, and the
+controller reconciles several StageSets at once. Only the first item below needs
+anything from you, and only if you alert or gate on <code>StageFailed</code>.</p>
+<h3 id="a-slow-stage-now-reports-stageprogressing">A slow stage now reports <code>StageProgressing</code></h3>
+<p>A stage whose verify wait ran out of time while its objects were still making
+progress used to report <code>Ready=False / StageFailed</code>. It now reports
+<a href="/runbooks/stageprogressing/"><code>StageProgressing</code></a>
+ — its own reason, because a
+release that is still starting and one that broke need different answers. The
+first converges on its own; only the second wants a human.</p>
+<p>A stage that genuinely failed is unaffected: the verify wait still aborts the
+moment an object reaches a terminal state, and still reports <code>StageFailed</code>.</p>
+<p>Anything matching on <code>StageFailed</code> therefore sees less than it used to. That is
+usually the point — a slow first install stops paging — but a rule that was
+counting on it to catch <em>everything</em> now has a gap. Check both places the reason
+surfaces:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl"><span class="c1"># Alerting and dashboards: the reason is a label on the reconcile counter.</span>
+</span></span><span class="line"><span class="cl">grep -rn <span class="s1">&#39;StageFailed&#39;</span> &lt;your-prometheus-rules-and-dashboards&gt;
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Anything polling the Ready condition (a portal, a fleet gate, a CI wait).</span>
+</span></span><span class="line"><span class="cl">kubectl get stageset --all-namespaces <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -o custom-columns<span class="o">=</span><span class="s1">&#39;NS:.metadata.namespace,NAME:.metadata.name,REASON:.status.conditions[?(@.type==&#34;Ready&#34;)].reason&#39;</span>
+</span></span></code></pre></div><p>Add <code>StageProgressing</code> where you want &ldquo;still coming up&rdquo; treated as an alert, or —
+more usually — leave it out and let it stop waking people.</p>
+<p>The hold is also paced by <code>spec.retryInterval</code> (falling back to <code>spec.interval</code>)
+rather than by the controller&rsquo;s internal backoff, so the re-check cadence is now
+a number you set.</p>
+<h3 id="reconciles-run-four-at-a-time">Reconciles run four at a time</h3>
+<p>A stage&rsquo;s verify wait blocks its worker for the whole stage timeout, and the
+controller previously ran one reconcile at a time — so one tenant coming up
+slowly held every other tenant&rsquo;s reconcile behind it, for as long as it took.
+Four run concurrently now.</p>
+<p>Nothing to configure. Memory scales with it: four reconciles can each hold a
+fetched artifact and its rendered manifests, so a controller sized against the
+old serial behaviour on very large releases may want its limit raised.</p>
+<h2 id="2026731092513">2026.7.31092513</h2>
+<p>How long a stage may take to verify, and what happens when it runs out of time,
+both changed. Only the first item below needs an audit before upgrading.</p>
+<h3 id="readycheckstimeout-now-takes-effect"><code>readyChecks.timeout</code> now takes effect</h3>
+<p><code>stages[].readyChecks.timeout</code> was accepted and then ignored: a stage that
+declared how long its readiness takes was bounded by <code>spec.timeout</code> instead. It
+is now the most specific level of the timeout ladder —
+<code>readyChecks.timeout</code>, then <code>stages[].timeout</code>, then <code>spec.timeout</code>, then the
+default.</p>
+<p>This is the one change that can make a timeout <strong>shorter</strong> than before. A
+StageSet written from the previous documentation carries <code>readyChecks.timeout: 5m</code>, which was doing nothing and now caps the verify phase at five minutes,
+below the new fifteen-minute default. List every stage that carries one:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl get stageset --all-namespaces --output<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq -r <span class="s1">&#39;.items[] | . as $s | .spec.stages[]?
+</span></span></span><span class="line"><span class="cl"><span class="s1">           | select(.readyChecks.timeout != null)
+</span></span></span><span class="line"><span class="cl"><span class="s1">           | &#34;\($s.metadata.namespace)/\($s.metadata.name) stage \(.name): \(.readyChecks.timeout)&#34;&#39;</span>
+</span></span></code></pre></div><p>Raise or remove the value on any stage whose workload needs longer than it says.</p>
+<h3 id="the-default-stage-timeout-is-15-minutes">The default stage timeout is 15 minutes</h3>
+<p>A stage with no timeout at any level now waits 15 minutes instead of 5 before
+failing. Nothing to do: the verify wait already fails fast when an object reaches
+a terminal failure, so the extra patience applies only to workloads still making
+progress — a first install running migrations against an empty database is the
+usual one.</p>
+<h3 id="a-verify-timeout-no-longer-rolls-back">A verify timeout no longer rolls back</h3>
+<p>With <code>spec.rollbackOnFailure</code> set, a stage that ran out of time used to have its
+previous manifests restored. It now halts with the new manifests in place, and
+the next reconcile re-verifies them. A stage whose objects genuinely failed still
+rolls back.</p>
+<p>Set <code>onTimeout: Rollback</code> — on <code>spec</code>, or on a single stage — to keep the old
+behaviour. Doing so is worth a thought for anything that migrates a database
+before it serves: restoring older code over a half-finished migration is what the
+new default avoids.</p>
+]]></content><category scheme="https://stageset.projects.metio.wtf/tags/installation" term="installation" label="installation"/><category scheme="https://stageset.projects.metio.wtf/tags/upgrade" term="upgrade" label="upgrade"/><category scheme="https://stageset.projects.metio.wtf/tags/migration" term="migration" label="migration"/><category scheme="https://stageset.projects.metio.wtf/tags/releases" term="releases" label="releases"/></entry></feed>
