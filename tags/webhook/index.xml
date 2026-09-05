@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Webhook on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/webhook/</link><description>Recent content in Webhook on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/webhook/index.xml" rel="self" type="application/rss+xml"/><item><title>Admission webhook</title><link>https://stageset.projects.metio.wtf/security/admission-webhook/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/admission-webhook/</guid><description>&lt;p&gt;A StageSet&amp;rsquo;s spec carries invariants the CRD&amp;rsquo;s structural schema cannot enforce
+cheaply, so the controller ships a &lt;strong&gt;validating admission webhook&lt;/strong&gt; that rejects a
+bad StageSet at &lt;code&gt;kubectl apply&lt;/code&gt; time — on &lt;code&gt;create&lt;/code&gt; and &lt;code&gt;update&lt;/code&gt; of
+&lt;code&gt;stages.metio.wtf/v1&lt;/code&gt; StageSets — before it ever reaches a reconcile.&lt;/p&gt;
+&lt;h2 id="why-a-webhook-and-not-cel"&gt;Why a webhook and not CEL&lt;/h2&gt;
+&lt;p&gt;The natural home for these rules is a CRD CEL validation. The catch: CEL cost is
+multiplied by the size of every enclosing array, and a StageSet&amp;rsquo;s &lt;code&gt;spec.stages&lt;/code&gt; and
+each stage&amp;rsquo;s action lists are deliberately &lt;strong&gt;unbounded&lt;/strong&gt;. A CEL rule over them
+makes the apiserver reject the CRD on cost grounds. Moving the checks into a webhook
+keeps the lists unbounded while still validating them.&lt;/p&gt;</description></item></channel></rss>

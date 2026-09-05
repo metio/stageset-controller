@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Claude-Code on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/claude-code/</link><description>Recent content in Claude-Code on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/claude-code/index.xml" rel="self" type="application/rss+xml"/><item><title>Claude Code skill</title><link>https://stageset.projects.metio.wtf/integrations/claude-code/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/claude-code/</guid><description>&lt;p&gt;The repository ships a &lt;a href="https://claude.com/claude-code"&gt;Claude Code&lt;/a&gt;
+ skill that
+teaches the assistant to author and operate &lt;code&gt;StageSet&lt;/code&gt; resources: writing and
+editing StageSet YAML, wiring a Flux source or a producer like
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ into staged rollouts, adding typed
+actions, ready checks, update windows, versioned migrations, and conflict
+policies, and driving a StageSet with the &lt;code&gt;stagesetctl&lt;/code&gt; CLI. With it installed,
+Claude Code works against the real schema and defaults instead of guessing.&lt;/p&gt;
+&lt;h2 id="install-the-plugin"&gt;Install the plugin&lt;/h2&gt;
+&lt;p&gt;The skill is packaged as a plugin in a marketplace. Add the marketplace from the
+repository, then install the plugin:&lt;/p&gt;</description></item></channel></rss>
