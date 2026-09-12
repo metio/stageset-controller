@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Timeout on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/timeout/</link><description>Recent content in Timeout on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/timeout/index.xml" rel="self" type="application/rss+xml"/><item><title>StageProgressing</title><link>https://stageset.projects.metio.wtf/runbooks/stageprogressing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/stageprogressing/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=StageProgressing&lt;/code&gt;. The Message names the stage and what the wait was still waiting on:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;ns&amp;gt; describe stageset &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;...
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Status:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Conditions:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Reason: StageProgressing
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Status: False
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Type: Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Message: stage &amp;#34;server&amp;#34; is applied and still becoming ready: timeout waiting for:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; [Deployment/&amp;lt;ns&amp;gt;/server status: &amp;#39;InProgress&amp;#39;] (waited 15m: stage
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; readyChecks.timeout, else stages[].timeout, else spec.timeout)
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The stage&amp;rsquo;s objects are applied and the stage shows &lt;code&gt;Verifying&lt;/code&gt; in &lt;code&gt;status.stages&lt;/code&gt;.&lt;/p&gt;</description></item></channel></rss>

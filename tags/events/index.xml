@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Events on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/events/</link><description>Recent content in Events on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/events/index.xml" rel="self" type="application/rss+xml"/><item><title>Alerting</title><link>https://stageset.projects.metio.wtf/observability/alerting/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/alerting/</guid><description>&lt;p&gt;Two layers surface trouble: Kubernetes Events the controller emits on a StageSet&amp;rsquo;s
+own timeline, and a Prometheus alert set built on the &lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+.
+Both lead an operator to a &lt;a href="https://stageset.projects.metio.wtf/runbooks/"&gt;runbook&lt;/a&gt;
+.&lt;/p&gt;
+&lt;p&gt;These alerts page on the &lt;em&gt;causes&lt;/em&gt; of trouble. To alert on a
+&lt;a href="https://stageset.projects.metio.wtf/observability/slos/"&gt;service-level objective&lt;/a&gt;
+ directly, and to see availability,
+error budget, and latency against their objectives, use the published
+&lt;a href="https://stageset.projects.metio.wtf/observability/dashboard/"&gt;dashboard&lt;/a&gt;
+.&lt;/p&gt;
+&lt;h2 id="the-controller-binary"&gt;The controller binary&lt;/h2&gt;
+&lt;h3 id="kubernetes-events"&gt;Kubernetes Events&lt;/h3&gt;
+&lt;p&gt;On a StageSet&amp;rsquo;s condition transitions and notable actions, the controller emits
+standard Kubernetes Events (events.v1) against the StageSet object. The reason
+fills both the Event &lt;code&gt;reason&lt;/code&gt; and &lt;code&gt;action&lt;/code&gt; slots. Read them with:&lt;/p&gt;</description></item></channel></rss>

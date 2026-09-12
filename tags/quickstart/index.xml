@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Quickstart on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/quickstart/</link><description>Recent content in Quickstart on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/quickstart/index.xml" rel="self" type="application/rss+xml"/><item><title>Get started</title><link>https://stageset.projects.metio.wtf/get-started/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/</guid><description>&lt;p&gt;Stand up the controller and ship your first release. Start with the Quickstart
+and work down — each page builds on the previous one.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/get-started/quickstart/"&gt;Quickstart&lt;/a&gt;
+&lt;/strong&gt; — from an empty cluster to one
+running StageSet, the shortest path.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/get-started/kubernetes/"&gt;Install on Kubernetes&lt;/a&gt;
+&lt;/strong&gt; — prerequisites and the
+Helm install in full.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/"&gt;From Jsonnet to a gated rollout&lt;/a&gt;
+&lt;/strong&gt; — the
+flagship flow: render Jsonnet with &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+,
+gate with readiness checks, add versioned migrations.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/get-started/flux-sources/"&gt;Stage sources&lt;/a&gt;
+&lt;/strong&gt; — point a stage at a
+&lt;code&gt;GitRepository&lt;/code&gt;, &lt;code&gt;OCIRepository&lt;/code&gt;, &lt;code&gt;Bucket&lt;/code&gt;, or a rendered &lt;code&gt;ExternalArtifact&lt;/code&gt;.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>Quickstart</title><link>https://stageset.projects.metio.wtf/get-started/quickstart/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/quickstart/</guid><description>&lt;p&gt;This tutorial takes you from an empty cluster to one running StageSet. The path
+is the shortest one — a single stage pointing directly at a Flux
+&lt;code&gt;GitRepository&lt;/code&gt; that already holds plain manifests. No Jsonnet, no migrations,
+no optional knobs.&lt;/p&gt;
+&lt;h2 id="prerequisites"&gt;Prerequisites&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;A &lt;a href="https://kubernetes.io/docs/"&gt;Kubernetes&lt;/a&gt;
+ cluster with &lt;code&gt;kubectl&lt;/code&gt; configured
+against it.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;helm&lt;/code&gt; 3.x.&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ &lt;strong&gt;v2.7.0 or newer&lt;/strong&gt; — the &lt;code&gt;ExternalArtifact&lt;/code&gt; CRD a
+stage resolves to lands in that version. See
+&lt;a href="https://stageset.projects.metio.wtf/get-started/kubernetes/#prerequisites"&gt;Install on Kubernetes&lt;/a&gt;
+ for the full
+prerequisites.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="step-1--install-the-controller"&gt;Step 1 — Install the controller&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;helm upgrade --install stageset-controller &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; oci://ghcr.io/metio/helm-charts/stageset-controller &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --namespace stageset-system --create-namespace &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --wait --timeout 5m
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;See &lt;a href="https://stageset.projects.metio.wtf/get-started/kubernetes/"&gt;Install on Kubernetes&lt;/a&gt;
+ for the full list of chart
+values (HA replicas, rollback store, webhook TLS mode, and so on).&lt;/p&gt;</description></item></channel></rss>

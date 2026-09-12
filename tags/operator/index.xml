@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Operator on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/operator/</link><description>Recent content in Operator on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/operator/index.xml" rel="self" type="application/rss+xml"/><item><title>MCP server</title><link>https://stageset.projects.metio.wtf/integrations/mcp-server/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/mcp-server/</guid><description>&lt;p&gt;The controller exposes StageSet introspection — and, when opted in, control — as
+&lt;a href="https://modelcontextprotocol.io/"&gt;Model Context Protocol&lt;/a&gt;
+ tools, so an LLM
+agent (Claude Code, Claude Desktop, or any MCP client) calls them directly. The
+server runs inside the controller pod and serves over streamable HTTP; the tools
+read and patch StageSet resources as the controller&amp;rsquo;s ServiceAccount, so an agent
+can never exceed the controller&amp;rsquo;s own RBAC.&lt;/p&gt;
+&lt;h2 id="enable-the-server"&gt;Enable the server&lt;/h2&gt;
+&lt;p&gt;Pass &lt;code&gt;--enable-mcp&lt;/code&gt; to the controller to serve the read tools (off by default).
+It binds &lt;code&gt;--mcp-bind-address&lt;/code&gt;, which defaults to &lt;code&gt;:8084&lt;/code&gt;:&lt;/p&gt;</description></item></channel></rss>

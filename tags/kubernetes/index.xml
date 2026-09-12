@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Kubernetes on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/kubernetes/</link><description>Recent content in Kubernetes on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/kubernetes/index.xml" rel="self" type="application/rss+xml"/><item><title>Install on Kubernetes</title><link>https://stageset.projects.metio.wtf/get-started/kubernetes/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/kubernetes/</guid><description>&lt;p&gt;The controller is distributed as a container image at
+&lt;code&gt;ghcr.io/metio/stageset-controller&lt;/code&gt; and as an OCI &lt;a href="https://helm.sh/"&gt;Helm&lt;/a&gt;
+ chart
+at &lt;code&gt;oci://ghcr.io/metio/helm-charts/stageset-controller&lt;/code&gt;. The deployment
+manifests live in the chart, not in the controller repository.&lt;/p&gt;
+&lt;h2 id="prerequisites"&gt;Prerequisites&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;A &lt;a href="https://kubernetes.io/"&gt;Kubernetes&lt;/a&gt;
+ cluster with &lt;code&gt;kubectl&lt;/code&gt; and
+&lt;a href="https://helm.sh/"&gt;&lt;code&gt;helm&lt;/code&gt;&lt;/a&gt;
+ &lt;strong&gt;v3.14 or later&lt;/strong&gt; (OCI chart support) configured
+against it.&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ &lt;code&gt;source-controller&lt;/code&gt;, specifically the
+&lt;code&gt;ExternalArtifact&lt;/code&gt; API (&lt;code&gt;source.toolkit.fluxcd.io&lt;/code&gt;). A &lt;code&gt;StageSet&lt;/code&gt; stage always
+resolves to an &lt;code&gt;ExternalArtifact&lt;/code&gt;, so the CRD must exist. &lt;code&gt;ExternalArtifact&lt;/code&gt;
+lands in Flux &lt;strong&gt;v2.7.0&lt;/strong&gt;; install at least that version. The controller also
+watches &lt;code&gt;GitRepository&lt;/code&gt;, &lt;code&gt;OCIRepository&lt;/code&gt;, and &lt;code&gt;Bucket&lt;/code&gt; sources for
+producer-aware resolution.&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://cert-manager.io/"&gt;cert-manager&lt;/a&gt;
+ — &lt;strong&gt;only&lt;/strong&gt; if you choose the
+&lt;code&gt;cert-manager&lt;/code&gt; webhook certificate mode. The chart defaults to &lt;code&gt;self-signed&lt;/code&gt;,
+which provisions and rotates the admission webhook&amp;rsquo;s TLS in-process and needs
+no cert-manager. See &lt;a href="https://stageset.projects.metio.wtf/running/production/#admission-webhook-tls"&gt;Production&lt;/a&gt;
+
+for the trade-off.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+, JOI, or any particular artifact
+producer are &lt;strong&gt;not&lt;/strong&gt; required to install the controller — those are sources of
+&lt;code&gt;ExternalArtifact&lt;/code&gt;s, wired up per &lt;code&gt;StageSet&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>StageSet vs Kustomize</title><link>https://stageset.projects.metio.wtf/comparisons/kustomize/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/kustomize/</guid><description>&lt;p&gt;&lt;a href="https://kustomize.io/"&gt;Kustomize&lt;/a&gt;
+ (the &lt;code&gt;kustomize&lt;/code&gt; CLI / &lt;code&gt;kubectl kustomize&lt;/code&gt;) is a
+manifest &lt;em&gt;builder&lt;/em&gt;: it composes bases and overlays, applies patches, and emits YAML.
+It does not apply anything, and it has no notion of ordering, readiness, or
+reconciliation — that&amp;rsquo;s &lt;code&gt;kubectl apply&lt;/code&gt;&amp;rsquo;s job, and &lt;code&gt;kubectl&lt;/code&gt; applies everything at
+once.&lt;/p&gt;
+&lt;h2 id="what-kustomize-gives-you"&gt;What Kustomize gives you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Overlay composition, strategic-merge and JSON6902 patches, variable replacement,
+generators.&lt;/li&gt;
+&lt;li&gt;A pure transformation: in goes a kustomization, out come manifests.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;It delivers, not just builds.&lt;/strong&gt; Kustomize stops at YAML. &lt;code&gt;StageSet&lt;/code&gt; applies it,
+waits for health, prunes what&amp;rsquo;s gone, and keeps doing so.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Ordering and gates.&lt;/strong&gt; &lt;code&gt;kubectl apply -k&lt;/code&gt; has no stages and no gates. &lt;code&gt;StageSet&lt;/code&gt;
+sequences stages and runs &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ between them.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Continuous reconciliation and drift correction&lt;/strong&gt;, versus a one-shot &lt;code&gt;apply&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; &lt;em&gt;includes&lt;/em&gt; the parts of Kustomize you reach for at delivery time: a stage
+has &lt;code&gt;path&lt;/code&gt;, &lt;code&gt;patches&lt;/code&gt;, and &lt;code&gt;postBuild&lt;/code&gt; substitution
+(&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages and sources&lt;/a&gt;
+). So you can keep authoring with
+Kustomize overlays and let a stage apply the right overlay, patched and
+substituted — then add the ordering, gating, and reconciliation Kustomize alone
+doesn&amp;rsquo;t offer.&lt;/p&gt;</description></item></channel></rss>

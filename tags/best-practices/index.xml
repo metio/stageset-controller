@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Best-Practices on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/best-practices/</link><description>Recent content in Best-Practices on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/best-practices/index.xml" rel="self" type="application/rss+xml"/><item><title>Best practices</title><link>https://stageset.projects.metio.wtf/guides/best-practices/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/best-practices/</guid><description>&lt;p&gt;StageSet works best when you lean into what it is: a delivery controller that
+keeps the &lt;em&gt;render&lt;/em&gt; pure and owns &lt;em&gt;ordering, gating, and execution memory&lt;/em&gt;. Almost
+every practice below — good or bad — follows from respecting or fighting that
+split. The one-line test for a decision is: &lt;strong&gt;does this belong in what should
+exist (the render) or in when and whether it runs (StageSet)?&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;For a single application, a small team, or a chart you distribute to others,
+Helm&amp;rsquo;s simplicity and ecosystem may serve you better; see
+&lt;a href="#when-helm-is-the-better-choice"&gt;when Helm is the better choice&lt;/a&gt;
+. These practices
+assume the case StageSet is built for — a multi-component, multi-tenant, stateful,
+policy-gated release.&lt;/p&gt;</description></item></channel></rss>

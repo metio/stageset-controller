@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Tenancy on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/tenancy/</link><description>Recent content in Tenancy on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/tenancy/index.xml" rel="self" type="application/rss+xml"/><item><title>Multi-cluster and tenancy</title><link>https://stageset.projects.metio.wtf/security/multi-cluster/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/multi-cluster/</guid><description>&lt;p&gt;There are two ways to run the controller, and they map onto two different trust
+models. Pick the one that matches your cluster:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Multi-tenant&lt;/strong&gt; — the controller holds no write access of its own and applies
+every &lt;code&gt;StageSet&lt;/code&gt; as that &lt;code&gt;StageSet&lt;/code&gt;&amp;rsquo;s &lt;code&gt;serviceAccountName&lt;/code&gt;. Each tenant&amp;rsquo;s RBAC
+bounds what its releases can touch. This is the chart default.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Single-tenant&lt;/strong&gt; — the cluster has one operator, so per-tenant isolation buys
+nothing. Run the controller under its own identity bound to &lt;code&gt;cluster-admin&lt;/code&gt; and
+skip impersonation entirely — the model Flux&amp;rsquo;s &lt;code&gt;helm-controller&lt;/code&gt; uses in its
+default install.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The two sections below set each one up. The optional
+&lt;a href="#scoping-the-controller-to-a-namespace-set"&gt;watch scoping&lt;/a&gt;
+ narrows &lt;em&gt;which&lt;/em&gt;
+namespaces a multi-tenant controller sees.&lt;/p&gt;</description></item></channel></rss>
