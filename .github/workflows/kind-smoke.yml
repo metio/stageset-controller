@@ -773,7 +773,7 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-image-verify
       - name: Enter the flake devShell (provides cosign)
-        uses: metio/nix-devshell@1976169d4c51b321be318ade369ccf689849f9f0 # 2026.7.6091757
+        uses: metio/nix-devshell@d0c25fdb0d2c08f23bc62c867317a266b6f1a5c1 # 2026.9.12204255
       - name: Cluster prereqs (Flux source CRDs + in-cluster registry)
         run: |
           hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
