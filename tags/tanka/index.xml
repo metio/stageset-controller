@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Tanka on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/tanka/</link><description>Recent content in Tanka on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/tanka/index.xml" rel="self" type="application/rss+xml"/><item><title>StageSet vs Tanka and kubecfg</title><link>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/tanka-kubecfg/</guid><description>&lt;p&gt;&lt;a href="https://tanka.dev/"&gt;Tanka&lt;/a&gt;
+ and &lt;a href="https://github.com/kubecfg/kubecfg"&gt;kubecfg&lt;/a&gt;
+ are
+Jsonnet-based config tools: you express your resources in Jsonnet, the tool renders
+them, diffs against the cluster, and applies. They generate configuration and run a
+CLI-driven apply, but they are imperative tools you run, not controllers that
+reconcile.&lt;/p&gt;
+&lt;h2 id="what-tanka--kubecfg-give-you"&gt;What Tanka / kubecfg give you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Jsonnet-powered, DRY manifest generation (libraries, abstractions, environments).&lt;/li&gt;
+&lt;li&gt;A &lt;code&gt;diff&lt;/code&gt;/&lt;code&gt;apply&lt;/code&gt; workflow with dependency-aware ordering of a single apply.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Reconciliation, not invocation.&lt;/strong&gt; Tanka/kubecfg apply when &lt;em&gt;you&lt;/em&gt; run them.
+&lt;code&gt;StageSet&lt;/code&gt; runs in-cluster and continuously reconciles, corrects drift, and
+prunes.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Staged, gated delivery.&lt;/strong&gt; They apply a rendered set (in dependency order);
+they don&amp;rsquo;t model multi-stage rollouts with readiness gates, update windows, or
+versioned migrations between stages.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;GitOps identity and tenancy.&lt;/strong&gt; &lt;code&gt;StageSet&lt;/code&gt; applies under a per-tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt; inside the cluster; Tanka/kubecfg use your local credentials.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;The Jsonnet &lt;em&gt;generation&lt;/em&gt; that Tanka and kubecfg do so well has a GitOps-native
+equivalent in two related projects:&lt;/p&gt;</description></item></channel></rss>
