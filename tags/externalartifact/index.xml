@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Externalartifact on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/externalartifact/</link><description>Recent content in Externalartifact on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/externalartifact/index.xml" rel="self" type="application/rss+xml"/><item><title>ArtifactNotFound</title><link>https://stageset.projects.metio.wtf/runbooks/artifactnotfound/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/artifactnotfound/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=ArtifactNotFound&lt;/code&gt;. Transient: the controller requeues in case the artifact appears.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;sourceRef&lt;/code&gt; resolves to &lt;strong&gt;no &lt;code&gt;ExternalArtifact&lt;/code&gt;&lt;/strong&gt;. Either:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;a &lt;strong&gt;direct&lt;/strong&gt; &lt;code&gt;sourceRef&lt;/code&gt; (&lt;code&gt;kind: ExternalArtifact&lt;/code&gt;, the default) names an object that does not exist in the target namespace; or&lt;/li&gt;
+&lt;li&gt;a &lt;strong&gt;producer&lt;/strong&gt; &lt;code&gt;sourceRef&lt;/code&gt; (e.g. &lt;code&gt;kind: JsonnetSnippet&lt;/code&gt;) exists, but no &lt;code&gt;ExternalArtifact&lt;/code&gt; carries a &lt;code&gt;spec.sourceRef&lt;/code&gt; back-pointer to it yet — the producer has not created its artifact object.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="diagnosis"&gt;Diagnosis&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; describe stageset &amp;lt;name&amp;gt; &lt;span class="c1"&gt;# Message names the missing ref&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;namespace&amp;gt; get externalartifact
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;For a producer ref, confirm the producer object exists and that it is configured to publish an &lt;code&gt;ExternalArtifact&lt;/code&gt; (not only serve over HTTP):&lt;/p&gt;</description></item><item><title>Producer-aware sources</title><link>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</guid><description>&lt;p&gt;Point a stage at the resource that &lt;em&gt;produces&lt;/em&gt; an artifact, and the controller
+finds the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes. This is the third source
+route, alongside the two direct ones — an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default
+&lt;code&gt;sourceRef.kind&lt;/code&gt;) or a Flux &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt; — covered in
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/#source-kinds"&gt;stages and sources&lt;/a&gt;
+. Reach for it when an
+operator publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt; from a custom resource (for example
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ rendering Jsonnet).&lt;/p&gt;
+&lt;h2 id="referencing-a-producer"&gt;Referencing a producer&lt;/h2&gt;
+&lt;p&gt;Set &lt;code&gt;kind&lt;/code&gt; (and &lt;code&gt;apiVersion&lt;/code&gt;) to a producer resource, and the controller resolves
+it to the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes — the one whose
+&lt;code&gt;spec.sourceRef&lt;/code&gt; back-references the producer (matched on group, kind, and name).
+For example, a &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ &lt;code&gt;JsonnetSnippet&lt;/code&gt;
+renders Jsonnet and publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt;; reference the snippet and the
+controller follows the link:&lt;/p&gt;</description></item><item><title>ResolveFailed</title><link>https://stageset.projects.metio.wtf/runbooks/resolvefailed/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/resolvefailed/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=ResolveFailed&lt;/code&gt;. The Message describes why resolution failed.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;sourceRef&lt;/code&gt; could not be resolved to an &lt;code&gt;ExternalArtifact&lt;/code&gt; for a spec/config or API reason (distinct from &amp;ldquo;not published yet&amp;rdquo;, which is &lt;a href="https://stageset.projects.metio.wtf/runbooks/sourcenotready/"&gt;&lt;code&gt;SourceNotReady&lt;/code&gt;&lt;/a&gt;
+, and &amp;ldquo;no such object&amp;rdquo;, which is &lt;a href="https://stageset.projects.metio.wtf/runbooks/artifactnotfound/"&gt;&lt;code&gt;ArtifactNotFound&lt;/code&gt;&lt;/a&gt;
+). Common cases:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;an &lt;strong&gt;ambiguous producer&lt;/strong&gt; — more than one &lt;code&gt;ExternalArtifact&lt;/code&gt; back-points at the same producer object, so the target is undefined;&lt;/li&gt;
+&lt;li&gt;a &lt;strong&gt;cross-namespace ref rejected&lt;/strong&gt; by &lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;;&lt;/li&gt;
+&lt;li&gt;a &lt;strong&gt;transient API error&lt;/strong&gt; reading the source or artifact (a list/get blip). A permanent API error — RBAC denial or a missing source CRD — is reported as &lt;a href="https://stageset.projects.metio.wtf/runbooks/rbacdenied/"&gt;&lt;code&gt;RBACDenied&lt;/code&gt;&lt;/a&gt;
+ instead, since retry can&amp;rsquo;t fix it.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;When the failing &lt;code&gt;sourceRef&lt;/code&gt; targets another namespace, the Message is deliberately scrubbed to &lt;code&gt;cross-namespace &amp;lt;kind&amp;gt; %q is not reachable&lt;/code&gt; so tenants cannot fingerprint other namespaces — check that source CR&amp;rsquo;s status in its own namespace.&lt;/p&gt;</description></item><item><title>Stages and sources</title><link>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</guid><description>&lt;p&gt;A &lt;code&gt;StageSet&lt;/code&gt; is an ordered list of stages. Each stage resolves a
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ source — a &lt;code&gt;GitRepository&lt;/code&gt;, &lt;code&gt;OCIRepository&lt;/code&gt;, &lt;code&gt;Bucket&lt;/code&gt;,
+or an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default) — applies its manifests, waits for them to
+become healthy, and only then lets the next stage start.&lt;/p&gt;
+&lt;h2 id="one-stage"&gt;One stage&lt;/h2&gt;
+&lt;p&gt;The minimum is one stage pointing at one artifact in the same namespace:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# an ExternalArtifact&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;sourceRef.kind&lt;/code&gt; defaults to &lt;code&gt;ExternalArtifact&lt;/code&gt;, so the common case is a single
+line. The controller fetches the artifact, applies every manifest in it, and marks
+the stage &lt;code&gt;Ready&lt;/code&gt; once the applied objects report healthy.&lt;/p&gt;</description></item></channel></rss>

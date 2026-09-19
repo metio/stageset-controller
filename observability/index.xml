@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Observability on StageSet Controller</title><link>https://stageset.projects.metio.wtf/observability/</link><description>Recent content in Observability on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/observability/index.xml" rel="self" type="application/rss+xml"/><item><title>Alerting</title><link>https://stageset.projects.metio.wtf/observability/alerting/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/alerting/</guid><description>&lt;p&gt;Two layers surface trouble: Kubernetes Events the controller emits on a StageSet&amp;rsquo;s
+own timeline, and a Prometheus alert set built on the &lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+.
+Both lead an operator to a &lt;a href="https://stageset.projects.metio.wtf/runbooks/"&gt;runbook&lt;/a&gt;
+.&lt;/p&gt;
+&lt;p&gt;These alerts page on the &lt;em&gt;causes&lt;/em&gt; of trouble. To alert on a
+&lt;a href="https://stageset.projects.metio.wtf/observability/slos/"&gt;service-level objective&lt;/a&gt;
+ directly, and to see availability,
+error budget, and latency against their objectives, use the published
+&lt;a href="https://stageset.projects.metio.wtf/observability/dashboard/"&gt;dashboard&lt;/a&gt;
+.&lt;/p&gt;
+&lt;h2 id="the-controller-binary"&gt;The controller binary&lt;/h2&gt;
+&lt;h3 id="kubernetes-events"&gt;Kubernetes Events&lt;/h3&gt;
+&lt;p&gt;On a StageSet&amp;rsquo;s condition transitions and notable actions, the controller emits
+standard Kubernetes Events (events.v1) against the StageSet object. The reason
+fills both the Event &lt;code&gt;reason&lt;/code&gt; and &lt;code&gt;action&lt;/code&gt; slots. Read them with:&lt;/p&gt;</description></item><item><title>Dashboard</title><link>https://stageset.projects.metio.wtf/observability/dashboard/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/dashboard/</guid><description>&lt;p&gt;The StageSet controller publishes a maintained Grafana dashboard as a single-layer
+OCI image at &lt;code&gt;ghcr.io/metio/stageset-controller-dashboard&lt;/code&gt;. The dashboard is
+grafonnet &lt;em&gt;source&lt;/em&gt;, not pre-rendered JSON, and the controller is not a Jsonnet
+renderer — so you render it through &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+, which
+publishes the rendered JSON as a Flux &lt;code&gt;ExternalArtifact&lt;/code&gt; the grafana-operator picks
+up. The two projects are intentionally tightly coupled; JaaS is the renderer.&lt;/p&gt;
+&lt;p&gt;The dashboard opens with an &lt;a href="https://stageset.projects.metio.wtf/observability/slos/"&gt;SLO&lt;/a&gt;
+ band — reconcile
+availability against its objective, error budget remaining, reconcile-latency p95
+against its objective, and an availability-versus-objective trend — over a band of
+controller internals that explain any movement: reconciles by reason, stages
+applied, drift corrected, deferred updates, stage readiness, watch-engagement
+failures, and the controller-runtime workqueue. The series are the
+&lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+ the controller exports.&lt;/p&gt;</description></item><item><title>Logging</title><link>https://stageset.projects.metio.wtf/observability/logging/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/logging/</guid><description>&lt;p&gt;The controller logs through Go&amp;rsquo;s &lt;code&gt;log/slog&lt;/code&gt;. Controller-runtime&amp;rsquo;s own logs flow
+through the same handler via the logr bridge, so the manager, the cache, and the
+reconciler all share one consistent output stream — there is no second logger to
+configure.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Status Conditions and Kubernetes Events stay the primary status surface&lt;/strong&gt; —
+&lt;code&gt;kubectl describe&lt;/code&gt;, &lt;code&gt;kubectl wait --for=condition&lt;/code&gt;, and Flux&amp;rsquo;s
+notification-controller all read them. Logs are additive operator-side detail
+for tracing what a reconcile did, not a replacement for the condition that
+tells you whether a StageSet is Ready.&lt;/p&gt;</description></item><item><title>Metrics</title><link>https://stageset.projects.metio.wtf/observability/metrics/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/metrics/</guid><description>&lt;p&gt;The controller exports Prometheus metrics on an HTTP endpoint: a set of custom
+&lt;code&gt;stageset_*&lt;/code&gt; series describing reconcile outcomes, stage applies, drift
+correction, deferred rollouts, webhook-cert renewals, and per-stage readiness —
+alongside the controller-runtime and workqueue series every controller-runtime
+manager exposes for free.&lt;/p&gt;
+&lt;h2 id="the-controller-binary"&gt;The controller binary&lt;/h2&gt;
+&lt;p&gt;The controller binds its metrics endpoint via &lt;code&gt;--metrics-bind-address&lt;/code&gt;, defaulting
+to &lt;code&gt;:8080&lt;/code&gt;. Setting it to &lt;code&gt;0&lt;/code&gt; disables the endpoint. Every custom metric is
+registered against controller-runtime&amp;rsquo;s registry, so it rides the same endpoint as
+the built-in series.&lt;/p&gt;</description></item><item><title>Service level objectives</title><link>https://stageset.projects.metio.wtf/observability/slos/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/slos/</guid><description>&lt;p&gt;The StageSet controller tracks two service-level objectives. Each is an objective
+on a service-level indicator (SLI) computed from the
+&lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+, measured over a rolling window. The published
+&lt;a href="https://stageset.projects.metio.wtf/observability/dashboard/"&gt;dashboard&lt;/a&gt;
+ renders them, and the Helm chart can alert
+on them.&lt;/p&gt;
+&lt;h2 id="slo-1--reconcile-availability"&gt;SLO 1 — reconcile availability&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Objective:&lt;/strong&gt; ≥ &lt;strong&gt;99%&lt;/strong&gt; of syncing reconciles reach &lt;code&gt;Ready=True&lt;/code&gt; (reason
+&lt;code&gt;Succeeded&lt;/code&gt;), over a &lt;strong&gt;28-day&lt;/strong&gt; window.&lt;/p&gt;
+&lt;p&gt;The SLI counts only reconciles that were actually trying to sync. The intentional
+and upstream-waiting reasons are excluded from the failure half — a paused
+StageSet (&lt;code&gt;Suspended&lt;/code&gt;), a rollout held by an update window (&lt;code&gt;UpdateDeferred&lt;/code&gt;), and
+a wait on an upstream artifact or dependency (&lt;code&gt;SourceNotReady&lt;/code&gt;,
+&lt;code&gt;DependencyNotReady&lt;/code&gt;) are not failures and must not burn the budget:&lt;/p&gt;</description></item><item><title>Tracing</title><link>https://stageset.projects.metio.wtf/observability/tracing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/tracing/</guid><description>&lt;p&gt;The controller integrates with OpenTelemetry and exports spans over OTLP gRPC.
+Tracing is &lt;strong&gt;off until you set an endpoint&lt;/strong&gt; — with no endpoint the OTel SDK
+installs a no-op tracer provider, so the instrumentation costs a function
+indirection and nothing ships off the pod. The controller takes no opinion on
+whether you run a collector.&lt;/p&gt;
+&lt;h2 id="the-controller-binary"&gt;The controller binary&lt;/h2&gt;
+&lt;p&gt;Three flags govern tracing:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;--tracing-endpoint&lt;/code&gt; — the OTLP gRPC collector as &lt;code&gt;host:port&lt;/code&gt;, e.g.
+&lt;code&gt;otel-collector.observability.svc:4317&lt;/code&gt;. Empty (the default) disables tracing
+entirely.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;--tracing-insecure&lt;/code&gt; — skip TLS when dialing the collector. Use only for
+in-cluster collectors that do not terminate TLS themselves. Defaults to &lt;code&gt;false&lt;/code&gt;,
+so the dial uses TLS against the system trust store.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;--tracing-sample-ratio&lt;/code&gt; — TraceID-ratio sampling between &lt;code&gt;0.0&lt;/code&gt; and &lt;code&gt;1.0&lt;/code&gt;.
+Defaults to &lt;code&gt;1.0&lt;/code&gt;, which samples every trace. Lower it on a busy controller to
+cap exporter and collector load.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Every span carries a &lt;code&gt;service.name&lt;/code&gt; of &lt;code&gt;stageset-controller&lt;/code&gt; and a
+&lt;code&gt;service.version&lt;/code&gt; resource attribute filled from the controller&amp;rsquo;s build version,
+so the collector can group spans by release.&lt;/p&gt;</description></item></channel></rss>

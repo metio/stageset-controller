@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>CLI on StageSet Controller</title><link>https://stageset.projects.metio.wtf/cli/</link><description>Recent content in CLI on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/cli/index.xml" rel="self" type="application/rss+xml"/><item><title>stagesetctl apply</title><link>https://stageset.projects.metio.wtf/cli/apply/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/apply/</guid><description>&lt;p&gt;&lt;code&gt;apply&lt;/code&gt; renders a StageSet&amp;rsquo;s stages with the controller&amp;rsquo;s resolve→fetch→build path
+and &lt;a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/"&gt;server-side-applies&lt;/a&gt;
+
+the resulting objects in stage order, under the controller&amp;rsquo;s field manager and owner
+labels — so a later reconcile sees no drift. Preview first with &lt;a href="https://stageset.projects.metio.wtf/cli/diff/"&gt;&lt;code&gt;diff&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;apply&lt;/code&gt; materializes the manifests only. It does &lt;strong&gt;not&lt;/strong&gt; run stage
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+, &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migrations&lt;/a&gt;
+,
+&lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;update-window&lt;/a&gt;
+ gating, ready checks (beyond &lt;code&gt;--wait&lt;/code&gt;), or
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/inventory/"&gt;pruning&lt;/a&gt;
+ — those belong to the controller&amp;rsquo;s reconcile loop. When
+a controller manages this StageSet it stays the source of truth and reconciles on its
+own schedule; reach for &lt;code&gt;apply&lt;/code&gt; in cluster-free workflows (no controller installed)
+and break-glass.&lt;/p&gt;</description></item><item><title>stagesetctl baseline</title><link>https://stageset.projects.metio.wtf/cli/baseline/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/baseline/</guid><description>&lt;p&gt;Adopts a system whose once-per-lifetime bootstrap already ran by asserting an
+action complete in the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#run-once-ever-scope-lifetime"&gt;StageLedger&lt;/a&gt;
+&amp;rsquo;s
+&lt;code&gt;spec.baseline&lt;/code&gt; — the controller promotes it to a recorded completion without
+running the action. &lt;code&gt;--export&lt;/code&gt; instead prints the ledger&amp;rsquo;s current completions as
+a committable &lt;code&gt;spec.baseline&lt;/code&gt; snippet, for disaster recovery or renaming a ledger.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl baseline NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Stage the action belongs to.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--action&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Name of the &lt;code&gt;scope: Lifetime&lt;/code&gt; action to baseline.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--export&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Print the ledger&amp;rsquo;s current completions as a &lt;code&gt;spec.baseline&lt;/code&gt; snippet instead of adding one. Mutually exclusive with &lt;code&gt;--stage&lt;/code&gt;/&lt;code&gt;--action&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;When the StageSet exists, the named action must be a &lt;code&gt;scope: Lifetime&lt;/code&gt; action or
+the command fails (a typo guard). When it does not exist yet, the command
+proceeds — applying the ledger before the StageSet is the race-free adoption
+order — and the controller validates the entry once the StageSet is applied.&lt;/p&gt;</description></item><item><title>stagesetctl build</title><link>https://stageset.projects.metio.wtf/cli/build/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/build/</guid><description>&lt;p&gt;Runs the same resolve → fetch → build pipeline the controller uses and writes the
+result — a multi-document YAML stream — to stdout. This is what would be applied,
+before it is applied. To preview the change against live cluster state instead, use
+&lt;a href="https://stageset.projects.metio.wtf/cli/diff/"&gt;&lt;code&gt;diff&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl build NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(all)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Render only the named stage(s); repeatable.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--source-dir&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(none)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Use a local artifact tree as &lt;code&gt;[STAGE=]PATH&lt;/code&gt; instead of fetching from the cluster; repeatable.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-secrets&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reveal Secret values instead of masking them.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--as-tenant&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Read the SOPS decryption key Secret as &lt;code&gt;spec.serviceAccountName&lt;/code&gt;, the identity the controller uses for it. Rendering itself always uses your credentials — the controller resolves sources and &lt;code&gt;substituteFrom&lt;/code&gt; as itself (see &lt;a href="https://stageset.projects.metio.wtf/security/multi-cluster/"&gt;multi-cluster and tenancy&lt;/a&gt;
+).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reject a stage &lt;code&gt;sourceRef&lt;/code&gt; that targets another namespace, matching a controller run with &lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;, so the preview fails the way the controller would.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;Secret values are masked by default, so the output is safe to paste into a review.
+&lt;code&gt;build&lt;/code&gt; writes YAML unconditionally — there is no output-format flag.&lt;/p&gt;</description></item><item><title>stagesetctl diff</title><link>https://stageset.projects.metio.wtf/cli/diff/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/diff/</guid><description>&lt;p&gt;By default &lt;code&gt;diff&lt;/code&gt; performs a
+&lt;a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/"&gt;server-side&lt;/a&gt;
+
+dry-run apply and exits &lt;code&gt;1&lt;/code&gt; when there are changes, so it works as a CI gate. It
+shows, per object, what a reconcile would create, configure, or delete, plus the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ a rollout would run. To see the full rendered manifests
+without comparing against the cluster, use &lt;a href="https://stageset.projects.metio.wtf/cli/build/"&gt;&lt;code&gt;build&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl diff NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(all)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Diff only the named stage(s); repeatable.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--source-dir&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(none)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Use a local artifact tree as &lt;code&gt;[STAGE=]PATH&lt;/code&gt;; repeatable. Skips the cluster fetch.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--server-side&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Server-side dry-run apply diff (needs update/patch RBAC). &lt;code&gt;false&lt;/code&gt; renders client-side against live objects.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--as-tenant&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Server-side dry-run each stage as its effective &lt;code&gt;serviceAccountName&lt;/code&gt; — the identity the controller &lt;em&gt;applies&lt;/em&gt; with (the stage&amp;rsquo;s own, else &lt;code&gt;spec.serviceAccountName&lt;/code&gt;). Reads (source resolve, &lt;code&gt;substituteFrom&lt;/code&gt;, inventory) always use your credentials, mirroring the controller, which reads as itself (see &lt;a href="https://stageset.projects.metio.wtf/security/multi-cluster/"&gt;multi-cluster and tenancy&lt;/a&gt;
+).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reject a stage &lt;code&gt;sourceRef&lt;/code&gt; that targets another namespace, matching a controller run with &lt;code&gt;--no-cross-namespace-refs&lt;/code&gt;, so the preview fails the way the controller would.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-secrets&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Reveal Secret values instead of masking.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--show-unchanged&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Include objects with no change.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--prune&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Show resources that would be deleted (fell out of inventory).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--color&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;auto&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Colorize output: &lt;code&gt;auto&lt;/code&gt;, &lt;code&gt;always&lt;/code&gt;, or &lt;code&gt;never&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--exit-code&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;true&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Exit &lt;code&gt;1&lt;/code&gt; when changes are found. &lt;code&gt;false&lt;/code&gt; always exits &lt;code&gt;0&lt;/code&gt; on a clean run.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="example"&gt;Example&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl diff payments
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;--- live
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;+++ merged
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;@@ Deployment payments/web @@
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; spec:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- replicas: 3
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;+ replicas: 6
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- ConfigMap payments/old-feature-flags (pruned: fell out of inventory)
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Actions to run:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; application:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; pre db-migrate job ledger-migrations
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; post smoke-test http https://payments.internal/healthz
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Objects that left the stage&amp;rsquo;s &lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/"&gt;inventory&lt;/a&gt;
+ show as deletions
+(&lt;code&gt;pruned: …&lt;/code&gt;); pass &lt;code&gt;--prune=false&lt;/code&gt; to hide them. The trailing &lt;code&gt;Actions to run&lt;/code&gt;
+block lists the &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;pre/post actions&lt;/a&gt;
+ a real reconcile
+would run, honoring the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#scope-revision-version-or-lifetime"&gt;action scopes&lt;/a&gt;
+:
+an action already satisfied for its scope — a &lt;code&gt;Revision&lt;/code&gt; action recorded at this
+revision, a &lt;code&gt;Version&lt;/code&gt; action held at a fixed version, a completed once-ever
+&lt;code&gt;Lifetime&lt;/code&gt; action — is omitted, plus the stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; actions. &lt;code&gt;diff&lt;/code&gt; never
+runs them, it only reports them. For the full behavioral preview — &lt;em&gt;why&lt;/em&gt; each
+action runs, skips, or re-runs — see &lt;a href="https://stageset.projects.metio.wtf/cli/plan/"&gt;&lt;code&gt;plan&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;</description></item><item><title>stagesetctl fleet</title><link>https://stageset.projects.metio.wtf/cli/fleet/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/fleet/</guid><description>&lt;p&gt;&lt;code&gt;stagesetctl fleet NAME&lt;/code&gt; shows where a &lt;a href="https://stageset.projects.metio.wtf/gating/fleet-rollout/"&gt;&lt;code&gt;FleetRollout&lt;/code&gt;&lt;/a&gt;
+ is,
+the way &lt;a href="https://stageset.projects.metio.wtf/cli/plan/"&gt;&lt;code&gt;plan&lt;/code&gt;&lt;/a&gt;
+ shows a StageSet: its overall phase and target version,
+each wave&amp;rsquo;s progress, and — per member — whether it has reached the version, is still
+held awaiting its wave, or has regressed. Read-only.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl fleet NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--output&lt;/code&gt;, &lt;code&gt;-o&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(human view)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;yaml&lt;/code&gt; or &lt;code&gt;json&lt;/code&gt; to emit the FleetRollout object.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="example"&gt;Example&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;$ stagesetctl fleet moodle-2-0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;FleetRollout moodle-2-0 → version 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; phase: InProgress wave: broad
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; wave canary 2/2 at 2.0.0, 2 ready settled, health: Passing
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; ✓ moodle-acme/app 2.0.0 Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; ✓ moodle-beta/app 2.0.0 Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; wave broad 1/3 at 2.0.0, 3 ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; ✓ moodle-x/app 2.0.0 Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; … moodle-y/app 1.0.0 held → awaiting 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; … moodle-z/app 1.0.0 held → awaiting 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; wave rest
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; … moodle-old/app 1.0.0 held → awaiting 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The header shows the version being rolled out — the pinned &lt;code&gt;spec.targetVersion&lt;/code&gt;, or
+the version members are advancing to when it is &lt;a href="https://stageset.projects.metio.wtf/gating/fleet-rollout/"&gt;derived&lt;/a&gt;
+.&lt;/p&gt;</description></item><item><title>stagesetctl get</title><link>https://stageset.projects.metio.wtf/cli/get/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/get/</guid><description>&lt;p&gt;With no &lt;code&gt;NAME&lt;/code&gt;, lists StageSets in the current namespace. With a &lt;code&gt;NAME&lt;/code&gt;, prints that
+StageSet&amp;rsquo;s detail (Ready reason, per-stage phase, revisions, version) — a readable
+view of &lt;a href="https://stageset.projects.metio.wtf/api/stageset/#status"&gt;&lt;code&gt;StageSet.status&lt;/code&gt;&lt;/a&gt;
+.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl get [NAME] [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;-A&lt;/code&gt;, &lt;code&gt;--all-namespaces&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;List StageSets across all namespaces.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;-o&lt;/code&gt;, &lt;code&gt;--output&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(table)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Output format: empty for the human table, or &lt;code&gt;yaml&lt;/code&gt; / &lt;code&gt;json&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="listing"&gt;Listing&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl get -A
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;NAMESPACE NAME READY REASON STAGES VERSION PENDING
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;payments payments True Succeeded 2/2 2.1.0 -
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;platform platform True Succeeded 3/3 - -
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;staging web False StageFailed 1/2 - -
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;STAGES&lt;/code&gt; is &lt;code&gt;ready/total&lt;/code&gt;; &lt;code&gt;PENDING&lt;/code&gt; shows &lt;code&gt;held until &amp;lt;time&amp;gt;&lt;/code&gt; when an
+&lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;update window&lt;/a&gt;
+ is holding a rollout. A &lt;code&gt;False&lt;/code&gt; &lt;code&gt;READY&lt;/code&gt;
+maps to a &lt;a href="https://stageset.projects.metio.wtf/runbooks/"&gt;runbook&lt;/a&gt;
+ by its &lt;code&gt;REASON&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>stagesetctl lint-migrations</title><link>https://stageset.projects.metio.wtf/cli/lint-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/lint-migrations/</guid><description>&lt;p&gt;Validate a &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migration ladder&lt;/a&gt;
+ — a single file, or a
+directory of &lt;code&gt;.yaml&lt;/code&gt;/&lt;code&gt;.yml&lt;/code&gt;/&lt;code&gt;.json&lt;/code&gt; files — before publishing it to a source the
+controller will fetch. It runs the &lt;strong&gt;exact checks the controller runs&lt;/strong&gt; at
+admission and at sourced-artifact fetch time, so a ladder that lints clean here
+won&amp;rsquo;t fail closed later in the cluster.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl lint-migrations PATH
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;It checks:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;strict parsing — a misspelled field (&lt;code&gt;acions:&lt;/code&gt; for &lt;code&gt;actions:&lt;/code&gt;) is rejected, not
+silently dropped;&lt;/li&gt;
+&lt;li&gt;each migration has a name, a &lt;code&gt;to&lt;/code&gt; that parses as a concrete semver, and an
+optional &lt;code&gt;from&lt;/code&gt; that parses as a semver constraint;&lt;/li&gt;
+&lt;li&gt;each action sets exactly one verb, with a unique, non-empty name;&lt;/li&gt;
+&lt;li&gt;migration names are unique across the ladder.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;On success it prints the parsed ladder — each migration&amp;rsquo;s boundary, anchor stage,
+and action verbs — so you can eyeball what will run:&lt;/p&gt;</description></item><item><title>stagesetctl plan</title><link>https://stageset.projects.metio.wtf/cli/plan/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/plan/</guid><description>&lt;p&gt;Where &lt;a href="https://stageset.projects.metio.wtf/cli/diff/"&gt;&lt;code&gt;diff&lt;/code&gt;&lt;/a&gt;
+ shows which objects a reconcile would change, &lt;code&gt;plan&lt;/code&gt;
+shows what it would &lt;strong&gt;do&lt;/strong&gt;: per stage, which &lt;code&gt;pre&lt;/code&gt;/&lt;code&gt;post&lt;/code&gt;
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+ will run, skip, or re-run on the next
+reconcile, and why. It renders each stage, resolves the version, reads the
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#scope-revision-version-or-lifetime"&gt;ledgers&lt;/a&gt;
+, and
+applies the same scope rules the controller gates on — so the preview agrees with
+what the controller will do.&lt;/p&gt;
+&lt;p&gt;It reads the cluster (ledgers, &lt;code&gt;completionAnchor&lt;/code&gt; witnesses) but changes nothing,
+and it predicts what will be &lt;strong&gt;attempted&lt;/strong&gt;, in what order, under which scope —
+never whether an action will succeed.&lt;/p&gt;</description></item><item><title>stagesetctl reconcile</title><link>https://stageset.projects.metio.wtf/cli/reconcile/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/reconcile/</guid><description>&lt;p&gt;Stamps the &lt;code&gt;reconcile.fluxcd.io/requestedAt&lt;/code&gt;
+&lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/#well-known-labels-and-annotations"&gt;annotation&lt;/a&gt;
+ to trigger a
+reconcile now, optionally waiting for the controller to report it handled.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl reconcile NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(all)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Force only this stage to re-run its actions (single-stage reconcile).&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--with-source&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Also re-request each stage source before reconciling. For an &lt;code&gt;ExternalArtifact&lt;/code&gt; source this stamps the &lt;em&gt;producer&lt;/em&gt; behind it (via the artifact&amp;rsquo;s back-pointer); an artifact with no producer back-pointer is a no-op and warns.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--update-now&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Apply a window-held rollout immediately, bypassing update windows.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--force&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Proceed even when the StageSet is suspended.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--wait&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Block until the controller reports the request handled.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--timeout&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;5m&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;How long to wait with &lt;code&gt;--wait&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="example"&gt;Example&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl --namespace payments reconcile payments
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Reconcile requested for StageSet payments (token 2026-06-15T09:30:00Z)
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Force just one stage to re-run its actions:&lt;/p&gt;</description></item><item><title>stagesetctl reset-ledger</title><link>https://stageset.projects.metio.wtf/cli/reset-ledger/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/reset-ledger/</guid><description>&lt;p&gt;Removes a recorded completion from a
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/#run-once-ever-scope-lifetime"&gt;StageLedger&lt;/a&gt;
+ so its
+&lt;code&gt;scope: Lifetime&lt;/code&gt; action is no longer suppressed and runs on the next reconcile.
+The matching &lt;code&gt;spec.baseline&lt;/code&gt; assertion is removed first, so a &lt;code&gt;Baselined&lt;/code&gt;
+completion is not immediately re-promoted.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl reset-ledger NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--stage&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required unless &lt;code&gt;--all&lt;/code&gt;)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Stage of the completion to forget.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--action&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(required unless &lt;code&gt;--all&lt;/code&gt;)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;Action of the completion to forget.&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--all&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;Forget every completion in the ledger. Mutually exclusive with &lt;code&gt;--stage&lt;/code&gt;/&lt;code&gt;--action&lt;/code&gt;.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;This re-runs a once-ever bootstrap, so use it when the underlying state was
+actually reset, or to repurpose a leftover ledger&amp;rsquo;s name after a delete and
+recreate signalled &lt;code&gt;LedgerAdopted&lt;/code&gt;.&lt;/p&gt;</description></item></channel></rss>

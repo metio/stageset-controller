@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Tlas on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/tlas/</link><description>Recent content in Tlas on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/tlas/index.xml" rel="self" type="application/rss+xml"/><item><title>Parameterizing a rollout</title><link>https://stageset.projects.metio.wtf/guides/parameters/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/parameters/</guid><description>&lt;p&gt;A rollout takes parameters at two distinct layers, which serve different purposes:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Render-time parameters (JaaS).&lt;/strong&gt; Change &lt;em&gt;what gets rendered&lt;/em&gt;. The Jsonnet
+computes its output from top-level arguments (&lt;code&gt;tlas&lt;/code&gt;) and external variables
+(&lt;code&gt;externalVariables&lt;/code&gt;). Different values produce a different &lt;code&gt;ExternalArtifact&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Delivery-time parameters (StageSet &lt;code&gt;postBuild&lt;/code&gt;).&lt;/strong&gt; Inject values &lt;em&gt;into
+already-rendered manifests&lt;/em&gt;, per stage, by string substitution — the same
+mechanism Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt; uses.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Use render-time parameters for structural logic; use delivery-time parameters to
+stamp environment-specific values onto a shared artifact.&lt;/p&gt;</description></item></channel></rss>
