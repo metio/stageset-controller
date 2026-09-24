@@ -17,6 +17,21 @@ to `:8080`. Setting it to `0` disables the endpoint. Every custom metric is
 registered against controller-runtime's registry, so it rides the same endpoint as
 the built-in series.
 
+The binary binds that listener itself rather than letting the controller-runtime
+manager do it. The exported series are the same either way, because both write to
+the same registry; what the choice buys is that the endpoint stays scrapeable
+when the manager is the thing that is down, which is exactly when
+`stageset_manager_available` carries information. A manager-owned endpoint would
+disappear with the manager, leaving a failed scrape that cannot distinguish a
+degraded controller from a pod that is gone.
+
+### Manager availability
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `stageset_manager_available` | Gauge | — | `1` once the manager's cache has synced and it is reconciling, `0` while it cannot start — an apiserver the pod cannot reach, a ClusterRole missing a verb, a CRD not installed, a webhook certificate not issued yet. See the [manager-unavailable runbook](/runbooks/manager-unavailable/). |
+| `stageset_manager_start_failures_total` | Counter | — | Manager starts that failed or returned early. Read alongside the gauge: the gauge says the controller is down now, this separates one long outage from a manager that keeps dying and being restarted. |
+
 All counters and the readiness gauge are labelled by `namespace` and the StageSet
 `name` so a single StageSet's behaviour is isolatable.
 
@@ -47,7 +62,7 @@ All counters and the readiness gauge are labelled by `namespace` and the StageSe
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `stageset_webhook_cert_renewal_failures_total` | Counter | — | Failed self-signed webhook certificate renewals in the background renewer goroutine. Meaningful only in self-signed webhook mode. |
+| `stageset_webhook_cert_renewal_failures_total` | Counter | — | Failed self-signed webhook caBundle writes, at bootstrap and in the background renewer. Meaningful only in self-signed webhook mode. A bootstrap write that has not landed yet keeps admission closed; for a renewal, the existing certificate's expiry is the deadline. |
 
 ### Controller-runtime and workqueue metrics
 

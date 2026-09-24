@@ -85,6 +85,7 @@ they describe the controller's own health, not a single StageSet.
 | Alert | Page | What it means |
 |---|---|---|
 | `StageSetControllerPodDown` | [Controller pod down](/runbooks/controller-pod-down/) | A controller pod has been NotReady for the alert window. |
+| `stageset_manager_available == 0` | [Manager unavailable](/runbooks/manager-unavailable/) | The pod is running, but its manager cannot start, so nothing is being reconciled. |
 | `StageSetReconcileLatencyHigh` | [Reconcile latency high](/runbooks/reconcile-latency/) | Reconcile p99 latency is above threshold. |
 | `StageSetControllerWorkqueueDepthHigh` | [Workqueue saturation](/runbooks/workqueue-saturation/) | The controller cannot drain its reconcile queue fast enough. |
 | `StageSetWebhookCertRenewalFailing` | [Webhook cert renewal failing](/runbooks/webhook-cert-renewal/) | The self-signed admission webhook certificate is not being rotated. |

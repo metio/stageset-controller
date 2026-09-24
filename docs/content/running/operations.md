@@ -20,6 +20,8 @@ metrics:
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
+| `stageset_manager_available` | gauge | _(none)_ | `1` once the manager has synced and is reconciling, `0` while it cannot start. See [Degraded manager](#degraded-manager). |
+| `stageset_manager_start_failures_total` | counter | _(none)_ | Manager starts that failed or returned early. |
 | `stageset_reconcile_total` | counter | `namespace`, `name`, `reason` | Reconciles, by terminal Ready reason. |
 | `stageset_stage_applied_total` | counter | `namespace`, `name`, `stage` | Stages applied and verified. |
 | `stageset_drift_corrected_total` | counter | `namespace`, `name`, `stage` | Out-of-band drift re-asserted on a steady-state reconcile. |
@@ -27,6 +29,40 @@ metrics:
 | `stageset_webhook_cert_renewal_failures_total` | counter | _(none)_ | Failed self-signed webhook cert renewals. |
 | `stageset_teardown_force_drop_total` | counter | `namespace`, `name`, `reason` | Finalizers force-dropped because teardown could not complete; sustained non-zero values flag an unreachable target and orphaned objects. `reason` is `timed_out` (`--max-teardown-wait` elapsed), `permanent`, or `unauthorized`. See [TeardownForced](/runbooks/teardown-forced/). |
 | `stageset_stage_ready` | gauge | `namespace`, `stageset`, `stage` | `1` when a stage is Ready, else `0` — for metric-based [progressive delivery](/guides/progressive-delivery/#argo-rollouts). |
+
+## Degraded manager
+
+The controller manager is supervised independently of the process that hosts it.
+When it cannot be built or started — an apiserver the pod cannot reach, a
+ClusterRole missing a verb, a CRD not yet installed, a webhook certificate not
+issued yet — the process keeps running and retries the manager with exponential
+backoff (1s, doubling, capped at 5m) for as long as the pod lives. The manager
+comes up on its own once the cause is cleared, in the same process and without a
+restart.
+
+That matters because the probe and metrics endpoints are bound by the binary
+rather than by the manager, so they keep answering while the manager is down and
+the cause stays legible:
+
+- `GET /healthz` stays an unconditional `200`, so the kubelet never restarts the
+  pod over a degraded manager.
+- `GET /readyz` reports not-ready, so the pod stays out of its Services. Nothing
+  it serves works without the manager — the webhook, the stage-gate endpoint and
+  the MCP server are all manager-scoped — so withdrawing it is the honest answer.
+- `GET /manager` carries the reason, the time the reading last changed, and the
+  number of manager starts.
+- `stageset_manager_available` is `0` while the manager is down;
+  `stageset_manager_start_failures_total` separates one long outage from a
+  manager that keeps dying.
+- The log carries one `manager unavailable, restarting` line per fresh cause and
+  a `still unavailable` line per retry, each naming the reason. The backoff paces
+  them, so a long outage thins out to one line every five minutes.
+
+A manager that lasted at least a minute before failing gets a fresh backoff; one
+that fails quickly keeps the growing delay, so a controller that cannot stay up
+does not hammer the apiserver.
+
+Diagnosis is in the [manager-unavailable runbook](/runbooks/manager-unavailable/).
 
 ## Alerts
 

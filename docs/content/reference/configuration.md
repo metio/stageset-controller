@@ -67,6 +67,15 @@ The metrics endpoint exposes standard `controller_runtime_*` and `workqueue_*`
 series alongside the custom `stageset_*` metrics documented in
 [Operations](/running/operations/).
 
+The probe endpoint serves `GET /healthz` (liveness, an unconditional `200`),
+`GET /readyz` (readiness, green once the manager's caches have synced), and
+`GET /manager`, which reports whether the manager is reconciling and, when it is
+not, the reason, the time the reading last changed, and how many times the manager
+has been started. Both endpoints are bound by the binary rather than by the
+manager, so they keep answering while the manager is the thing that is down — see
+[Degraded manager](/running/operations/#degraded-manager). Either address takes
+`0` or an empty value to disable that endpoint.
+
 ## Tracing
 
 The controller exports OpenTelemetry traces over OTLP gRPC when

@@ -13,9 +13,13 @@ writes (`failurePolicy: Fail`).
 
 ## Cause
 
-- a crash-looping container (bad config flag, missing RBAC, panic),
+- the manager cannot start, so `/readyz` never goes green while the pod keeps
+  running — denied egress to the apiserver, an incomplete ClusterRole, missing
+  CRDs, a webhook certificate that has not been issued. `GET /manager` on the
+  probe port names the reason; see
+  [manager unavailable](/runbooks/manager-unavailable/),
+- a crash-looping container (bad config flag, panic),
 - the node draining or out of resources,
-- a failing readiness probe (`/readyz` on `--health-probe-bind-address`),
 - the leader-election lease unobtainable.
 
 ## Diagnosis
@@ -31,6 +35,9 @@ Look for flag-parse errors at startup, RBAC `Forbidden` on the controller's own
 
 ## Remediation
 
+- Read `GET /manager` on the probe port first: a pod that is `Running` and
+  `0/1` with no restarts is a manager that cannot start, and that page names the
+  cause and the fix. The pod recovers on its own once it is cleared.
 - Fix the surfaced cause (correct the flag/values, grant the missing controller
   RBAC, raise resource limits).
 - Run more than one replica with leader election so a single pod failure doesn't

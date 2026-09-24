@@ -83,6 +83,34 @@ nix develop --command go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/
 
 ## Architecture
 
+- **The manager never ends the process.** `run` binds the probe and metrics
+  endpoints itself, then hands the manager to `supervise` (`cmd/supervisor.go`),
+  which rebuilds and restarts it with exponential backoff (1s, doubling, capped
+  5m, ±20% jitter) for as long as the process context lives. Everything the
+  manager needs from the apiserver happens while `managerRunner.run` builds it —
+  the discovery behind each reconciler's watches, the RESTMapper lookups the
+  producer watches are gated on — so an unreachable apiserver, a missing RBAC
+  verb, an uninstalled CRD or a webhook certificate that has not been issued fails
+  the *build*, which the unbounded `cacheSyncTimeout` does not cover (that governs
+  informer sync after `mgr.Start`). Three traps this closes:
+  - `buildManagerOptions` sets `Metrics.BindAddress` and `HealthProbeBindAddress`
+    to `"0"` and the binary serves both (`serveMetrics`, `serveProbes`): a
+    manager-owned endpoint disappears with the manager, which is exactly when
+    `stageset_manager_available` and `/readyz` carry information, and a rebuilt
+    manager would fight its predecessor for the ports. `/healthz`, `/readyz` and
+    the ports are unchanged; `/manager` is new and carries the reason.
+  - `Controller.SkipNameValidation` is on: controller-runtime keeps controller
+    names for the process lifetime and never releases a stopped manager's entry,
+    so a rebuild registering "stageset" again would be rejected permanently.
+  - The backoff resets only after a manager has run for `superviseHealthyRun`
+    (1m). Resetting on availability alone retries about once a second forever when
+    a manager syncs its cache and then dies on the next step — the shape a missing
+    webhook certificate produces.
+  `internal/opstate` holds the availability (mirrored from jaas): a small RWMutex
+  struct whose `MarkAvailable`/`MarkUnavailable` report whether the reading
+  changed, so callers log transitions and not repeats. `readinessGate` is the
+  non-leader-election runnable that marks it available after cache sync, so
+  `/readyz`, `/manager` and the gauge all read one source.
 - `cmd/main.go` — the manager entrypoint. `--watch-namespaces` (comma-separated,
   falls back to `STAGESET_WATCH_NAMESPACES`) scopes `Cache.DefaultNamespaces` —
   empty (default) is cluster-wide; `parseWatchNamespaces` does the split. The chart

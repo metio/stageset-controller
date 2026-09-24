@@ -9,6 +9,29 @@ release that needs action gets a section below, headed by its calendar version; 
 release with no section needs no migration — a plain upgrade (bump the chart's
 `appVersion` or pull the new image tag) suffices.
 
+## 2026.9.24
+
+A manager that cannot start no longer ends the process. The pod stays `Running`
+and retries it in place, so the failures that used to show up as
+`CrashLoopBackOff` — egress denied to the apiserver, an incomplete ClusterRole,
+CRDs not installed, a webhook certificate not yet issued — now show up as a pod
+that is `Running`, `0/1`, and reconciling nothing.
+
+Alerting that watched container restarts for this class of failure goes quiet.
+Watch the manager's own signals instead:
+
+```promql
+# The controller is not reconciling at all.
+stageset_manager_available == 0
+```
+
+`GET /manager` on `--health-probe-bind-address` carries the same state with the
+reason attached, and
+[manager unavailable](/runbooks/manager-unavailable/) covers diagnosis.
+`/healthz` and `/readyz` keep their paths, their port and their meanings; the
+binary serves them now rather than the manager, which is what keeps them
+answering while the manager is down.
+
 ## After 2026.7.31184504
 
 Five gates changed. Two now cover ground they were documented to cover and did
