@@ -77,6 +77,8 @@ custom `stageset_*` metrics plus controller-runtime signals:
 | `StageSetControllerWorkqueueDepthHigh` | the reconcile queue not draining | warning |
 | `StageSetReconcileLatencyHigh` | reconcile p99 latency over threshold | warning |
 | `StageSetControllerPodDown` | a controller pod NotReady | critical |
+| `StageSetManagerUnavailable` | the manager cannot start, so nothing reconciles | critical |
+| `StageSetManagerFlapping` | the manager comes up and dies repeatedly | warning |
 | `StageSetWebhookCertRenewalFailing` | self-signed cert rotation failing | critical |
 
 Every threshold is a knob under `metrics.prometheusRule.thresholds`, and

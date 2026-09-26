@@ -4,9 +4,9 @@ description: The controller process is running, but its manager cannot start, so
 tags: [runbooks, troubleshooting, operations, networking, rbac]
 ---
 
-Linked from the `stageset_manager_available == 0` signal and from `GET /manager`
-returning `503`. The pod is up and its probe and metrics endpoints answer; the
-controller manager is what cannot start.
+Linked from the `StageSetManagerUnavailable` and `StageSetManagerFlapping`
+alerts, and from `GET /manager` returning `503`. The pod is up and its probe and
+metrics endpoints answer; the controller manager is what cannot start.
 
 ## Symptom
 
@@ -46,8 +46,9 @@ controller down:
 4. **The webhook has no certificate yet.** The reason is
    `open …/serving-certs/tls.crt: no such file or directory` — cert-manager has
    not issued the Secret, or the mount is wrong. The manager syncs its cache and
-   then fails on the webhook server, so this one alternates between available and
-   unavailable until the certificate lands.
+   then fails on the webhook server, so the reading alternates between available
+   and unavailable until the certificate lands; that is the shape
+   `StageSetManagerFlapping` catches and `StageSetManagerUnavailable` can miss.
 5. **The apiserver is genuinely unreachable** — control-plane outage, in-cluster
    DNS failure, a mesh sidecar that has not started yet.
 6. **The leader-election lease was lost** after a period of healthy operation.
