@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Defining a release on StageSet Controller</title><link>https://stageset.projects.metio.wtf/defining-a-release/</link><description>Recent content in Defining a release on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/defining-a-release/index.xml" rel="self" type="application/rss+xml"/><item><title>Actions</title><link>https://stageset.projects.metio.wtf/defining-a-release/actions/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/actions/</guid><description>&lt;p&gt;Actions are typed steps the controller runs around a stage&amp;rsquo;s apply. They turn an
+ordered apply into an orchestrated rollout — run a migration before the app, gate
+the stage on an external check, clean up on failure.&lt;/p&gt;
+&lt;p&gt;A stage has three action hooks:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;pre&lt;/code&gt;&lt;/strong&gt; — run before the manifests are built and applied. A failure aborts the
+stage with nothing applied.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;post&lt;/code&gt;&lt;/strong&gt; — run after the apply is verified. The stage is &lt;code&gt;Ready&lt;/code&gt; only if these
+all succeed.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;onFailure&lt;/code&gt;&lt;/strong&gt; — best-effort steps run on any failure from the apply onward.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A stage&amp;rsquo;s &lt;code&gt;onFailure&lt;/code&gt; fires at the &lt;em&gt;moment&lt;/em&gt; of failure, before any rollback. For
+cleanup that must run &lt;em&gt;after&lt;/em&gt; the previous manifests are restored, use the
+StageSet-level &lt;a href="#post-rollback-cleanup-onrollback"&gt;&lt;code&gt;onRollback&lt;/code&gt;&lt;/a&gt;
+ hook instead.&lt;/p&gt;</description></item><item><title>Conflict policies</title><link>https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/</guid><description>&lt;p&gt;Conflict policies decide what happens when an apply hits an immutable-field
+conflict — a changed &lt;code&gt;clusterIP&lt;/code&gt;, a &lt;code&gt;Job&lt;/code&gt; pod template, a &lt;code&gt;StorageClass&lt;/code&gt; field
+that can&amp;rsquo;t be updated in place. By default the controller fails the stage and
+reports it, so nothing destructive happens by surprise. A policy opts specific
+resources into automatic resolution.&lt;/p&gt;
+&lt;h2 id="the-three-actions"&gt;The three actions&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;Fail&lt;/code&gt; — stop and report (the default; safest).&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;Recreate&lt;/code&gt; — delete and re-create the object to get past an immutable-field
+change.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;KeepExisting&lt;/code&gt; — leave the live object as-is and move on.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="a-default-for-the-whole-stage"&gt;A default for the whole stage&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;conflictPolicy&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;default&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Fail &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# explicit; the safe default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The &lt;code&gt;force: true&lt;/code&gt; shorthand on a stage is equivalent to
+&lt;code&gt;conflictPolicy.default: Recreate&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Inventory and pruning</title><link>https://stageset.projects.metio.wtf/defining-a-release/inventory/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/inventory/</guid><description>&lt;p&gt;Every time a stage applies, the controller records the exact set of objects it
+applied, so it can &lt;strong&gt;prune&lt;/strong&gt; what a later revision no longer renders and tear a
+StageSet down in reverse stage order. That record is the &lt;strong&gt;&lt;code&gt;StageInventory&lt;/code&gt;&lt;/strong&gt; — a
+controller-owned resource you never author (its fields are in the
+&lt;a href="https://stageset.projects.metio.wtf/api/stageinventory/"&gt;API reference&lt;/a&gt;
+).&lt;/p&gt;
+&lt;h2 id="what-the-inventory-records"&gt;What the inventory records&lt;/h2&gt;
+&lt;p&gt;For each stage, the controller writes a &lt;code&gt;StageInventory&lt;/code&gt; listing every object the
+stage owns — group, kind, namespace, name. On the next reconcile it diffs the new
+render against that record and prunes the objects that dropped out, honoring
+&lt;code&gt;prune: false&lt;/code&gt; and the &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/"&gt;conflict policy&lt;/a&gt;
+. On deletion it
+walks the stages in reverse, so a later stage&amp;rsquo;s objects are removed before the
+earlier stages they depend on.&lt;/p&gt;</description></item><item><title>Ready checks</title><link>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/ready-checks/</guid><description>&lt;p&gt;Ready checks decide when a stage is healthy enough to let the next stage start.
+They are purely observational — the controller waits and reports, but takes no
+action (active steps are &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+).&lt;/p&gt;
+&lt;p&gt;By default, with no &lt;code&gt;readyChecks&lt;/code&gt; block, the controller waits for &lt;strong&gt;every&lt;/strong&gt; object
+the stage applied to report ready via
+&lt;a href="https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus"&gt;kstatus&lt;/a&gt;
+.
+&lt;code&gt;readyChecks&lt;/code&gt; lets you narrow that to specific objects (&lt;code&gt;checks&lt;/code&gt;), add custom
+health for resources kstatus doesn&amp;rsquo;t understand (&lt;code&gt;exprs&lt;/code&gt;, &lt;a href="https://github.com/google/cel-spec"&gt;CEL&lt;/a&gt;
+),
+bound the wait (&lt;code&gt;timeout&lt;/code&gt;), or skip it entirely (&lt;code&gt;disableWait&lt;/code&gt;). &lt;code&gt;checks&lt;/code&gt; and
+&lt;code&gt;exprs&lt;/code&gt; may be set together.&lt;/p&gt;</description></item><item><title>Stages and sources</title><link>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</guid><description>&lt;p&gt;A &lt;code&gt;StageSet&lt;/code&gt; is an ordered list of stages. Each stage resolves a
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ source — a &lt;code&gt;GitRepository&lt;/code&gt;, &lt;code&gt;OCIRepository&lt;/code&gt;, &lt;code&gt;Bucket&lt;/code&gt;,
+or an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default) — applies its manifests, waits for them to
+become healthy, and only then lets the next stage start.&lt;/p&gt;
+&lt;h2 id="one-stage"&gt;One stage&lt;/h2&gt;
+&lt;p&gt;The minimum is one stage pointing at one artifact in the same namespace:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# an ExternalArtifact&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;sourceRef.kind&lt;/code&gt; defaults to &lt;code&gt;ExternalArtifact&lt;/code&gt;, so the common case is a single
+line. The controller fetches the artifact, applies every manifest in it, and marks
+the stage &lt;code&gt;Ready&lt;/code&gt; once the applied objects report healthy.&lt;/p&gt;</description></item></channel></rss>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Slo on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/slo/</link><description>Recent content in Slo on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/slo/index.xml" rel="self" type="application/rss+xml"/><item><title>BudgetExhausted</title><link>https://stageset.projects.metio.wtf/runbooks/budgetexhausted/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/budgetexhausted/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=BudgetExhausted&lt;/code&gt; (or, for an already-deployed StageSet, &lt;code&gt;READY=True&lt;/code&gt; with a &lt;code&gt;status.budgetFreeze&lt;/code&gt; and the message prefixed &lt;code&gt;Deployed;&lt;/code&gt;). &lt;code&gt;status.budgetFreeze&lt;/code&gt; records the last observed remaining budget, the freeze and resume thresholds, and when the freeze began.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;This is &lt;strong&gt;not a failure&lt;/strong&gt; — it is the &lt;a href="https://stageset.projects.metio.wtf/gating/error-budget/"&gt;error-budget freeze&lt;/a&gt;
+ working as configured. The metric source named in &lt;code&gt;spec.errorBudget.source&lt;/code&gt; returned a remaining-budget value below &lt;code&gt;freezeThreshold&lt;/code&gt;, so new-revision rollouts are held until the budget recovers. This is the Google SRE error-budget policy: when the budget is spent, stop shipping feature changes until reliability recovers.&lt;/p&gt;</description></item><item><title>BudgetSourceUnavailable</title><link>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/budgetsourceunavailable/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;BudgetSourceUnavailable&lt;/code&gt; Warning event, the &lt;code&gt;stageset_metric_source_errors_total&lt;/code&gt; counter rising, and — when a gate&amp;rsquo;s &lt;code&gt;onSourceError&lt;/code&gt; is &lt;code&gt;Hold&lt;/code&gt; — &lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=BudgetSourceUnavailable&lt;/code&gt;. With &lt;code&gt;onSourceError: Allow&lt;/code&gt; the rollout proceeds and only the event and metric fire, so the condition may not show the reason.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;A metric source (the &lt;a href="https://stageset.projects.metio.wtf/gating/error-budget/"&gt;error-budget freeze&lt;/a&gt;
+ or a &lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;promotion analysis&lt;/a&gt;
+ check) was unreachable or returned no usable scalar: the Prometheus endpoint was down or returned a non-2xx, the query evaluated to an error, an empty or multi-sample vector, or &lt;code&gt;NaN&lt;/code&gt; (the shape a wrong query takes). This is treated as &lt;em&gt;transient&lt;/em&gt; — the controller keeps retrying.&lt;/p&gt;</description></item><item><title>Dashboard</title><link>https://stageset.projects.metio.wtf/observability/dashboard/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/dashboard/</guid><description>&lt;p&gt;The StageSet controller publishes a maintained Grafana dashboard as a single-layer
+OCI image at &lt;code&gt;ghcr.io/metio/stageset-controller-dashboard&lt;/code&gt;. The dashboard is
+grafonnet &lt;em&gt;source&lt;/em&gt;, not pre-rendered JSON, and the controller is not a Jsonnet
+renderer — so you render it through &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+, which
+publishes the rendered JSON as a Flux &lt;code&gt;ExternalArtifact&lt;/code&gt; the grafana-operator picks
+up. The two projects are intentionally tightly coupled; JaaS is the renderer.&lt;/p&gt;
+&lt;p&gt;The dashboard opens with an &lt;a href="https://stageset.projects.metio.wtf/observability/slos/"&gt;SLO&lt;/a&gt;
+ band — reconcile
+availability against its objective, error budget remaining, reconcile-latency p95
+against its objective, and an availability-versus-objective trend — over a band of
+controller internals that explain any movement: reconciles by reason, stages
+applied, drift corrected, deferred updates, stage readiness, watch-engagement
+failures, and the controller-runtime workqueue. The series are the
+&lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+ the controller exports.&lt;/p&gt;</description></item><item><title>Error-budget freeze</title><link>https://stageset.projects.metio.wtf/gating/error-budget/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/error-budget/</guid><description>&lt;p&gt;An error-budget freeze holds new-revision rollouts while a service is out of its
+SLO error budget, and resumes them on its own once the budget recovers — the
+Google SRE error-budget policy: when the budget is spent, stop shipping feature
+changes until reliability is back. The controller does no SLO math; it reads one
+number (the remaining budget) from a metric source you already run and compares
+it to a threshold.&lt;/p&gt;</description></item><item><title>Service level objectives</title><link>https://stageset.projects.metio.wtf/observability/slos/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/slos/</guid><description>&lt;p&gt;The StageSet controller tracks two service-level objectives. Each is an objective
+on a service-level indicator (SLI) computed from the
+&lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+, measured over a rolling window. The published
+&lt;a href="https://stageset.projects.metio.wtf/observability/dashboard/"&gt;dashboard&lt;/a&gt;
+ renders them, and the Helm chart can alert
+on them.&lt;/p&gt;
+&lt;h2 id="slo-1--reconcile-availability"&gt;SLO 1 — reconcile availability&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Objective:&lt;/strong&gt; ≥ &lt;strong&gt;99%&lt;/strong&gt; of syncing reconciles reach &lt;code&gt;Ready=True&lt;/code&gt; (reason
+&lt;code&gt;Succeeded&lt;/code&gt;), over a &lt;strong&gt;28-day&lt;/strong&gt; window.&lt;/p&gt;
+&lt;p&gt;The SLI counts only reconciles that were actually trying to sync. The intentional
+and upstream-waiting reasons are excluded from the failure half — a paused
+StageSet (&lt;code&gt;Suspended&lt;/code&gt;), a rollout held by an update window (&lt;code&gt;UpdateDeferred&lt;/code&gt;), and
+a wait on an upstream artifact or dependency (&lt;code&gt;SourceNotReady&lt;/code&gt;,
+&lt;code&gt;DependencyNotReady&lt;/code&gt;) are not failures and must not burn the budget:&lt;/p&gt;</description></item></channel></rss>

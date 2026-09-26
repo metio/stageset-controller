@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Rbac on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/rbac/</link><description>Recent content in Rbac on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/rbac/index.xml" rel="self" type="application/rss+xml"/><item><title>Multi-cluster and tenancy</title><link>https://stageset.projects.metio.wtf/security/multi-cluster/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/multi-cluster/</guid><description>&lt;p&gt;There are two ways to run the controller, and they map onto two different trust
+models. Pick the one that matches your cluster:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Multi-tenant&lt;/strong&gt; — the controller holds no write access of its own and applies
+every &lt;code&gt;StageSet&lt;/code&gt; as that &lt;code&gt;StageSet&lt;/code&gt;&amp;rsquo;s &lt;code&gt;serviceAccountName&lt;/code&gt;. Each tenant&amp;rsquo;s RBAC
+bounds what its releases can touch. This is the chart default.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Single-tenant&lt;/strong&gt; — the cluster has one operator, so per-tenant isolation buys
+nothing. Run the controller under its own identity bound to &lt;code&gt;cluster-admin&lt;/code&gt; and
+skip impersonation entirely — the model Flux&amp;rsquo;s &lt;code&gt;helm-controller&lt;/code&gt; uses in its
+default install.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The two sections below set each one up. The optional
+&lt;a href="#scoping-the-controller-to-a-namespace-set"&gt;watch scoping&lt;/a&gt;
+ narrows &lt;em&gt;which&lt;/em&gt;
+namespaces a multi-tenant controller sees.&lt;/p&gt;</description></item><item><title>RBACDenied</title><link>https://stageset.projects.metio.wtf/runbooks/rbacdenied/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/rbacdenied/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=RBACDenied&lt;/code&gt;. The Message names the call that failed and appends the verbatim apiserver error:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;kubectl --namespace &amp;lt;ns&amp;gt; describe stageset &amp;lt;name&amp;gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;...
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Status:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Conditions:
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Reason: RBACDenied
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Status: False
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Type: Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; Message: stage &amp;#34;deploy&amp;#34; apply: RBAC denied apply — grant the missing verb to the tenant ServiceAccount ...
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The controller logs at error level and stops engaging backoff for this StageSet. The next reconcile happens only when the spec changes, a referenced source CR&amp;rsquo;s status flips, or &lt;code&gt;spec.interval&lt;/code&gt; ticks — so the workqueue isn&amp;rsquo;t burning cycles on a permanently-failing call.&lt;/p&gt;</description></item><item><title>Security &amp; multi-tenancy</title><link>https://stageset.projects.metio.wtf/security/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/</guid><description>&lt;p&gt;How to run StageSet without granting it broad cluster power, keep secrets
+encrypted, and constrain what it can reach. The controller applies as a tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt;, so a StageSet can do exactly what its RBAC allows and no more.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/encryption/"&gt;Secrets encryption&lt;/a&gt;
+&lt;/strong&gt; — decrypt SOPS-encrypted files
+in memory during apply.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/multi-cluster/"&gt;Multi-cluster and tenancy&lt;/a&gt;
+&lt;/strong&gt; — apply as a tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt; or to a remote cluster.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/admission-webhook/"&gt;Admission webhook&lt;/a&gt;
+&lt;/strong&gt; — validate StageSets at
+admission time.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/network-policy/"&gt;Network policy&lt;/a&gt;
+&lt;/strong&gt; — lock the controller&amp;rsquo;s traffic
+down to what it needs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/service-mesh/"&gt;Service mesh&lt;/a&gt;
+&lt;/strong&gt; — run the controller inside a mesh.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item></channel></rss>

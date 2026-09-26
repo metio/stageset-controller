@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Opentelemetry on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/opentelemetry/</link><description>Recent content in Opentelemetry on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/opentelemetry/index.xml" rel="self" type="application/rss+xml"/><item><title>Tracing</title><link>https://stageset.projects.metio.wtf/observability/tracing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/tracing/</guid><description>&lt;p&gt;The controller integrates with OpenTelemetry and exports spans over OTLP gRPC.
+Tracing is &lt;strong&gt;off until you set an endpoint&lt;/strong&gt; — with no endpoint the OTel SDK
+installs a no-op tracer provider, so the instrumentation costs a function
+indirection and nothing ships off the pod. The controller takes no opinion on
+whether you run a collector.&lt;/p&gt;
+&lt;h2 id="the-controller-binary"&gt;The controller binary&lt;/h2&gt;
+&lt;p&gt;Three flags govern tracing:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;--tracing-endpoint&lt;/code&gt; — the OTLP gRPC collector as &lt;code&gt;host:port&lt;/code&gt;, e.g.
+&lt;code&gt;otel-collector.observability.svc:4317&lt;/code&gt;. Empty (the default) disables tracing
+entirely.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;--tracing-insecure&lt;/code&gt; — skip TLS when dialing the collector. Use only for
+in-cluster collectors that do not terminate TLS themselves. Defaults to &lt;code&gt;false&lt;/code&gt;,
+so the dial uses TLS against the system trust store.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;--tracing-sample-ratio&lt;/code&gt; — TraceID-ratio sampling between &lt;code&gt;0.0&lt;/code&gt; and &lt;code&gt;1.0&lt;/code&gt;.
+Defaults to &lt;code&gt;1.0&lt;/code&gt;, which samples every trace. Lower it on a busy controller to
+cap exporter and collector load.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Every span carries a &lt;code&gt;service.name&lt;/code&gt; of &lt;code&gt;stageset-controller&lt;/code&gt; and a
+&lt;code&gt;service.version&lt;/code&gt; resource attribute filled from the controller&amp;rsquo;s build version,
+so the collector can group spans by release.&lt;/p&gt;</description></item></channel></rss>

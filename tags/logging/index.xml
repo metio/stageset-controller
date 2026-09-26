@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Logging on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/logging/</link><description>Recent content in Logging on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/logging/index.xml" rel="self" type="application/rss+xml"/><item><title>Logging</title><link>https://stageset.projects.metio.wtf/observability/logging/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/logging/</guid><description>&lt;p&gt;The controller logs through Go&amp;rsquo;s &lt;code&gt;log/slog&lt;/code&gt;. Controller-runtime&amp;rsquo;s own logs flow
+through the same handler via the logr bridge, so the manager, the cache, and the
+reconciler all share one consistent output stream — there is no second logger to
+configure.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Status Conditions and Kubernetes Events stay the primary status surface&lt;/strong&gt; —
+&lt;code&gt;kubectl describe&lt;/code&gt;, &lt;code&gt;kubectl wait --for=condition&lt;/code&gt;, and Flux&amp;rsquo;s
+notification-controller all read them. Logs are additive operator-side detail
+for tracing what a reconcile did, not a replacement for the condition that
+tells you whether a StageSet is Ready.&lt;/p&gt;</description></item><item><title>Observability</title><link>https://stageset.projects.metio.wtf/observability/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/</guid><description>&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Status Conditions and Kubernetes Events are the primary status surface&lt;/strong&gt; —
+&lt;code&gt;kubectl describe&lt;/code&gt;, &lt;code&gt;kubectl wait --for=condition&lt;/code&gt;, and Flux&amp;rsquo;s
+notification-controller all read them. The four pillars below are additive
+operator-side detail; they explain how a reconcile behaved, but the condition
+on the StageSet is what tells you whether it is Ready.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;The controller surfaces its behaviour through four pillars, each configured by a
+small set of binary flags that the Helm chart drives from values:&lt;/p&gt;</description></item></channel></rss>
