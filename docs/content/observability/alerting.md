@@ -73,6 +73,8 @@ metrics:
 | `StageSetControllerWorkqueueDepthHigh` | warning | `workqueue_depth{controller="stageset"}` exceeds the depth. | `workqueueDepth` (`50`), `workqueueDuration` (`15m`) |
 | `StageSetReconcileLatencyHigh` | warning | Reconcile p99 (10m window) exceeds the ceiling in seconds. | `reconcileLatencySeconds` (`30`), `reconcileLatencyDuration` (`15m`) |
 | `StageSetControllerPodDown` | critical | A controller pod is NotReady for the window. | `podDownDuration` (`5m`) |
+| `StageSetManagerUnavailable` | critical | `stageset_manager_available` reads 0 — the process is up, its manager cannot start, nothing reconciles. | `managerUnavailableDuration` (`5m`) |
+| `StageSetManagerFlapping` | warning | The manager is reconciling for less than the configured fraction of a 30-minute window, so it comes up and dies repeatedly. | `managerAvailabilityRatio` (`0.9`), `managerFlappingDuration` (`10m`) |
 | `StageSetWebhookCertRenewalFailing` | critical | `stageset_webhook_cert_renewal_failures_total` increases over 1h beyond the count. | `webhookCertRenewalFailuresPerHour` (`1`), `webhookCertRenewalFailuresDuration` (`30m`) |
 | `StageSetWatchEngagementFailing` | warning | `stageset_watch_engagement_failures_total{gvk=...}` increases over 1h beyond the count — a producer watch failed to engage, so StageSets referencing that kind stop re-triggering on its upstream changes. | `watchEngagementFailuresPerHour` (`1`), `watchEngagementFailuresDuration` (`30m`) |
 

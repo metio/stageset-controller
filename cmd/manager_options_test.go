@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/metio/stageset-controller/internal/cliflags"
+	"github.com/metio/stageset-controller/internal/opstate"
 )
 
 // flagsFor parses args (and supplies env) through the real flag registration so
@@ -27,27 +28,34 @@ func flagsFor(t *testing.T, args []string) *cliflags.Flags {
 	return c
 }
 
-// TestBuildManagerOptions_PropagatesMetricsBindAddress pins that the configured
-// --metrics-bind-address reaches metricsserver.Options.BindAddress — the wiring
-// that decides whether (and where) controller-runtime serves /metrics.
-func TestBuildManagerOptions_PropagatesMetricsBindAddress(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"explicit address forwards", []string{"--metrics-bind-address=127.0.0.1:9876"}, "127.0.0.1:9876"},
-		{"disabled forwards as \"0\"", []string{"--metrics-bind-address=0"}, "0"},
-		{"default is :8080", nil, ":8080"},
+// TestBuildManagerOptions_DisablesTheManagersOwnServers pins that the manager
+// binds neither the metrics nor the probe endpoint whatever the flags say: the
+// binary serves both, so they answer while the manager is down, and a rebuilt
+// manager must not fight its predecessor for the ports. Leaving either field
+// unset would take controller-runtime's own default address instead of "off".
+func TestBuildManagerOptions_DisablesTheManagersOwnServers(t *testing.T) {
+	for _, args := range [][]string{
+		nil,
+		{"--metrics-bind-address=127.0.0.1:9876", "--health-probe-bind-address=127.0.0.1:9877"},
+	} {
+		opts := buildManagerOptions(flagsFor(t, args), nil)
+		if got := opts.Metrics.BindAddress; got != "0" {
+			t.Errorf("args %v: Metrics.BindAddress = %q, want %q", args, got, "0")
+		}
+		if got := opts.HealthProbeBindAddress; got != "0" {
+			t.Errorf("args %v: HealthProbeBindAddress = %q, want %q", args, got, "0")
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := flagsFor(t, tc.args)
-			opts := buildManagerOptions(c, nil)
-			if opts.Metrics.BindAddress != tc.want {
-				t.Errorf("Metrics.BindAddress = %q, want %q", opts.Metrics.BindAddress, tc.want)
-			}
-		})
+}
+
+// TestBuildManagerOptions_SkipsControllerNameValidation pins the rebuild path:
+// controller-runtime never releases a stopped manager's controller names, so a
+// manager the supervisor rebuilds would be rejected for reusing "stageset" and
+// the controller could never recover without a restart.
+func TestBuildManagerOptions_SkipsControllerNameValidation(t *testing.T) {
+	opts := buildManagerOptions(flagsFor(t, nil), nil)
+	if opts.Controller.SkipNameValidation == nil || !*opts.Controller.SkipNameValidation {
+		t.Error("Controller.SkipNameValidation is not set; a rebuilt manager would be rejected")
 	}
 }
 
@@ -76,22 +84,25 @@ func TestBuildManagerOptions_SetsUnboundedCacheSyncTimeout(t *testing.T) {
 	}
 }
 
-// TestReadinessGate_FlipsAfterStart proves readyz reports not-ready until the
-// gate's Start runs (which controller-runtime invokes only after cache sync).
-func TestReadinessGate_FlipsAfterStart(t *testing.T) {
-	g := &readinessGate{}
-	if err := g.check(nil); err == nil {
-		t.Fatal("readyz should be not-ready before cache sync")
+// TestReadinessGate_MarksAvailableAfterStart proves the manager reads as
+// unavailable until the gate's Start runs, which controller-runtime invokes only
+// after cache sync. That reading is what /readyz and the availability gauge
+// report.
+func TestReadinessGate_MarksAvailableAfterStart(t *testing.T) {
+	state := opstate.New()
+	g := &readinessGate{state: state}
+	if state.Available() {
+		t.Fatal("manager should read unavailable before cache sync")
 	}
 	go func() { _ = g.Start(t.Context()) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if g.check(nil) == nil {
+		if state.Available() {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("readyz never became ready after Start")
+	t.Fatal("manager never read available after Start")
 }
 
 // TestBuildManagerOptions_PropagatesWatchNamespaces proves the watch-scope

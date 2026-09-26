@@ -2,14 +2,29 @@
 // SPDX-License-Identifier: 0BSD
 
 // Package metrics defines the controller's Prometheus metrics, registered
-// against controller-runtime's registry so they ride the manager's metrics
-// endpoint.
+// against controller-runtime's registry. The binary serves that registry from a
+// listener it owns, so the series stay scrapeable while the manager is down.
 package metrics
 
 import (
+	"sync/atomic"
+
 	"github.com/prometheus/client_golang/prometheus"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"github.com/metio/stageset-controller/internal/opstate"
 )
+
+// managerState is the availability ManagerAvailable reads. The supervisor owns
+// the State and publishes it here once, so the gauge can be a package-level
+// collector registered at init like every other metric while still reading
+// through to the live value on each scrape.
+var managerState atomic.Pointer[opstate.State]
+
+// SetManagerState publishes the State that stageset_manager_available reports.
+func SetManagerState(state *opstate.State) {
+	managerState.Store(state)
+}
 
 var (
 	// ReconcileTotal counts reconciles by their terminal Ready reason.
@@ -48,11 +63,41 @@ var (
 		Help: "Total reconciles that deferred a rollout due to a closed update window.",
 	}, []string{"namespace", "name"})
 
-	// WebhookCertRenewalFailuresTotal counts failed self-signed webhook cert
-	// renewals in the background renewer goroutine.
+	// ManagerAvailable reports whether the controller manager is reconciling.
+	// It is 0 while the manager cannot be built or started — an apiserver the
+	// pod cannot reach, a ClusterRole missing a verb, a CRD not installed — and
+	// 1 once its cache has synced.
+	//
+	// The endpoint that serves this is bound by the binary rather than by the
+	// manager, which is what makes the metric readable in the state it
+	// describes: a manager that never started would otherwise take its own
+	// metrics endpoint with it, and the only remaining signal would be a failed
+	// scrape, which does not distinguish a degraded controller from a pod that
+	// is gone.
+	ManagerAvailable = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "stageset_manager_available",
+		Help: "1 when the controller manager has synced and is reconciling, 0 while it cannot start.",
+	}, func() float64 {
+		if managerState.Load().Available() {
+			return 1
+		}
+		return 0
+	})
+
+	// ManagerStartFailuresTotal counts manager starts that ended in failure.
+	// Paired with ManagerAvailable: the gauge says the controller is down now,
+	// this says how often it has gone down, which separates one long outage from
+	// a manager that keeps dying and being restarted.
+	ManagerStartFailuresTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "stageset_manager_start_failures_total",
+		Help: "Manager starts that failed or returned early. Sustained growth flags a manager that cannot stay up, as opposed to one outage that persists.",
+	})
+
+	// WebhookCertRenewalFailuresTotal counts failed self-signed webhook caBundle
+	// writes, at bootstrap and in the background renewer goroutine.
 	WebhookCertRenewalFailuresTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "stageset_webhook_cert_renewal_failures_total",
-		Help: "Total failed self-signed webhook certificate renewals.",
+		Help: "Total failed self-signed webhook caBundle writes. Admission stays closed until a bootstrap write lands; for a renewal the existing cert's expiry is the deadline.",
 	})
 
 	// WatchEngagementFailuresTotal counts failures to engage a dynamic producer
@@ -174,7 +219,7 @@ var (
 )
 
 func init() {
-	ctrlmetrics.Registry.MustRegister(ReconcileTotal, StageAppliedTotal, ActionRunsTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen, LedgerAnchorErrorsTotal, LedgerAdoptionsTotal)
+	ctrlmetrics.Registry.MustRegister(ManagerAvailable, ManagerStartFailuresTotal, ReconcileTotal, StageAppliedTotal, ActionRunsTotal, DriftCorrectedTotal, UpdateDeferredTotal, WebhookCertRenewalFailuresTotal, WatchEngagementFailuresTotal, TeardownForceDropTotal, InventorySkippedEntriesTotal, StageReady, StagePromotionPending, StagePromotionBlocked, BudgetRemaining, BudgetFrozen, MetricSourceErrorsTotal, StageBudgetFrozen, LedgerAnchorErrorsTotal, LedgerAdoptionsTotal)
 }
 
 // SetStageBudgetFrozen publishes the per-stage error-budget freeze gauge.
