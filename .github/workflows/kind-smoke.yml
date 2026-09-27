@@ -123,11 +123,17 @@ jobs:
           # The pinned helm/kind-action bundles a kind binary that can lag new
           # kindest/node images — a brand-new node image then fails to load with
           # "unknown containerd config version: N". Pin the newest kind release so
-          # the binary matches the node image; empty falls back to the action default.
+          # the binary matches the node image.
+          #
+          # A discovery miss fails the job rather than falling back to the action
+          # default: an older kind writes a kubeadm.k8s.io/v1beta3
+          # ClusterConfiguration that a v1.37.0 node image refuses outright, so
+          # the fallback surfaces as a confusing kubeadm error.
           kv=$(gh release list --repo kubernetes-sigs/kind --limit 30 \
                  --json tagName,isPrerelease \
                  --jq '.[] | select(.isPrerelease==false) | .tagName' \
                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          [ -n "$kv" ] || { echo "::error::kind release discovery failed"; exit 1; }
           echo "kind_latest=$kv" >> "$GITHUB_OUTPUT"
           echo "kind_latest=$kv"
 
