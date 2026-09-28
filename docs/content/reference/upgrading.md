@@ -9,7 +9,7 @@ release that needs action gets a section below, headed by its calendar version; 
 release with no section needs no migration — a plain upgrade (bump the chart's
 `appVersion` or pull the new image tag) suffices.
 
-## After 2026.8.17224814
+## 2026.9.28202553
 
 A manager that cannot start no longer ends the process. The pod stays `Running`
 and retries it in place, so the failures that used to show up as
