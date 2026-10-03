@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Integrations &amp; tooling on StageSet Controller</title><link>https://stageset.projects.metio.wtf/integrations/</link><description>Recent content in Integrations &amp; tooling on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/integrations/index.xml" rel="self" type="application/rss+xml"/><item><title>Claude Code skill</title><link>https://stageset.projects.metio.wtf/integrations/claude-code/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/claude-code/</guid><description>&lt;p&gt;The repository ships a &lt;a href="https://claude.com/claude-code"&gt;Claude Code&lt;/a&gt;
+ skill that
+teaches the assistant to author and operate &lt;code&gt;StageSet&lt;/code&gt; resources: writing and
+editing StageSet YAML, wiring a Flux source or a producer like
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ into staged rollouts, adding typed
+actions, ready checks, update windows, versioned migrations, and conflict
+policies, and driving a StageSet with the &lt;code&gt;stagesetctl&lt;/code&gt; CLI. With it installed,
+Claude Code works against the real schema and defaults instead of guessing.&lt;/p&gt;
+&lt;h2 id="install-the-plugin"&gt;Install the plugin&lt;/h2&gt;
+&lt;p&gt;The skill is packaged as a plugin in a marketplace. Add the marketplace from the
+repository, then install the plugin:&lt;/p&gt;</description></item><item><title>Flux Operator (ResourceSet) integration</title><link>https://stageset.projects.metio.wtf/integrations/flux-operator/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/flux-operator/</guid><description>&lt;p&gt;Pair &lt;code&gt;StageSet&lt;/code&gt; with the &lt;a href="https://fluxoperator.dev/"&gt;Flux Operator&lt;/a&gt;
+&amp;rsquo;s
+&lt;code&gt;ResourceSet&lt;/code&gt; to combine &lt;em&gt;discovery&lt;/em&gt; and &lt;em&gt;fan-out&lt;/em&gt; with &lt;em&gt;ordered, gated
+promotion&lt;/em&gt;. &lt;code&gt;ResourceSet&lt;/code&gt; and &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; (RSIP) discover and
+template inputs; &lt;code&gt;StageSet&lt;/code&gt; rolls a single app through its stages. The two work on
+&lt;a href="https://stageset.projects.metio.wtf/comparisons/flux-operator/"&gt;complementary axes&lt;/a&gt;
+ — this page shows the two
+patterns where they meet.&lt;/p&gt;
+&lt;p&gt;Both patterns require the
+&lt;a href="https://fluxoperator.dev/docs/install/"&gt;Flux Operator installed&lt;/a&gt;
+ alongside
+Flux and the stageset-controller.&lt;/p&gt;
+&lt;h2 id="discovery-feeding-gated-promotion"&gt;Discovery feeding gated promotion&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; watches an OCI registry for new chart or image tags
+on a schedule, and a &lt;code&gt;ResourceSet&lt;/code&gt; templates a &lt;code&gt;StageSet&lt;/code&gt; pinned to whatever tag
+it discovers. The &lt;code&gt;StageSet&lt;/code&gt; then promotes that version through its ordered,
+gated stages.&lt;/p&gt;</description></item><item><title>MCP server</title><link>https://stageset.projects.metio.wtf/integrations/mcp-server/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/mcp-server/</guid><description>&lt;p&gt;The controller exposes StageSet introspection — and, when opted in, control — as
+&lt;a href="https://modelcontextprotocol.io/"&gt;Model Context Protocol&lt;/a&gt;
+ tools, so an LLM
+agent (Claude Code, Claude Desktop, or any MCP client) calls them directly. The
+server runs inside the controller pod and serves over streamable HTTP; the tools
+read and patch StageSet resources as the controller&amp;rsquo;s ServiceAccount, so an agent
+can never exceed the controller&amp;rsquo;s own RBAC.&lt;/p&gt;
+&lt;h2 id="enable-the-server"&gt;Enable the server&lt;/h2&gt;
+&lt;p&gt;Pass &lt;code&gt;--enable-mcp&lt;/code&gt; to the controller to serve the read tools (off by default).
+It binds &lt;code&gt;--mcp-bind-address&lt;/code&gt;, which defaults to &lt;code&gt;:8084&lt;/code&gt;:&lt;/p&gt;</description></item><item><title>Producer-aware sources</title><link>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</guid><description>&lt;p&gt;Point a stage at the resource that &lt;em&gt;produces&lt;/em&gt; an artifact, and the controller
+finds the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes. This is the third source
+route, alongside the two direct ones — an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default
+&lt;code&gt;sourceRef.kind&lt;/code&gt;) or a Flux &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt; — covered in
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/#source-kinds"&gt;stages and sources&lt;/a&gt;
+. Reach for it when an
+operator publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt; from a custom resource (for example
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ rendering Jsonnet).&lt;/p&gt;
+&lt;h2 id="referencing-a-producer"&gt;Referencing a producer&lt;/h2&gt;
+&lt;p&gt;Set &lt;code&gt;kind&lt;/code&gt; (and &lt;code&gt;apiVersion&lt;/code&gt;) to a producer resource, and the controller resolves
+it to the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes — the one whose
+&lt;code&gt;spec.sourceRef&lt;/code&gt; back-references the producer (matched on group, kind, and name).
+For example, a &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ &lt;code&gt;JsonnetSnippet&lt;/code&gt;
+renders Jsonnet and publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt;; reference the snippet and the
+controller follows the link:&lt;/p&gt;</description></item></channel></rss>

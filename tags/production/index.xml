@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Production on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/production/</link><description>Recent content in Production on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/production/index.xml" rel="self" type="application/rss+xml"/><item><title>Production</title><link>https://stageset.projects.metio.wtf/running/production/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/production/</guid><description>&lt;p&gt;The chart&amp;rsquo;s defaults bring up a hardened, lease-guarded controller, but a few
+decisions still belong to you before it manages production releases: whether
+rollback is enabled and where its store lives, how many replicas run, what the
+controller can reach, and how you observe and recover it. Work through these in
+order. Each step states what to set and why, and ends with the Helm values for
+that step. Every flag and its Helm value live in the &lt;a href="https://stageset.projects.metio.wtf/reference/configuration/"&gt;configuration
+reference&lt;/a&gt;
+.&lt;/p&gt;</description></item><item><title>Run in production</title><link>https://stageset.projects.metio.wtf/running/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/running/</guid><description>&lt;p&gt;Once the controller is installed, these pages cover keeping it healthy in
+production: the posture to set before going live, what to watch day to day, how
+to size it, and how to recover its state.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/running/production/"&gt;Production&lt;/a&gt;
+&lt;/strong&gt; — HA replicas, leader election, webhook
+TLS, and the security posture to set before going live.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/running/operations/"&gt;Operations&lt;/a&gt;
+&lt;/strong&gt; — day-two running: what to watch, drift
+correction, and routine tasks.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/running/scale-and-capacity/"&gt;Scale and capacity&lt;/a&gt;
+&lt;/strong&gt; — sizing, throughput, and
+resource tuning for larger fleets.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/running/disaster-recovery/"&gt;Backup and disaster recovery&lt;/a&gt;
+&lt;/strong&gt; — what to back
+up and how to recover the controller&amp;rsquo;s state.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item></channel></rss>

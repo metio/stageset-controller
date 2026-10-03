@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Promql on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/promql/</link><description>Recent content in Promql on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/promql/index.xml" rel="self" type="application/rss+xml"/><item><title>Metrics</title><link>https://stageset.projects.metio.wtf/observability/metrics/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/metrics/</guid><description>&lt;p&gt;The controller exports Prometheus metrics on an HTTP endpoint: a set of custom
+&lt;code&gt;stageset_*&lt;/code&gt; series describing reconcile outcomes, stage applies, drift
+correction, deferred rollouts, webhook-cert renewals, and per-stage readiness —
+alongside the controller-runtime and workqueue series every controller-runtime
+manager exposes for free.&lt;/p&gt;
+&lt;h2 id="the-controller-binary"&gt;The controller binary&lt;/h2&gt;
+&lt;p&gt;The controller binds its metrics endpoint via &lt;code&gt;--metrics-bind-address&lt;/code&gt;, defaulting
+to &lt;code&gt;:8080&lt;/code&gt;. Setting it to &lt;code&gt;0&lt;/code&gt; disables the endpoint. Every custom metric is
+registered against controller-runtime&amp;rsquo;s registry, so it rides the same endpoint as
+the built-in series.&lt;/p&gt;</description></item></channel></rss>
