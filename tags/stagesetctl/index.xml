@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Stagesetctl on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/stagesetctl/</link><description>Recent content in Stagesetctl on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/stagesetctl/index.xml" rel="self" type="application/rss+xml"/><item><title>CLI</title><link>https://stageset.projects.metio.wtf/cli/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/</guid><description>&lt;p&gt;&lt;code&gt;stagesetctl&lt;/code&gt; previews, renders, and drives StageSets without waiting for the next
+reconcile. It speaks to the cluster with your own kubeconfig — nothing about it runs
+in-cluster.&lt;/p&gt;
+&lt;p&gt;Installed on your &lt;code&gt;PATH&lt;/code&gt; as &lt;code&gt;kubectl-stageset&lt;/code&gt;, it also works as a kubectl plugin:
+&lt;code&gt;kubectl stageset &amp;lt;command&amp;gt;&lt;/code&gt; is equivalent to &lt;code&gt;stagesetctl &amp;lt;command&amp;gt;&lt;/code&gt;.&lt;/p&gt;
+&lt;h2 id="installation"&gt;Installation&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;stagesetctl&lt;/code&gt; ships as a standalone binary attached to every
+&lt;a href="https://github.com/metio/stageset-controller/releases"&gt;GitHub release&lt;/a&gt;
+ as
+&lt;code&gt;stagesetctl_&amp;lt;version&amp;gt;_&amp;lt;os&amp;gt;_&amp;lt;arch&amp;gt;.tar.gz&lt;/code&gt; (&lt;code&gt;.zip&lt;/code&gt; on Windows), for linux, darwin,
+and windows on amd64 and arm64. The binary inside the archive is named
+&lt;code&gt;stagesetctl_v&amp;lt;version&amp;gt;&lt;/code&gt;.&lt;/p&gt;</description></item></channel></rss>

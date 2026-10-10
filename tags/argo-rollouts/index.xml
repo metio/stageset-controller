@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Argo-Rollouts on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/argo-rollouts/</link><description>Recent content in Argo-Rollouts on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/argo-rollouts/index.xml" rel="self" type="application/rss+xml"/><item><title>Comparisons</title><link>https://stageset.projects.metio.wtf/comparisons/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/</guid><description>&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; isn&amp;rsquo;t a templating tool and isn&amp;rsquo;t a replacement for your manifest
+generator. It&amp;rsquo;s a &lt;em&gt;delivery&lt;/em&gt; controller: it takes manifests that already exist
+(as a &lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ &lt;code&gt;ExternalArtifact&lt;/code&gt;) and rolls them out in order,
+with gates, under continuous reconciliation. The tools below come up in the same
+situations; here is how each one relates.&lt;/p&gt;
+&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;&lt;/th&gt;
+					&lt;th&gt;Generates manifests&lt;/th&gt;
+					&lt;th&gt;Applies them&lt;/th&gt;
+					&lt;th&gt;Continuous reconcile / drift&lt;/th&gt;
+					&lt;th&gt;Ordered stages within a release&lt;/th&gt;
+					&lt;th&gt;Gates / typed actions&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;strong&gt;StageSet&lt;/strong&gt;&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;&lt;strong&gt;yes&lt;/strong&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;strong&gt;yes&lt;/strong&gt;&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Helm&lt;/td&gt;
+					&lt;td&gt;yes (templates)&lt;/td&gt;
+					&lt;td&gt;yes (&lt;code&gt;helm upgrade&lt;/code&gt;)&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;hooks + weights&lt;/td&gt;
+					&lt;td&gt;hooks only&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Kustomize (&lt;code&gt;kustomize&lt;/code&gt; CLI)&lt;/td&gt;
+					&lt;td&gt;yes (overlays)&lt;/td&gt;
+					&lt;td&gt;no (&lt;code&gt;kubectl apply&lt;/code&gt;)&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Flux &lt;code&gt;kustomize-controller&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;between Kustomizations&lt;/td&gt;
+					&lt;td&gt;health checks&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Tanka / kubecfg&lt;/td&gt;
+					&lt;td&gt;yes (Jsonnet)&lt;/td&gt;
+					&lt;td&gt;yes (CLI)&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;dependency order&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; is complementary to all of them. It consumes manifests produced by
+&lt;a href="https://helm.sh/"&gt;Helm&lt;/a&gt;
+, &lt;a href="https://kustomize.io/"&gt;Kustomize&lt;/a&gt;
+,
+&lt;a href="https://tanka.dev/"&gt;Tanka&lt;/a&gt;
+, or anything else — its job starts once you have
+manifests and need to deliver them carefully.&lt;/p&gt;</description></item></channel></rss>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Fleet on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/fleet/</link><description>Recent content in Fleet on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/fleet/index.xml" rel="self" type="application/rss+xml"/><item><title>AwaitingApproval</title><link>https://stageset.projects.metio.wtf/runbooks/awaitingapproval/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/awaitingapproval/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=AwaitingApproval&lt;/code&gt;. The Message names the target version (and
+the pending migration count, when the transition carries migrations).
+&lt;code&gt;status.pendingMigrations&lt;/code&gt; lists exactly what will run. Nothing is applied and
+&lt;code&gt;status.version&lt;/code&gt; is not advanced — this is an intentional hold, not an error.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;spec.version.approvalMode&lt;/code&gt; holds this transition until the target version is
+approved:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;OnMigrations&lt;/code&gt; holds only a transition that carries migrations, so destructive
+migrations don&amp;rsquo;t run unattended while a config-only version bump proceeds.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;Always&lt;/code&gt; holds every version advance — a fleet-managed StageSet sets this so a
+&lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;&lt;code&gt;FleetRollout&lt;/code&gt;&lt;/a&gt;
+ can pace its adoption wave by wave.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The whole rollout (app and migrations) waits until the target version is authorized.&lt;/p&gt;</description></item><item><title>Fleet rollout</title><link>https://stageset.projects.metio.wtf/gating/fleet-rollout/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/fleet-rollout/</guid><description>&lt;p&gt;When you run one product across many StageSets — one per tenant, often one per
+namespace — a new version reaches every tenant at once. A &lt;code&gt;FleetRollout&lt;/code&gt; paces that:
+it rolls a version across a selected set of StageSets in &lt;strong&gt;ordered waves&lt;/strong&gt;, opening
+the next wave only after the current one reaches the version, stays healthy through a
+soak and a metric gate, and &lt;strong&gt;halts the whole fleet&lt;/strong&gt; the moment a wave regresses.&lt;/p&gt;</description></item><item><title>stagesetctl fleet</title><link>https://stageset.projects.metio.wtf/cli/fleet/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/cli/fleet/</guid><description>&lt;p&gt;&lt;code&gt;stagesetctl fleet NAME&lt;/code&gt; shows where a &lt;a href="https://stageset.projects.metio.wtf/gating/fleet-rollout/"&gt;&lt;code&gt;FleetRollout&lt;/code&gt;&lt;/a&gt;
+ is,
+the way &lt;a href="https://stageset.projects.metio.wtf/cli/plan/"&gt;&lt;code&gt;plan&lt;/code&gt;&lt;/a&gt;
+ shows a StageSet: its overall phase and target version,
+each wave&amp;rsquo;s progress, and — per member — whether it has reached the version, is still
+held awaiting its wave, or has regressed. Read-only.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;stagesetctl fleet NAME [flags]
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;Flag&lt;/th&gt;
+					&lt;th&gt;Default&lt;/th&gt;
+					&lt;th&gt;Description&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;code&gt;--output&lt;/code&gt;, &lt;code&gt;-o&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;em&gt;(human view)&lt;/em&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;code&gt;yaml&lt;/code&gt; or &lt;code&gt;json&lt;/code&gt; to emit the FleetRollout object.&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id="example"&gt;Example&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;$ stagesetctl fleet moodle-2-0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;FleetRollout moodle-2-0 → version 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; phase: InProgress wave: broad
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; wave canary 2/2 at 2.0.0, 2 ready settled, health: Passing
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; ✓ moodle-acme/app 2.0.0 Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; ✓ moodle-beta/app 2.0.0 Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; wave broad 1/3 at 2.0.0, 3 ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; ✓ moodle-x/app 2.0.0 Ready
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; … moodle-y/app 1.0.0 held → awaiting 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; … moodle-z/app 1.0.0 held → awaiting 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; wave rest
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; … moodle-old/app 1.0.0 held → awaiting 2.0.0
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The header shows the version being rolled out — the pinned &lt;code&gt;spec.targetVersion&lt;/code&gt;, or
+the version members are advancing to when it is &lt;a href="https://stageset.projects.metio.wtf/gating/fleet-rollout/"&gt;derived&lt;/a&gt;
+.&lt;/p&gt;</description></item></channel></rss>
