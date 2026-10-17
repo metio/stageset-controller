@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Configuration on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/configuration/</link><description>Recent content in Configuration on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/configuration/index.xml" rel="self" type="application/rss+xml"/><item><title>Configuration reference</title><link>https://stageset.projects.metio.wtf/reference/configuration/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/reference/configuration/</guid><description>&lt;p&gt;The controller is configured entirely through command-line flags, grouped below
+by subsystem. When deployed via the Helm chart you never pass these directly — the
+chart sets them from your values and its own defaults. For the values that drive
+each flag, see &lt;a href="https://stageset.projects.metio.wtf/reference/helm-values/"&gt;Helm chart values&lt;/a&gt;
+. For the values
+worth tuning and the reasoning behind each, see
+&lt;a href="https://stageset.projects.metio.wtf/running/production/"&gt;Production&lt;/a&gt;
+; for metrics and
+runbooks, &lt;a href="https://stageset.projects.metio.wtf/running/operations/"&gt;Operations&lt;/a&gt;
+.&lt;/p&gt;
+&lt;p&gt;The flag tables below are generated from the binary&amp;rsquo;s own FlagSet, so they track
+the controller&amp;rsquo;s runtime contract rather than a hand-maintained copy.&lt;/p&gt;</description></item><item><title>Defining a release</title><link>https://stageset.projects.metio.wtf/defining-a-release/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/</guid><description>&lt;p&gt;These pages cover what goes in a StageSet&amp;rsquo;s &lt;code&gt;spec&lt;/code&gt;: the ordered stages, where
+each one reads from, and how each stage applies, verifies, and is cleaned up.
+Each page has a complete, copy-pasteable example; the
+&lt;a href="https://stageset.projects.metio.wtf/api/stageset/"&gt;API reference&lt;/a&gt;
+ has the exhaustive field-by-field detail.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;Stages and sources&lt;/a&gt;
+&lt;/strong&gt; — the ordered
+stages and the Flux source each one applies.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;Actions&lt;/a&gt;
+&lt;/strong&gt; — typed pre, post, and on-failure
+steps around a stage&amp;rsquo;s apply.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/ready-checks/"&gt;Ready checks&lt;/a&gt;
+&lt;/strong&gt; — hold a stage until its
+objects report healthy.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/conflict-policies/"&gt;Conflict policies&lt;/a&gt;
+&lt;/strong&gt; — what to do
+when an apply hits an immutable-field conflict.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/inventory/"&gt;Inventory and pruning&lt;/a&gt;
+&lt;/strong&gt; — how the
+controller tracks and removes what each stage applied.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>Reference</title><link>https://stageset.projects.metio.wtf/reference/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/reference/</guid><description>&lt;p&gt;Look-up material for exact values and release mechanics, generated from the
+binary and chart so it tracks the current contract.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/reference/configuration/"&gt;Configuration reference&lt;/a&gt;
+&lt;/strong&gt; — every controller flag
+with its default.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/reference/helm-values/"&gt;Helm chart values&lt;/a&gt;
+&lt;/strong&gt; — every chart value with its
+default.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/reference/verifying-releases/"&gt;Verifying releases&lt;/a&gt;
+&lt;/strong&gt; — check the signed
+image and binaries before you run them.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/reference/upgrading/"&gt;Upgrading&lt;/a&gt;
+&lt;/strong&gt; — the actions required when moving
+between releases.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item></channel></rss>

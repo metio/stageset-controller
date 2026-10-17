@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Rollback on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/rollback/</link><description>Recent content in Rollback on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/rollback/index.xml" rel="self" type="application/rss+xml"/><item><title>Fleet rollout</title><link>https://stageset.projects.metio.wtf/gating/fleet-rollout/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/fleet-rollout/</guid><description>&lt;p&gt;When you run one product across many StageSets — one per tenant, often one per
+namespace — a new version reaches every tenant at once. A &lt;code&gt;FleetRollout&lt;/code&gt; paces that:
+it rolls a version across a selected set of StageSets in &lt;strong&gt;ordered waves&lt;/strong&gt;, opening
+the next wave only after the current one reaches the version, stays healthy through a
+soak and a metric gate, and &lt;strong&gt;halts the whole fleet&lt;/strong&gt; the moment a wave regresses.&lt;/p&gt;</description></item><item><title>Gating &amp; rollout safety</title><link>https://stageset.projects.metio.wtf/gating/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/</guid><description>&lt;p&gt;A stage can be healthy and still not the right moment to advance. These features
+decide &lt;em&gt;when&lt;/em&gt; a new revision rolls out and &lt;em&gt;whether&lt;/em&gt; it proceeds, and undo it
+when it goes wrong — they compose, so you can require an open window, a healthy
+budget, and a passed soak all at once.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;Update windows&lt;/a&gt;
+&lt;/strong&gt; — allow or deny new revisions on a
+schedule.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/gating/stage-promotion/"&gt;Stage promotion&lt;/a&gt;
+&lt;/strong&gt; — hold a stage with a soak
+window, a manual gate, or a metric analysis before it advances.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/gating/error-budget/"&gt;Error-budget freeze&lt;/a&gt;
+&lt;/strong&gt; — pause rollouts while a
+service is out of its SLO error budget.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;Versioned migrations&lt;/a&gt;
+&lt;/strong&gt; — run migrations when
+a release crosses a version boundary.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;Rollback&lt;/a&gt;
+&lt;/strong&gt; — restore the last-good revision when a
+rollout fails.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>PreviousRevisionUnavailable</title><link>https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/previousrevisionunavailable/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=PreviousRevisionUnavailable&lt;/code&gt;. The StageSet has &lt;code&gt;spec.rollbackOnFailure&lt;/code&gt; set, a run failed, and the controller could not restore the last-good revisions.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;&lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;&lt;code&gt;rollbackOnFailure&lt;/code&gt;&lt;/a&gt;
+ restores the previously-applied artifact revisions by re-fetching their recorded URLs and verifying their digests. That only works while the &lt;strong&gt;producer still retains&lt;/strong&gt; those revisions. This reason means a revision the rollback needs is no longer fetchable — the producer garbage-collected it.&lt;/p&gt;
+&lt;p&gt;Rollback is best-effort by contract: it works exactly when producers retain. Common triggers:&lt;/p&gt;</description></item><item><title>Rollback</title><link>https://stageset.projects.metio.wtf/gating/rollback/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/rollback/</guid><description>&lt;p&gt;When a run fails, the controller can restore the last successfully-applied artifact
+revisions instead of leaving you on a broken release. Rollback is opt-in and needs
+somewhere to keep prior revisions.&lt;/p&gt;
+&lt;h2 id="enabling-it"&gt;Enabling it&lt;/h2&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;rollbackOnFailure&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;On a failed run the controller restores each stage&amp;rsquo;s last-good artifact revision,
+best-effort, and emits a &lt;code&gt;RolledBack&lt;/code&gt; event. The coordinates it restores from are
+recorded in &lt;code&gt;status.lastAppliedSnapshot&lt;/code&gt;.&lt;/p&gt;</description></item></channel></rss>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Jaas on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/jaas/</link><description>Recent content in Jaas on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/jaas/index.xml" rel="self" type="application/rss+xml"/><item><title>Dashboard</title><link>https://stageset.projects.metio.wtf/observability/dashboard/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/observability/dashboard/</guid><description>&lt;p&gt;The StageSet controller publishes a maintained Grafana dashboard as a single-layer
+OCI image at &lt;code&gt;ghcr.io/metio/stageset-controller-dashboard&lt;/code&gt;. The dashboard is
+grafonnet &lt;em&gt;source&lt;/em&gt;, not pre-rendered JSON, and the controller is not a Jsonnet
+renderer — so you render it through &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+, which
+publishes the rendered JSON as a Flux &lt;code&gt;ExternalArtifact&lt;/code&gt; the grafana-operator picks
+up. The two projects are intentionally tightly coupled; JaaS is the renderer.&lt;/p&gt;
+&lt;p&gt;The dashboard opens with an &lt;a href="https://stageset.projects.metio.wtf/observability/slos/"&gt;SLO&lt;/a&gt;
+ band — reconcile
+availability against its objective, error budget remaining, reconcile-latency p95
+against its objective, and an availability-versus-objective trend — over a band of
+controller internals that explain any movement: reconciles by reason, stages
+applied, drift corrected, deferred updates, stage readiness, watch-engagement
+failures, and the controller-runtime workqueue. The series are the
+&lt;a href="https://stageset.projects.metio.wtf/observability/metrics/"&gt;metrics&lt;/a&gt;
+ the controller exports.&lt;/p&gt;</description></item><item><title>From Jsonnet to a gated rollout</title><link>https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/</guid><description>&lt;p&gt;This tutorial follows a complete delivery: write &lt;a href="https://kubernetes.io/docs/"&gt;Kubernetes&lt;/a&gt;
+
+manifests in &lt;a href="https://jsonnet.org/"&gt;Jsonnet&lt;/a&gt;
+ and publish the source through
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+; &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ renders it into a
+Flux &lt;code&gt;ExternalArtifact&lt;/code&gt;, and a StageSet rolls it out with a readiness gate.&lt;/p&gt;
+&lt;p&gt;The chain is:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Jsonnet in Git/OCI/Bucket → JaaS (JsonnetSnippet) → ExternalArtifact → StageSet
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;This tutorial renders &lt;em&gt;Jsonnet&lt;/em&gt;, so it goes through JaaS: JaaS turns the Jsonnet
+into an &lt;code&gt;ExternalArtifact&lt;/code&gt; the stage consumes. (If your manifests were already plain
+YAML, a stage could read a &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt; directly — see
+&lt;a href="https://stageset.projects.metio.wtf/get-started/flux-sources/"&gt;Stage sources&lt;/a&gt;
+. The renderer is here because the input is
+Jsonnet, not because StageSet can&amp;rsquo;t read Git.)&lt;/p&gt;</description></item><item><title>Generating migrations with Jsonnet</title><link>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</guid><description>&lt;p&gt;A &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migration ladder&lt;/a&gt;
+ is just data — a list of
+version-gated actions. So you can &lt;em&gt;generate&lt;/em&gt; it with &lt;a href="https://jsonnet.org/"&gt;Jsonnet&lt;/a&gt;
+,
+publish it once as a Flux artifact with &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+,
+and have every StageSet that deploys the app consume it through
+&lt;code&gt;spec.migrationsSourceRef&lt;/code&gt;. One ladder, authored once, shared across namespaces.&lt;/p&gt;
+&lt;p&gt;The chain mirrors &lt;a href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/"&gt;From Jsonnet to a gated rollout&lt;/a&gt;
+,
+but the rendered artifact is the &lt;em&gt;migrations&lt;/em&gt; rather than the manifests:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Jsonnet ladder → JaaS (JsonnetSnippet) → ExternalArtifact → StageSet.migrationsSourceRef
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="prerequisites"&gt;Prerequisites&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Flux installed (with the &lt;code&gt;ExternalArtifact&lt;/code&gt; API — Flux ≥ v2.7.0).&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ installed in operator mode.&lt;/li&gt;
+&lt;li&gt;StageSet installed (see &lt;a href="https://stageset.projects.metio.wtf/get-started/kubernetes/"&gt;Installation&lt;/a&gt;
+).&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="1-write-the-ladder-in-jsonnet"&gt;1. Write the ladder in Jsonnet&lt;/h2&gt;
+&lt;p&gt;The snippet evaluates to a &lt;strong&gt;JSON array of migrations&lt;/strong&gt; — the same shape the
+ladder file uses, so JaaS&amp;rsquo;s &lt;code&gt;rendered.json&lt;/code&gt; &lt;em&gt;is&lt;/em&gt; the ladder. A small helper keeps
+each entry readable, and the file is trivially parameterizable (per app, per
+environment) with top-level args:&lt;/p&gt;</description></item><item><title>Integrations &amp; tooling</title><link>https://stageset.projects.metio.wtf/integrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/</guid><description>&lt;p&gt;How StageSet fits with the rest of your delivery stack: react to upstream
+producers that render artifacts, compose with the Flux Operator, and drive
+StageSets from an AI assistant.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/integrations/producer-aware-sources/"&gt;Producer-aware sources&lt;/a&gt;
+&lt;/strong&gt; — point a
+stage at a producer like &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ and re-render
+when it republishes.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/integrations/flux-operator/"&gt;Flux Operator integration&lt;/a&gt;
+&lt;/strong&gt; — combine StageSet
+with the Flux Operator&amp;rsquo;s &lt;code&gt;ResourceSet&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/integrations/claude-code/"&gt;Claude Code skill&lt;/a&gt;
+&lt;/strong&gt; — a skill that helps an
+assistant author and operate StageSets.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/integrations/mcp-server/"&gt;MCP server&lt;/a&gt;
+&lt;/strong&gt; — an MCP server an agent uses to
+read status and drive reconciliation.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>Parameterizing a rollout</title><link>https://stageset.projects.metio.wtf/guides/parameters/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/parameters/</guid><description>&lt;p&gt;A rollout takes parameters at two distinct layers, which serve different purposes:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Render-time parameters (JaaS).&lt;/strong&gt; Change &lt;em&gt;what gets rendered&lt;/em&gt;. The Jsonnet
+computes its output from top-level arguments (&lt;code&gt;tlas&lt;/code&gt;) and external variables
+(&lt;code&gt;externalVariables&lt;/code&gt;). Different values produce a different &lt;code&gt;ExternalArtifact&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Delivery-time parameters (StageSet &lt;code&gt;postBuild&lt;/code&gt;).&lt;/strong&gt; Inject values &lt;em&gt;into
+already-rendered manifests&lt;/em&gt;, per stage, by string substitution — the same
+mechanism Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt; uses.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Use render-time parameters for structural logic; use delivery-time parameters to
+stamp environment-specific values onto a shared artifact.&lt;/p&gt;</description></item><item><title>Producer-aware sources</title><link>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/producer-aware-sources/</guid><description>&lt;p&gt;Point a stage at the resource that &lt;em&gt;produces&lt;/em&gt; an artifact, and the controller
+finds the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes. This is the third source
+route, alongside the two direct ones — an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default
+&lt;code&gt;sourceRef.kind&lt;/code&gt;) or a Flux &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt; — covered in
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/#source-kinds"&gt;stages and sources&lt;/a&gt;
+. Reach for it when an
+operator publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt; from a custom resource (for example
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ rendering Jsonnet).&lt;/p&gt;
+&lt;h2 id="referencing-a-producer"&gt;Referencing a producer&lt;/h2&gt;
+&lt;p&gt;Set &lt;code&gt;kind&lt;/code&gt; (and &lt;code&gt;apiVersion&lt;/code&gt;) to a producer resource, and the controller resolves
+it to the &lt;code&gt;ExternalArtifact&lt;/code&gt; that producer publishes — the one whose
+&lt;code&gt;spec.sourceRef&lt;/code&gt; back-references the producer (matched on group, kind, and name).
+For example, a &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ &lt;code&gt;JsonnetSnippet&lt;/code&gt;
+renders Jsonnet and publishes an &lt;code&gt;ExternalArtifact&lt;/code&gt;; reference the snippet and the
+controller follows the link:&lt;/p&gt;</description></item></channel></rss>

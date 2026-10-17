@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Guides on StageSet Controller</title><link>https://stageset.projects.metio.wtf/guides/</link><description>Recent content in Guides on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/guides/index.xml" rel="self" type="application/rss+xml"/><item><title>Best practices</title><link>https://stageset.projects.metio.wtf/guides/best-practices/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/best-practices/</guid><description>&lt;p&gt;StageSet works best when you lean into what it is: a delivery controller that
+keeps the &lt;em&gt;render&lt;/em&gt; pure and owns &lt;em&gt;ordering, gating, and execution memory&lt;/em&gt;. Almost
+every practice below — good or bad — follows from respecting or fighting that
+split. The one-line test for a decision is: &lt;strong&gt;does this belong in what should
+exist (the render) or in when and whether it runs (StageSet)?&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;For a single application, a small team, or a chart you distribute to others,
+Helm&amp;rsquo;s simplicity and ecosystem may serve you better; see
+&lt;a href="#when-helm-is-the-better-choice"&gt;when Helm is the better choice&lt;/a&gt;
+. These practices
+assume the case StageSet is built for — a multi-component, multi-tenant, stateful,
+policy-gated release.&lt;/p&gt;</description></item><item><title>Generating migrations with Jsonnet</title><link>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/jsonnet-migrations/</guid><description>&lt;p&gt;A &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;migration ladder&lt;/a&gt;
+ is just data — a list of
+version-gated actions. So you can &lt;em&gt;generate&lt;/em&gt; it with &lt;a href="https://jsonnet.org/"&gt;Jsonnet&lt;/a&gt;
+,
+publish it once as a Flux artifact with &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+,
+and have every StageSet that deploys the app consume it through
+&lt;code&gt;spec.migrationsSourceRef&lt;/code&gt;. One ladder, authored once, shared across namespaces.&lt;/p&gt;
+&lt;p&gt;The chain mirrors &lt;a href="https://stageset.projects.metio.wtf/get-started/jsonnet-to-rollout/"&gt;From Jsonnet to a gated rollout&lt;/a&gt;
+,
+but the rendered artifact is the &lt;em&gt;migrations&lt;/em&gt; rather than the manifests:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Jsonnet ladder → JaaS (JsonnetSnippet) → ExternalArtifact → StageSet.migrationsSourceRef
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id="prerequisites"&gt;Prerequisites&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Flux installed (with the &lt;code&gt;ExternalArtifact&lt;/code&gt; API — Flux ≥ v2.7.0).&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+ installed in operator mode.&lt;/li&gt;
+&lt;li&gt;StageSet installed (see &lt;a href="https://stageset.projects.metio.wtf/get-started/kubernetes/"&gt;Installation&lt;/a&gt;
+).&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="1-write-the-ladder-in-jsonnet"&gt;1. Write the ladder in Jsonnet&lt;/h2&gt;
+&lt;p&gt;The snippet evaluates to a &lt;strong&gt;JSON array of migrations&lt;/strong&gt; — the same shape the
+ladder file uses, so JaaS&amp;rsquo;s &lt;code&gt;rendered.json&lt;/code&gt; &lt;em&gt;is&lt;/em&gt; the ladder. A small helper keeps
+each entry readable, and the file is trivially parameterizable (per app, per
+environment) with top-level args:&lt;/p&gt;</description></item><item><title>Parameterizing a rollout</title><link>https://stageset.projects.metio.wtf/guides/parameters/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/parameters/</guid><description>&lt;p&gt;A rollout takes parameters at two distinct layers, which serve different purposes:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Render-time parameters (JaaS).&lt;/strong&gt; Change &lt;em&gt;what gets rendered&lt;/em&gt;. The Jsonnet
+computes its output from top-level arguments (&lt;code&gt;tlas&lt;/code&gt;) and external variables
+(&lt;code&gt;externalVariables&lt;/code&gt;). Different values produce a different &lt;code&gt;ExternalArtifact&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Delivery-time parameters (StageSet &lt;code&gt;postBuild&lt;/code&gt;).&lt;/strong&gt; Inject values &lt;em&gt;into
+already-rendered manifests&lt;/em&gt;, per stage, by string substitution — the same
+mechanism Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt; uses.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Use render-time parameters for structural logic; use delivery-time parameters to
+stamp environment-specific values onto a shared artifact.&lt;/p&gt;</description></item><item><title>Progressive delivery</title><link>https://stageset.projects.metio.wtf/guides/progressive-delivery/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/guides/progressive-delivery/</guid><description>&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; integrates with both progressive-delivery controllers:
+&lt;a href="https://flagger.app/"&gt;Flagger&lt;/a&gt;
+ and
+&lt;a href="https://argoproj.github.io/argo-rollouts/"&gt;Argo Rollouts&lt;/a&gt;
+. The controller exposes
+a read-only gate endpoint and a readiness gauge so either one can hold a promotion
+until a &lt;code&gt;StageSet&lt;/code&gt; stage is healthy; ready checks let a stage wait on a Rollout in
+return. See also &lt;a href="https://stageset.projects.metio.wtf/comparisons/argo-rollouts/"&gt;StageSet vs Argo Rollouts&lt;/a&gt;
+.&lt;/p&gt;
+&lt;h2 id="the-gate-contract"&gt;The gate contract&lt;/h2&gt;
+&lt;p&gt;The gate endpoint backs the Flagger integration and the Argo Rollouts JSON-metric
+option.&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /gate/{namespace}/{stageset}/{stage}
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; 200 — the stage is Ready at the currently pinned revision
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; 403 — the stage is not Ready (or not found / not gateable)
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;It is served on &lt;code&gt;--gate-bind-address&lt;/code&gt; (default &lt;code&gt;:8082&lt;/code&gt;) and exposed by the chart&amp;rsquo;s
+&lt;code&gt;stageset-controller-gate&lt;/code&gt; Service (&lt;code&gt;gate.enabled&lt;/code&gt;, on by default). The endpoint is
+&lt;strong&gt;unauthenticated and read-only&lt;/strong&gt;, so fence it with a &lt;code&gt;NetworkPolicy&lt;/code&gt;
+(&lt;a href="https://stageset.projects.metio.wtf/running/production/#network-policy"&gt;production&lt;/a&gt;
+) to admit only your
+delivery controller.&lt;/p&gt;</description></item></channel></rss>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Flux-Operator on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/flux-operator/</link><description>Recent content in Flux-Operator on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/flux-operator/index.xml" rel="self" type="application/rss+xml"/><item><title>Flux Operator (ResourceSet) integration</title><link>https://stageset.projects.metio.wtf/integrations/flux-operator/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/integrations/flux-operator/</guid><description>&lt;p&gt;Pair &lt;code&gt;StageSet&lt;/code&gt; with the &lt;a href="https://fluxoperator.dev/"&gt;Flux Operator&lt;/a&gt;
+&amp;rsquo;s
+&lt;code&gt;ResourceSet&lt;/code&gt; to combine &lt;em&gt;discovery&lt;/em&gt; and &lt;em&gt;fan-out&lt;/em&gt; with &lt;em&gt;ordered, gated
+promotion&lt;/em&gt;. &lt;code&gt;ResourceSet&lt;/code&gt; and &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; (RSIP) discover and
+template inputs; &lt;code&gt;StageSet&lt;/code&gt; rolls a single app through its stages. The two work on
+&lt;a href="https://stageset.projects.metio.wtf/comparisons/flux-operator/"&gt;complementary axes&lt;/a&gt;
+ — this page shows the two
+patterns where they meet.&lt;/p&gt;
+&lt;p&gt;Both patterns require the
+&lt;a href="https://fluxoperator.dev/docs/install/"&gt;Flux Operator installed&lt;/a&gt;
+ alongside
+Flux and the stageset-controller.&lt;/p&gt;
+&lt;h2 id="discovery-feeding-gated-promotion"&gt;Discovery feeding gated promotion&lt;/h2&gt;
+&lt;p&gt;A &lt;code&gt;ResourceSetInputProvider&lt;/code&gt; watches an OCI registry for new chart or image tags
+on a schedule, and a &lt;code&gt;ResourceSet&lt;/code&gt; templates a &lt;code&gt;StageSet&lt;/code&gt; pinned to whatever tag
+it discovers. The &lt;code&gt;StageSet&lt;/code&gt; then promotes that version through its ordered,
+gated stages.&lt;/p&gt;</description></item><item><title>StageSet vs Flux Operator ResourceSet</title><link>https://stageset.projects.metio.wtf/comparisons/flux-operator/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/flux-operator/</guid><description>&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; and the &lt;a href="https://fluxoperator.dev/"&gt;Flux Operator&lt;/a&gt;
+&amp;rsquo;s &lt;code&gt;ResourceSet&lt;/code&gt;
+solve different axes of delivery, and they compose cleanly:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;ResourceSet&lt;/code&gt; is horizontal fan-out.&lt;/strong&gt; It templates &lt;em&gt;N&lt;/em&gt; instances of a set of
+resources from a matrix of inputs, and pairs with a
+&lt;code&gt;ResourceSetInputProvider&lt;/code&gt; (RSIP) to &lt;em&gt;discover&lt;/em&gt; those inputs — pull requests,
+branches, tags, OCI artifact tags — on a schedule.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;StageSet&lt;/code&gt; is vertical promotion.&lt;/strong&gt; It moves &lt;em&gt;one&lt;/em&gt; application through an
+ordered list of gated &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages&lt;/a&gt;
+, with typed
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+, &lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+,
+and &lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;rollback&lt;/a&gt;
+ along the way.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Reach for &lt;code&gt;ResourceSet&lt;/code&gt; to stamp out many similar deployments from a changing set
+of inputs. Reach for &lt;code&gt;StageSet&lt;/code&gt; to roll a single release out in order, gated at
+each step. To do both — discover a new version, then promote it through gated
+stages — run them together; see the
+&lt;a href="https://stageset.projects.metio.wtf/integrations/flux-operator/"&gt;Flux Operator integration&lt;/a&gt;
+ page.&lt;/p&gt;</description></item></channel></rss>
