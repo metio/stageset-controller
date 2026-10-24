@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Flux on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/flux/</link><description>Recent content in Flux on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/flux/index.xml" rel="self" type="application/rss+xml"/><item><title>Comparisons</title><link>https://stageset.projects.metio.wtf/comparisons/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/</guid><description>&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; isn&amp;rsquo;t a templating tool and isn&amp;rsquo;t a replacement for your manifest
+generator. It&amp;rsquo;s a &lt;em&gt;delivery&lt;/em&gt; controller: it takes manifests that already exist
+(as a &lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ &lt;code&gt;ExternalArtifact&lt;/code&gt;) and rolls them out in order,
+with gates, under continuous reconciliation. The tools below come up in the same
+situations; here is how each one relates.&lt;/p&gt;
+&lt;table&gt;
+	&lt;thead&gt;
+			&lt;tr&gt;
+					&lt;th&gt;&lt;/th&gt;
+					&lt;th&gt;Generates manifests&lt;/th&gt;
+					&lt;th&gt;Applies them&lt;/th&gt;
+					&lt;th&gt;Continuous reconcile / drift&lt;/th&gt;
+					&lt;th&gt;Ordered stages within a release&lt;/th&gt;
+					&lt;th&gt;Gates / typed actions&lt;/th&gt;
+			&lt;/tr&gt;
+	&lt;/thead&gt;
+	&lt;tbody&gt;
+			&lt;tr&gt;
+					&lt;td&gt;&lt;strong&gt;StageSet&lt;/strong&gt;&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;&lt;strong&gt;yes&lt;/strong&gt;&lt;/td&gt;
+					&lt;td&gt;&lt;strong&gt;yes&lt;/strong&gt;&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Helm&lt;/td&gt;
+					&lt;td&gt;yes (templates)&lt;/td&gt;
+					&lt;td&gt;yes (&lt;code&gt;helm upgrade&lt;/code&gt;)&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;hooks + weights&lt;/td&gt;
+					&lt;td&gt;hooks only&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Kustomize (&lt;code&gt;kustomize&lt;/code&gt; CLI)&lt;/td&gt;
+					&lt;td&gt;yes (overlays)&lt;/td&gt;
+					&lt;td&gt;no (&lt;code&gt;kubectl apply&lt;/code&gt;)&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Flux &lt;code&gt;kustomize-controller&lt;/code&gt;&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;yes&lt;/td&gt;
+					&lt;td&gt;between Kustomizations&lt;/td&gt;
+					&lt;td&gt;health checks&lt;/td&gt;
+			&lt;/tr&gt;
+			&lt;tr&gt;
+					&lt;td&gt;Tanka / kubecfg&lt;/td&gt;
+					&lt;td&gt;yes (Jsonnet)&lt;/td&gt;
+					&lt;td&gt;yes (CLI)&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+					&lt;td&gt;dependency order&lt;/td&gt;
+					&lt;td&gt;no&lt;/td&gt;
+			&lt;/tr&gt;
+	&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; is complementary to all of them. It consumes manifests produced by
+&lt;a href="https://helm.sh/"&gt;Helm&lt;/a&gt;
+, &lt;a href="https://kustomize.io/"&gt;Kustomize&lt;/a&gt;
+,
+&lt;a href="https://tanka.dev/"&gt;Tanka&lt;/a&gt;
+, or anything else — its job starts once you have
+manifests and need to deliver them carefully.&lt;/p&gt;</description></item><item><title>Stage sources — Git, OCI, Bucket</title><link>https://stageset.projects.metio.wtf/get-started/flux-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/get-started/flux-sources/</guid><description>&lt;p&gt;A stage resolves its &lt;code&gt;sourceRef&lt;/code&gt; to a &lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ artifact. You have
+two routes:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-text" data-lang="text"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;manifests in Git / OCI / Bucket ──────────────────────────► StageSet (direct)
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;manifests in Git / OCI / Bucket ──► a renderer (JaaS) ──► ExternalArtifact ──► StageSet
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Use the &lt;strong&gt;direct&lt;/strong&gt; route when the source already holds ready-to-apply manifests
+(the same thing Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt; consumes). Use the &lt;strong&gt;renderer&lt;/strong&gt; route
+when you generate manifests first — e.g. evaluating Jsonnet with
+&lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+.&lt;/p&gt;
+&lt;p&gt;Copy-pasteable recipes follow, one per source kind. For how &lt;code&gt;sourceRef&lt;/code&gt;
+resolution works as a concept — and the &lt;code&gt;path&lt;/code&gt;, &lt;code&gt;prune&lt;/code&gt;, &lt;code&gt;patches&lt;/code&gt;, and
+&lt;code&gt;postBuild&lt;/code&gt; knobs that shape a stage — see
+&lt;a href="https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/"&gt;stages and sources&lt;/a&gt;
+.&lt;/p&gt;</description></item><item><title>Stages and sources</title><link>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/defining-a-release/stages-and-sources/</guid><description>&lt;p&gt;A &lt;code&gt;StageSet&lt;/code&gt; is an ordered list of stages. Each stage resolves a
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ source — a &lt;code&gt;GitRepository&lt;/code&gt;, &lt;code&gt;OCIRepository&lt;/code&gt;, &lt;code&gt;Bucket&lt;/code&gt;,
+or an &lt;code&gt;ExternalArtifact&lt;/code&gt; (the default) — applies its manifests, waits for them to
+become healthy, and only then lets the next stage start.&lt;/p&gt;
+&lt;h2 id="one-stage"&gt;One stage&lt;/h2&gt;
+&lt;p&gt;The minimum is one stage pointing at one artifact in the same namespace:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;apiVersion&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;stages.metio.wtf/v1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;kind&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;StageSet&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;metadata&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;namespace&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;default&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;spec&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;stages&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;app&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;sourceRef&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-app &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# an ExternalArtifact&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;sourceRef.kind&lt;/code&gt; defaults to &lt;code&gt;ExternalArtifact&lt;/code&gt;, so the common case is a single
+line. The controller fetches the artifact, applies every manifest in it, and marks
+the stage &lt;code&gt;Ready&lt;/code&gt; once the applied objects report healthy.&lt;/p&gt;</description></item><item><title>StageSet vs Flux kustomize-controller</title><link>https://stageset.projects.metio.wtf/comparisons/flux/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/flux/</guid><description>&lt;p&gt;This is the closest comparison — &lt;code&gt;StageSet&lt;/code&gt; is built &lt;em&gt;for&lt;/em&gt;
+&lt;a href="https://fluxcd.io/"&gt;Flux&lt;/a&gt;
+ and borrows its conventions. Flux&amp;rsquo;s &lt;code&gt;kustomize-controller&lt;/code&gt;
+(and &lt;code&gt;helm-controller&lt;/code&gt;) reconcile a source into the cluster continuously, exactly
+like &lt;code&gt;StageSet&lt;/code&gt;. The difference is granularity.&lt;/p&gt;
+&lt;h2 id="what-kustomize-controller-gives-you"&gt;What kustomize-controller gives you&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Continuous reconciliation of a &lt;code&gt;Kustomization&lt;/code&gt; from a Flux source, with pruning,
+health checks, drift correction, and &lt;code&gt;dependsOn&lt;/code&gt; ordering &lt;strong&gt;between&lt;/strong&gt;
+Kustomizations.&lt;/li&gt;
+&lt;li&gt;Impersonation via &lt;code&gt;serviceAccountName&lt;/code&gt;, &lt;code&gt;postBuild&lt;/code&gt; substitution, patches — the
+same surface &lt;code&gt;StageSet&lt;/code&gt; deliberately mirrors.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="where-stageset-differs"&gt;Where StageSet differs&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Ordering within a release.&lt;/strong&gt; &lt;code&gt;kustomize-controller&lt;/code&gt; applies one Kustomization
+as a unit; ordering exists only &lt;em&gt;between&lt;/em&gt; Kustomizations via &lt;code&gt;dependsOn&lt;/code&gt;. To
+sequence three steps you create three Kustomizations and wire their
+dependencies. &lt;code&gt;StageSet&lt;/code&gt; expresses that as one resource with ordered &lt;code&gt;stages&lt;/code&gt; —
+and the controller waits for each stage&amp;rsquo;s health before the next.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Typed actions between steps.&lt;/strong&gt; Migrations, HTTP gates, waits, and transient
+applies are first-class &lt;a href="https://stageset.projects.metio.wtf/defining-a-release/actions/"&gt;actions&lt;/a&gt;
+; in plain Flux you&amp;rsquo;d model
+these as extra Kustomizations and Jobs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Typed dependencies.&lt;/strong&gt; &lt;code&gt;dependsOn&lt;/code&gt; exists in Flux too, but only as readiness
+ordering. &lt;code&gt;StageSet&lt;/code&gt; adds a &lt;code&gt;minVersion&lt;/code&gt; floor — a dependent waits until its
+dependency is deployed &lt;em&gt;at or above&lt;/em&gt; a version, not merely Ready, so &amp;ldquo;the app rolls
+only once the database is migrated to 5.2&amp;rdquo; is a declared gate, not a hope.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Release-level features.&lt;/strong&gt; &lt;a href="https://stageset.projects.metio.wtf/gating/update-windows/"&gt;Update windows&lt;/a&gt;
+,
+&lt;a href="https://stageset.projects.metio.wtf/gating/versioned-migrations/"&gt;versioned migrations&lt;/a&gt;
+, and
+&lt;a href="https://stageset.projects.metio.wtf/gating/rollback/"&gt;rollback&lt;/a&gt;
+ operate across the whole staged release.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Source-native.&lt;/strong&gt; A stage consumes a &lt;code&gt;GitRepository&lt;/code&gt;/&lt;code&gt;OCIRepository&lt;/code&gt;/&lt;code&gt;Bucket&lt;/code&gt;
+directly (just like &lt;code&gt;kustomize-controller&lt;/code&gt;), or an &lt;code&gt;ExternalArtifact&lt;/code&gt; (RFC-0012),
+or a &lt;em&gt;producer&lt;/em&gt; resolved to its artifact — which is how it also pairs with
+renderers like &lt;a href="https://jaas.projects.metio.wtf/"&gt;JaaS&lt;/a&gt;
+.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SOPS parity.&lt;/strong&gt; Encrypted Secrets in a source decrypt the same way, via
+&lt;a href="https://stageset.projects.metio.wtf/security/encryption/"&gt;&lt;code&gt;spec.decryption&lt;/code&gt;&lt;/a&gt;
+ (age, PGP, or cloud KMS), so a SOPS-using
+repo ports across unchanged.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id="using-them-together"&gt;Using them together&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;StageSet&lt;/code&gt; sits alongside the other Flux controllers and reuses Flux&amp;rsquo;s source layer,
+notifications (&lt;code&gt;Alert&lt;/code&gt;/&lt;code&gt;Provider&lt;/code&gt; targeting &lt;code&gt;kind: StageSet&lt;/code&gt;), and reconcile
+annotations. Use &lt;code&gt;kustomize-controller&lt;/code&gt; for ordinary one-shot reconciliation and
+reach for &lt;code&gt;StageSet&lt;/code&gt; when a release needs ordered, gated stages.&lt;/p&gt;</description></item><item><title>StageSet vs jsonnet-controller</title><link>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/comparisons/jsonnet-controller/</guid><description>&lt;p&gt;&lt;a href="https://github.com/pelotech/jsonnet-controller"&gt;jsonnet-controller&lt;/a&gt;
+ (pelotech) is a
+Flux controller that evaluates Jsonnet (kubecfg- and Tanka-style) and applies the
+result to the cluster. Its &lt;code&gt;Konfiguration&lt;/code&gt; resource (&lt;code&gt;jsonnet.io/v1beta1&lt;/code&gt;) is, in
+effect, &lt;em&gt;kustomize-controller for Jsonnet&lt;/em&gt;: point it at a &lt;code&gt;GitRepository&lt;/code&gt; (or an
+HTTP(S) URL), and it builds the Jsonnet and reconciles the manifests — with
+pruning, health/revision tracking, TLA string/code variables, and &lt;code&gt;dependsOn&lt;/code&gt;
+ordering &lt;strong&gt;between&lt;/strong&gt; Konfigurations.&lt;/p&gt;
+&lt;p&gt;The two projects sit at &lt;strong&gt;different layers&lt;/strong&gt;, which is the whole comparison.&lt;/p&gt;</description></item></channel></rss>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Multi-Tenancy on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/multi-tenancy/</link><description>Recent content in Multi-Tenancy on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/multi-tenancy/index.xml" rel="self" type="application/rss+xml"/><item><title>Fleet rollout</title><link>https://stageset.projects.metio.wtf/gating/fleet-rollout/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/gating/fleet-rollout/</guid><description>&lt;p&gt;When you run one product across many StageSets — one per tenant, often one per
+namespace — a new version reaches every tenant at once. A &lt;code&gt;FleetRollout&lt;/code&gt; paces that:
+it rolls a version across a selected set of StageSets in &lt;strong&gt;ordered waves&lt;/strong&gt;, opening
+the next wave only after the current one reaches the version, stays healthy through a
+soak and a metric gate, and &lt;strong&gt;halts the whole fleet&lt;/strong&gt; the moment a wave regresses.&lt;/p&gt;</description></item><item><title>Security &amp; multi-tenancy</title><link>https://stageset.projects.metio.wtf/security/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/</guid><description>&lt;p&gt;How to run StageSet without granting it broad cluster power, keep secrets
+encrypted, and constrain what it can reach. The controller applies as a tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt;, so a StageSet can do exactly what its RBAC allows and no more.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/encryption/"&gt;Secrets encryption&lt;/a&gt;
+&lt;/strong&gt; — decrypt SOPS-encrypted files
+in memory during apply.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/multi-cluster/"&gt;Multi-cluster and tenancy&lt;/a&gt;
+&lt;/strong&gt; — apply as a tenant
+&lt;code&gt;ServiceAccount&lt;/code&gt; or to a remote cluster.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/admission-webhook/"&gt;Admission webhook&lt;/a&gt;
+&lt;/strong&gt; — validate StageSets at
+admission time.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/network-policy/"&gt;Network policy&lt;/a&gt;
+&lt;/strong&gt; — lock the controller&amp;rsquo;s traffic
+down to what it needs.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href="https://stageset.projects.metio.wtf/security/service-mesh/"&gt;Service mesh&lt;/a&gt;
+&lt;/strong&gt; — run the controller inside a mesh.
+&lt;/content&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item></channel></rss>

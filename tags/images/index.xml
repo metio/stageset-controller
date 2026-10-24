@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Images on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/images/</link><description>Recent content in Images on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/images/index.xml" rel="self" type="application/rss+xml"/><item><title>Image verification</title><link>https://stageset.projects.metio.wtf/security/image-verification/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/image-verification/</guid><description>&lt;p&gt;Require every container image a rollout deploys to be signed before it reaches the
+cluster. You write a cluster-scoped &lt;code&gt;ImageVerificationPolicy&lt;/code&gt; that names the images it
+governs and the identities allowed to sign them; the controller verifies each image a
+stage renders and holds the stage if any image fails — nothing unverified is applied.&lt;/p&gt;
+&lt;p&gt;Verification is owned by the platform, not the tenant: a &lt;code&gt;StageSet&lt;/code&gt; author deploys
+without declaring any signing configuration, and the policies that gate their images
+live in one cluster-scoped resource an administrator controls.&lt;/p&gt;</description></item><item><title>ImageUnverified</title><link>https://stageset.projects.metio.wtf/runbooks/imageunverified/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/imageunverified/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=ImageUnverified&lt;/code&gt;. The run halts at the stage before it applies
+anything. The Message names the failing image and the policy that rejected it.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;Before a stage applies its objects, the controller verifies every container image they
+reference against the cluster &lt;a href="https://stageset.projects.metio.wtf/security/image-verification/"&gt;&lt;code&gt;ImageVerificationPolicy&lt;/code&gt;&lt;/a&gt;
+
+resources — signature (cosign keyless identity or public key) and any required
+attestations (SLSA provenance, SBOM, a fresh scan). The stage is held because an image:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;is not signed, or is signed by an identity no policy authority accepts;&lt;/li&gt;
+&lt;li&gt;is missing a required attestation, or one is stale (past &lt;code&gt;maxAge&lt;/code&gt;); or&lt;/li&gt;
+&lt;li&gt;(under &lt;code&gt;--require-image-verification&lt;/code&gt;) matches no policy at all — deny-by-default.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Nothing unverified is deployed — the gate runs &lt;em&gt;before&lt;/em&gt; apply.&lt;/p&gt;</description></item></channel></rss>

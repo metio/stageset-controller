@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Supply-Chain on StageSet Controller</title><link>https://stageset.projects.metio.wtf/tags/supply-chain/</link><description>Recent content in Supply-Chain on StageSet Controller</description><generator>Hugo</generator><language>en</language><atom:link href="https://stageset.projects.metio.wtf/tags/supply-chain/index.xml" rel="self" type="application/rss+xml"/><item><title>Image verification</title><link>https://stageset.projects.metio.wtf/security/image-verification/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/security/image-verification/</guid><description>&lt;p&gt;Require every container image a rollout deploys to be signed before it reaches the
+cluster. You write a cluster-scoped &lt;code&gt;ImageVerificationPolicy&lt;/code&gt; that names the images it
+governs and the identities allowed to sign them; the controller verifies each image a
+stage renders and holds the stage if any image fails — nothing unverified is applied.&lt;/p&gt;
+&lt;p&gt;Verification is owned by the platform, not the tenant: a &lt;code&gt;StageSet&lt;/code&gt; author deploys
+without declaring any signing configuration, and the policies that gate their images
+live in one cluster-scoped resource an administrator controls.&lt;/p&gt;</description></item><item><title>ImageUnverified</title><link>https://stageset.projects.metio.wtf/runbooks/imageunverified/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/runbooks/imageunverified/</guid><description>&lt;h2 id="symptom"&gt;Symptom&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;READY=False&lt;/code&gt;, &lt;code&gt;REASON=ImageUnverified&lt;/code&gt;. The run halts at the stage before it applies
+anything. The Message names the failing image and the policy that rejected it.&lt;/p&gt;
+&lt;h2 id="cause"&gt;Cause&lt;/h2&gt;
+&lt;p&gt;Before a stage applies its objects, the controller verifies every container image they
+reference against the cluster &lt;a href="https://stageset.projects.metio.wtf/security/image-verification/"&gt;&lt;code&gt;ImageVerificationPolicy&lt;/code&gt;&lt;/a&gt;
+
+resources — signature (cosign keyless identity or public key) and any required
+attestations (SLSA provenance, SBOM, a fresh scan). The stage is held because an image:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;is not signed, or is signed by an identity no policy authority accepts;&lt;/li&gt;
+&lt;li&gt;is missing a required attestation, or one is stale (past &lt;code&gt;maxAge&lt;/code&gt;); or&lt;/li&gt;
+&lt;li&gt;(under &lt;code&gt;--require-image-verification&lt;/code&gt;) matches no policy at all — deny-by-default.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Nothing unverified is deployed — the gate runs &lt;em&gt;before&lt;/em&gt; apply.&lt;/p&gt;</description></item><item><title>Verifying releases</title><link>https://stageset.projects.metio.wtf/reference/verifying-releases/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://stageset.projects.metio.wtf/reference/verifying-releases/</guid><description>&lt;p&gt;Every release is signed with &lt;a href="https://github.com/sigstore/cosign"&gt;cosign&lt;/a&gt;
+ keyless
+signing. There is no GPG key to import and no public key to distribute — the
+signature&amp;rsquo;s trust comes from the GitHub Actions workflow&amp;rsquo;s OIDC identity, proven by
+a &lt;a href="https://docs.sigstore.dev/"&gt;Fulcio&lt;/a&gt;
+ certificate and logged in
+&lt;a href="https://docs.sigstore.dev/logging/overview/"&gt;Rekor&lt;/a&gt;
+. Verify the artifacts you pull
+before you run them.&lt;/p&gt;
+&lt;p&gt;Install cosign from &lt;a href="https://github.com/sigstore/cosign/releases"&gt;its releases&lt;/a&gt;
+, or
+on most systems:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-shell" data-lang="shell"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;go install github.com/sigstore/cosign/v2/cmd/cosign@latest
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Two values appear in every command below — the workflow identity and the OIDC
+issuer. They are the same for the image and the blobs:&lt;/p&gt;</description></item></channel></rss>
