@@ -45,6 +45,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: scope
         name: Did this PR touch the binary, CRDs, or smoke wiring?
         env:
@@ -155,6 +156,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
 
       - name: Build container image
@@ -172,7 +175,9 @@ jobs:
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-smoke
 
       - name: Install Flux ${{ matrix.flux_version }} source CRDs (real schema)
-        run: hack/smoke/setup-flux-source-crds.sh ${{ matrix.flux_version }}
+        run: hack/smoke/setup-flux-source-crds.sh "${MATRIX_FLUX_VERSION}"
+        env:
+          MATRIX_FLUX_VERSION: ${{ matrix.flux_version }}
 
       - name: Install the released chart with the dev image
         run: |
@@ -182,7 +187,7 @@ jobs:
           # is covered by the binary's envtest suite. image.pullPolicy defaults
           # to IfNotPresent, so the kind-loaded :smoke image is used as-is.
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -200,6 +205,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
 
       - name: Scenario — basic apply + inventory + finalizer prune
         run: hack/smoke/scenario-basic.sh
@@ -243,6 +250,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -256,8 +265,10 @@ jobs:
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-s3
       - name: Cluster prereqs (Flux source CRDs + S3Mock)
         run: |
-          hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+          hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
           hack/smoke/setup-s3mock.sh
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart (S3Mock rollback store) with the dev image
         run: |
           # S3Mock validates no signature, so anonymous mode is correct here; do
@@ -265,7 +276,7 @@ jobs:
           # default sse=s3 header but does not encrypt). The SeaweedFS job covers
           # real SigV4 / multipart / SSE. Webhook off, same as the matrix job.
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -279,6 +290,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — S3 rollback-store round-trip
         run: hack/smoke/scenario-rollback-s3.sh
         env:
@@ -301,6 +314,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -314,8 +329,10 @@ jobs:
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-seaweedfs
       - name: Cluster prereqs (Flux source CRDs + SeaweedFS)
         run: |
-          hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+          hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
           hack/smoke/setup-seaweedfs.sh
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart (SeaweedFS rollback store, real creds + SSE) with the dev image
         run: |
           kubectl create namespace stageset-system
@@ -328,7 +345,7 @@ jobs:
             --from-literal=AWS_ACCESS_KEY_ID=stageset-smoke \
             --from-literal=AWS_SECRET_ACCESS_KEY=stageset-smoke-secret
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -344,6 +361,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — S3 rollback-store round-trip (SeaweedFS)
         run: hack/smoke/scenario-rollback-s3.sh
         env:
@@ -366,6 +385,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -378,13 +399,15 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-ha
       - name: Cluster prereqs (Flux source CRDs)
-        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+        run: hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart (2 replicas) with the dev image
         run: |
           # replicas.min/max=2 runs two controller pods; leader election gates
           # which one reconciles. Webhook off, same as the matrix job.
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -395,6 +418,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — leader failover
         run: hack/smoke/scenario-ha.sh
       - name: Diagnostics on failure
@@ -414,6 +439,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -426,7 +453,9 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-selfsigned
       - name: Cluster prereqs (Flux source CRDs)
-        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+        run: hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart (self-signed webhook) with the dev image
         run: |
           # The one job that keeps the webhook ON: in self-signed cert mode the
@@ -438,7 +467,7 @@ jobs:
           # (stageset.name = Chart.Name = stageset-controller) — matches the
           # scenario's VWC env default.
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace default \
             --set-string image.tag=smoke \
             --set webhook.enabled=true \
@@ -448,6 +477,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=default:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — self-signed webhook admission + caBundle patch
         run: hack/smoke/scenario-selfsigned-webhook.sh
       - name: Diagnostics on failure
@@ -467,6 +498,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -479,14 +512,16 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-scale
       - name: Cluster prereqs (Flux source CRDs)
-        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+        run: hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart with the dev image
         run: |
           # Same install as the matrix job: webhook off (the scenario exercises the
           # data plane at fan-out, not admission), dev image, HEAD CRDs overlaid,
           # broad RoleBinding for the controller's own apply identity.
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -495,6 +530,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — 50 StageSets converge + prune
         run: hack/smoke/scenario-scale.sh
       - name: Diagnostics on failure
@@ -514,6 +551,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -526,14 +565,16 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-new-fields
       - name: Cluster prereqs (Flux source CRDs)
-        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+        run: hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart with the dev image
         run: |
           # Same install as the matrix job: webhook off (the scenario does not
           # require admission), dev image, HEAD CRDs overlaid, broad RoleBinding
           # for the controller's own apply identity.
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -542,6 +583,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — suspend/resume + Event emission
         run: hack/smoke/scenario-fields.sh
       - name: Diagnostics on failure
@@ -561,6 +604,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -573,11 +618,13 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-rollout-gates
       - name: Cluster prereqs (Flux source CRDs)
-        run: hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+        run: hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart with the dev image
         run: |
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -586,6 +633,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — error-budget freeze then resume
         run: hack/smoke/scenario-errorbudget.sh
       - name: Diagnostics on failure
@@ -634,6 +683,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster (no default CNI)
@@ -656,7 +707,7 @@ jobs:
           # The admitted namespace must exist before the policy scopes to it.
           kubectl create namespace flux-system
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -668,6 +719,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — NetworkPolicy enforcement
         run: ENFORCE=${{ matrix.enforce }} hack/smoke/scenario-networkpolicy-enforcement.sh
       - name: Diagnostics on failure
@@ -706,6 +759,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -733,7 +788,7 @@ jobs:
       - name: Install the released chart (serviceMesh enabled, engine=${{ matrix.engine }}) with the dev image
         run: |
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -746,6 +801,8 @@ jobs:
           kubectl create clusterrolebinding stageset-smoke-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=stageset-system:stageset-controller
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       - name: Scenario — service-mesh authz enforcement (by SA identity)
         run: ENGINE=${{ matrix.engine }} hack/smoke/scenario-servicemesh.sh
       - name: Diagnostics on failure
@@ -767,6 +824,8 @@ jobs:
     steps:
       - name: Clone Git Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build container image
         run: docker build -t ghcr.io/metio/stageset-controller:smoke .
       - name: Create kind cluster
@@ -780,8 +839,10 @@ jobs:
         run: kind load docker-image ghcr.io/metio/stageset-controller:smoke --name stageset-image-verify
       - name: Cluster prereqs (Flux source CRDs + in-cluster registry)
         run: |
-          hack/smoke/setup-flux-source-crds.sh ${{ needs.discover.outputs.flux_latest }}
+          hack/smoke/setup-flux-source-crds.sh "${NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST}"
           hack/smoke/setup-registry.sh image-verify
+        env:
+          NEEDS_DISCOVER_OUTPUTS_FLUX_LATEST: ${{ needs.discover.outputs.flux_latest }}
       - name: Install the released chart with the dev image (insecure registry arg)
         run: |
           # Same install as the matrix job (webhook off, dev image, HEAD CRDs, broad
@@ -791,7 +852,7 @@ jobs:
           # yet — appended to the controller's args directly. It affects only the
           # verifier's bundle fetch, not the kubelet (the scenario runs 0 replicas).
           helm upgrade --install stageset oci://ghcr.io/metio/helm-charts/stageset-controller \
-            --version "${{ needs.discover.outputs.chart_version }}" \
+            --version "${NEEDS_DISCOVER_OUTPUTS_CHART_VERSION}" \
             --namespace stageset-system --create-namespace \
             --set-string image.tag=smoke \
             --set webhook.enabled=false \
@@ -804,6 +865,8 @@ jobs:
           kubectl -n stageset-system patch deploy stageset-controller --type=json \
             -p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"${arg}\"}]"
           kubectl -n stageset-system rollout status deploy/stageset-controller --timeout=180s
+        env:
+          NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       # After the helm install above, so that step keeps the runner's helm.
       - name: Install the project toolchain (provides cosign)
         uses: metio/breto@c9a84cb81ba92328c0148a4bb905b2bbe3cb817d # 2026.10.30080906
