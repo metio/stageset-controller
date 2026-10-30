@@ -7,9 +7,9 @@
 #   - docs/data/helm-values.json — the stageset-controller chart's flattened
 #                                  values schema
 #
-# Run this through the flake's development shell before building the site:
-#   nix develop --command hack/gen-docs-data.sh
-#   nix develop --command serve
+# Run this in the project's breto shell before building the site:
+#   hack/gen-docs-data.sh
+#   serve
 #
 # The schema is generated on-the-fly from the chart's Chart.yaml + values.yaml
 # fetched from helm-charts' main branch (helm-schema, the same tool the chart

@@ -6,7 +6,7 @@
 # each target under QEMU. buildx supplies TARGETOS/TARGETARCH/TARGETVARIANT per
 # target; the runtime stage below takes $TARGETPLATFORM and pulls the matching
 # distroless base. The builder is Docker Hub's official golang image, pinned in
-# lockstep with the flake's Go so prod and dev builds agree — cgr.dev
+# lockstep with the Go of @go so prod and dev builds agree — cgr.dev
 # throttles anonymous pulls, making its large Go builder layer very slow to
 # fetch in CI.
 FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.1@sha256:e0174e51e81218523251d85d248a90d24c3d5e81543b4f07a5d66229397db190 AS build

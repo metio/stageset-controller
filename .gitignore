@@ -20,7 +20,3 @@ docs/.hugo_build.lock
 tmp/.htmltest/
 .local/
 
-# direnv nix-direnv build cache (real-nix contributors may add a local .envrc).
-.direnv/
-result
-result-*

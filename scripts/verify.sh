@@ -33,8 +33,8 @@ step() {
 # --- Go: metio/ci golang.yml ------------------------------------------------
 
 step build go build ./...
-# -shuffle=on because order-dependent tests are a real failure this catches; the
-# devShell exports KUBEBUILDER_ASSETS, so the envtest-backed suites run here
+# -shuffle=on because order-dependent tests are a real failure this catches;
+# @envtest exports KUBEBUILDER_ASSETS, so the envtest-backed suites run here
 # even though CI's Verify gate skips them.
 step test go test -count=1 -race -shuffle=on ./...
 step vet go vet ./...

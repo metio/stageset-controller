@@ -21,11 +21,10 @@ deps: ## Resolve Go dependencies (run once after cloning the scaffold)
 
 .PHONY: generate
 generate: ## Generate DeepCopy, CRDs, RBAC and webhook manifests
-	# Delegates to the flake command so this and CI share one definition.
-	# scripts/generate.sh carries no shebang by design — nix's
-	# writeShellApplication supplies it, along with `set -euo pipefail` and a
-	# build-time shellcheck — so it is run through the command, not directly.
-	nix develop --command generate
+	# Delegates to the breto command so this and CI share one definition.
+	# scripts/generate.sh carries no shebang by design — the command runs it with
+	# bash -euo pipefail — so it is run through the command, not directly.
+	breto run generate
 
 .PHONY: fmt
 fmt: ## Format sources

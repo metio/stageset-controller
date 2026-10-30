@@ -40,45 +40,47 @@ delivery (`spec.updateWindows`).
 
 ## Common commands
 
-The toolchain is a **nix flake** (`flake.nix` + `flake.lock`, Renovate-maintained):
-the Go correctness gates run in CI via the shared `metio/ci` reusable `golang.yml`,
-and the same tools live in the flake so a local run reproduces them.
-`KUBEBUILDER_ASSETS` is set by the devShell (etcd + kube-apiserver + kubectl from
-nixpkgs), so envtest tests run offline. Run any command through the devShell:
+The toolchain is declared in `.breto.edn`, which names the
+[metio/toolchains](https://github.com/metio/toolchains) groups that pin each tool;
+breto installs them from the published registry, locally and in CI through the
+breto action. The Go correctness gates run in CI via the shared `metio/ci`
+reusable `golang.yml`, and the same tools sit on `PATH` in a project shell
+(`eval "$(breto env)"`, or the breto prompt hook), so a local run reproduces them.
+`KUBEBUILDER_ASSETS` comes from `@envtest` (etcd + kube-apiserver + kubectl from
+controller-tools' envtest releases), so envtest tests run offline once installed:
 
 ```shell
-nix develop --command go build ./...
-nix develop --command go vet ./...
-nix develop --command staticcheck ./...                # checks=all via staticcheck.conf
-nix develop --command gofumpt -l .                     # strict formatting (empty == clean)
-nix develop --command gosec ./...                      # security scanner
-nix develop --command arch-go                          # architecture rules (arch-go.yml)
-nix develop --command govulncheck ./...
-nix develop --command modernize ./...                  # newer-Go idiom check (ignore zz_generated.deepcopy.go maps.Copy hits)
-nix develop --command go test -count=1 -race -shuffle=on -cover ./...   # full suite (envtest wired)
-nix develop --command go tool controller-gen object:headerFile="hack/boilerplate.go.txt" paths=./api/v1/...  # regenerate deepcopy — headerFile REQUIRED so the SPDX header is kept (REUSE)
-nix develop --command go tool controller-gen crd paths=./api/... output:crd:artifacts:config=config/crd  # regenerate CRDs
+go build ./...
+go vet ./...
+staticcheck ./...                # checks=all via staticcheck.conf
+gofumpt -l .                     # strict formatting (empty == clean)
+gosec ./...                      # security scanner
+arch-go                          # architecture rules (arch-go.yml)
+govulncheck ./...
+modernize ./...                  # newer-Go idiom check (ignore zz_generated.deepcopy.go maps.Copy hits)
+go test -count=1 -race -shuffle=on -cover ./...   # full suite (envtest wired)
+go tool controller-gen object:headerFile="hack/boilerplate.go.txt" paths=./api/v1/...  # regenerate deepcopy — headerFile REQUIRED so the SPDX header is kept (REUSE)
+go tool controller-gen crd paths=./api/... output:crd:artifacts:config=config/crd  # regenerate CRDs
 ```
 
-Or `nix develop` to drop into the shell and run tools bare. On this host `nix` is
-nix-portable (see the root `CLAUDE.md`'s nix section). arch-go, modernize, and
-helm-schema aren't in nixpkgs, so the flake builds them from source; `update-flake.yml`
-runs `nix-update` weekly to bump them (Renovate can't compute nix hashes).
+The `:commands` of `.breto.edn` (`generate`, `website`, `serve`, `verify`) are
+linked into the project's bin directory, so they run bare in a project shell or as
+`breto run <name>`. Tool versions change in metio/toolchains, where Renovate bumps
+the groups; a new toolchains release reaches this project on the next `breto update`.
 
 **Static analysis is the standalone tools above — never golangci-lint** (banned
 project-wide). The Go gate is `go vet` + `staticcheck` + `gosec` +
 `govulncheck` + `gofumpt` + `arch-go`. These configs are kept **identical to the
 jaas repo** so both projects lint the same way. Text linters mirror the same set: `yamllint`
 (`.yamllint.yaml`), `actionlint`, `markdownlint-cli2` (`.markdownlint.yaml`),
-`typos` (`.typos.toml`) — all in the flake's devShell so the local shell
-reproduces every CI gate.
+`typos` (`.typos.toml`) — all in `@lint`, so the local shell reproduces every
+CI gate.
 
-The devShell exports `KUBEBUILDER_ASSETS` from a nixpkgs-assembled bundle
-(kube-apiserver + etcd), so the envtest-backed packages run offline with nothing
-to download. Run a single fuzz target's seed-plus-campaign locally with:
+`@envtest` exports `KUBEBUILDER_ASSETS` (kube-apiserver + etcd), so the
+envtest-backed packages run offline once it is installed. Run a single fuzz target's seed-plus-campaign locally with:
 
 ```shell
-nix develop --command go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/
+go test -run=^$ -fuzz=^FuzzName$ -fuzztime=30s ./internal/<pkg>/
 ```
 
 ## Architecture
@@ -265,7 +267,7 @@ real apiserver.
 - **envtest integration tests** — packages whose `TestMain` boots a real
   kube-apiserver + etcd via `sigs.k8s.io/controller-runtime/pkg/envtest`
   (`internal/controller`, `internal/cli`, and the `internal/apply` diff suite).
-  These need `KUBEBUILDER_ASSETS` pointing at an asset bundle. The devShell
+  These need `KUBEBUILDER_ASSETS` pointing at an asset bundle. `@envtest`
   exports one, so they run by default. When the
   variable is **absent**, the package skips cleanly rather than failing:
   `internal/apply`'s `TestMain` `os.Exit(0)`s and the controller/cli suites lazily
@@ -314,7 +316,7 @@ real apiserver.
 - **actionlint is a failing gate** — the `github-actions` job runs
   `reviewdog/action-actionlint` with `fail_on_error: true` + `filter_mode: nofilter`,
   so findings block the merge across the whole tree, not just changed lines.
-  actionlint shells out to `shellcheck` to lint `run:` blocks, so the devShell
+  actionlint shells out to `shellcheck` to lint `run:` blocks, so `@lint`
   carries `shellcheck`; without it `actionlint` silently
   skips shell linting and the local gate diverges from CI. shellcheck findings are
   fixed at the source (quote expansions, `find` over `ls`, grouped redirects), not
@@ -457,11 +459,11 @@ are **no** design/decision docs in the tree: that material was folded into the
 end-user docs (every StageSet YAML example is treated as a designed artifact —
 keep them beautiful).
 
-Build/preview locally with the flake's commands (declared in `flake.nix` from `scripts/<name>.sh`):
+Build/preview locally with the `.breto.edn` commands, which run `scripts/<name>.sh`:
 
 ```shell
-nix develop --command website   # one-shot build into docs/public/
-nix develop --command serve     # live server on :1313
+website   # one-shot build into docs/public/
+serve     # live server on :1313
 ```
 
 `serve` sets `HUGO_RESOURCEDIR=/tmp/hugo-resources-dev` and
@@ -473,11 +475,11 @@ lets whichever ran second serve the other's prod-URL'd hashed CSS and the browse
 blocks it on an SRI mismatch. Isolated, a build and a serve session run
 concurrently without interfering.
 
-Both website linters ride in the devShell. Build the site first, then:
+Both website linters come with `@docs`. Build the site first, then:
 
 ```shell
-nix develop --command htmltest                          # rendered HTML: dead internal links, missing alt, broken anchors (.htmltest.yml)
-nix develop --command bash -c 'cd docs/themes/metio && biome lint'   # theme CSS (run from theme dir, no path; biome v2 treats its biome.json as the project root and files.includes scopes the run)
+htmltest                          # rendered HTML: dead internal links, missing alt, broken anchors (.htmltest.yml)
+bash -c 'cd docs/themes/metio && biome lint'   # theme CSS (run from theme dir, no path; biome v2 treats its biome.json as the project root and files.includes scopes the run)
 ```
 
 `htmltest` reads `.htmltest.yml` (rooted at `docs/public`, external links off for a deterministic offline gate — flip `CheckExternal` to verify outbound URLs). The CSS lives in the theme submodule, so `biome` is configured by `biome.json` *in the theme repo* (it excludes the vendored `normalize.css` / `syntax.css`); fix CSS findings there, not in the submodule checkout.
@@ -506,7 +508,7 @@ so they can never drift from the runtime contract or the chart schema:
 
 `hack/gen-docs-data.sh` regenerates both files (flaggen → `docs/data/flags.json`,
 schema fetch+flatten → `docs/data/helm-values.json`); run it with
-`nix develop --command hack/gen-docs-data.sh` before building the site. Both outputs are **gitignored** — the published site is
+`hack/gen-docs-data.sh` before building the site. Both outputs are **gitignored** — the published site is
 always generated from source. The shortcodes degrade to nothing when the data file
 is absent, so a bare `hugo` on a clean checkout never errors. `docs.yml` runs on a
 **daily** cron (so a chart change reaches the site with no cross-repo trigger) and

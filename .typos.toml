@@ -6,6 +6,7 @@
 extend-ignore-re = ["applyset-[A-Za-z0-9_-]+-v1", "ANDed"]
 
 [default.extend-words]
+edn = "edn"
 # Deliberate spelling used in comments and a test name.
 unparseable = "unparseable"
 # Valid prefix in hyphenated compounds (mis-resolve, mis-deployed, …).
