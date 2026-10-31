@@ -20,5 +20,6 @@ contributing — lives at <https://stageset.projects.metio.wtf/>.
 📦 The Helm chart is published at `oci://ghcr.io/metio/helm-charts/stageset-controller`
 and listed on [ArtifactHub](https://artifacthub.io/packages/helm/stageset-controller/stageset-controller).
 
-Licensed under [0BSD](LICENSE); the repository is [REUSE](https://reuse.software/)
-compliant.
+## License
+
+[0BSD](LICENSES/0BSD.txt).
