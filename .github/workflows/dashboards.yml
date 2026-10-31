@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: metio/breto@c9a84cb81ba92328c0148a4bb905b2bbe3cb817d # 2026.10.30080906
+      - uses: metio/breto@3d35cbfa61e9b8e98fe3d92113390a6db219b66c # 2026.10.30182439
         with:
           registries: github:metio/toolchains
       - name: Vendor grafonnet and render every dashboard
@@ -92,7 +92,7 @@ jobs:
         run: |
           n=$(docker image inspect stageset-controller-dashboard-verify:latest --format '{{ len .RootFS.Layers }}')
           [ "$n" = "1" ] || { echo "::error::dashboard image has $n layers, expected 1"; exit 1; }
-      - uses: metio/breto@c9a84cb81ba92328c0148a4bb905b2bbe3cb817d # 2026.10.30080906
+      - uses: metio/breto@3d35cbfa61e9b8e98fe3d92113390a6db219b66c # 2026.10.30182439
         with:
           registries: github:metio/toolchains
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
