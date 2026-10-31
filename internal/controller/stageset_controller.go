@@ -350,7 +350,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// on the For() watch. Requeue explicitly so the first real reconcile
 		// runs instead of waiting for the interval (or an unrelated event).
 		logger.V(1).Info("finalizer added; requeuing to reconcile")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	if ss.Spec.Suspend {
@@ -990,7 +990,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				// ready. Nothing else in this pass is worth finishing: abandon it so
 				// the reconcile that tears the StageSet down is not queued behind
 				// the remainder of the verify timeout.
-				return ctrl.Result{Requeue: true}, errAbortForDeletion
+				return ctrl.Result{}, errAbortForDeletion
 			case v.cause != nil && v.progressing && stageOnTimeout(&ss, stage) != "Rollback":
 				// Still progressing, under the default onTimeout: a hold, not a
 				// failure, so a workload that is merely slow converges on its own.
@@ -1157,7 +1157,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// A stage's verify wait saw the StageSet deleted. Its status is going away
 		// with it, so nothing is written here.
 		logger.Info("StageSet deleted while a stage was still becoming ready; abandoning the pass so teardown can run")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 	if errors.Is(loopErr, errHoldForPromotion) {
 		// A promotion gate is holding the rollout at promoteHoldStage. Persist the
