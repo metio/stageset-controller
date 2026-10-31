@@ -1,28 +1,18 @@
 # SPDX-FileCopyrightText: The stageset-controller Authors
 # SPDX-License-Identifier: 0BSD
+
 [default]
-# "ANDed" is upstream Kubernetes wording ("The requirements are ANDed.") pulled
-# into the generated CRD by the embedded LabelSelector schema — not a typo.
-extend-ignore-re = ["applyset-[A-Za-z0-9_-]+-v1", "ANDed"]
+extend-ignore-re = ['applyset-[A-Za-z0-9_-]+-v1', 'ANDed']
 
 [default.extend-words]
 edn = "edn"
-# Deliberate spelling used in comments and a test name.
 unparseable = "unparseable"
-# Valid prefix in hyphenated compounds (mis-resolve, mis-deployed, …).
 mis = "mis"
-# POSIX open(2) flag name, not a misspelling of "wrongly".
 wronly = "wronly"
-# The custom-resource kind of pelotech/jsonnet-controller (German "configuration").
 Konfiguration = "Konfiguration"
-# "HashiCorp" (the company) tokenizes to "Hashi".
 Hashi = "Hashi"
 
+[default.extend-identifiers]
+
 [files]
-# go.mod/go.sum are machine-generated dependency manifests: their module pins carry
-# git SHAs whose hex fragments read as words (afe→safe, dead, cafe, …), and a real
-# module-path typo fails the build rather than reaching typos. docs/themes/metio is a
-# separate (CC0) submodule with its own CI; CI's checkout doesn't fetch submodules, so
-# exclude it here too — otherwise a local run flags the theme's content while CI never
-# sees it.
 extend-exclude = ["LICENSES/", "go.mod", "go.sum", "docs/themes/"]

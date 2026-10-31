@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: The stageset-controller Authors
+# SPDX-License-Identifier: 0BSD
+
+cff-version: 1.2.0
+title: stageset-controller
+message: If you use this software, please cite it as below.
+type: software
+authors:
+- family-names: Hoß
+  given-names: Sebastian
+  email: seb@hoß.de
+url: https://github.com/metio/stageset-controller/
+license: 0BSD
+keywords:
+  - fluxcd
+  - gitops
+  - jsonnet
+  - kubernetes
