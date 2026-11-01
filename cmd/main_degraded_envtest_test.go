@@ -152,6 +152,20 @@ func envtestGatedSetup(t *testing.T) *apiserverGate {
 	return gate
 }
 
+// awaitMetric waits for the metrics endpoint to report `want`. That endpoint
+// starts on its own, so it can still refuse connections when a probe answers.
+func awaitMetric(t *testing.T, addr, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, body := probeGet(t, addr, "/metrics"); strings.Contains(body, want) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Errorf("metrics do not report %s within %v", want, timeout)
+}
+
 // awaitProbe polls path until it answers with want. The failure names the last
 // body seen, which for /manager is the reason the manager is down.
 func awaitProbe(t *testing.T, addr, path string, want int, timeout time.Duration) {
@@ -219,9 +233,7 @@ func TestRun_DegradesWhileTheApiserverIsUnreachable(t *testing.T) {
 	if code, _ := probeGet(t, probeAddr, "/readyz"); code != http.StatusServiceUnavailable {
 		t.Errorf("GET /readyz = %d, want %d while the manager is down", code, http.StatusServiceUnavailable)
 	}
-	if _, body := probeGet(t, metricsAddr, "/metrics"); !strings.Contains(body, "stageset_manager_available 0") {
-		t.Errorf("metrics do not report stageset_manager_available 0")
-	}
+	awaitMetric(t, metricsAddr, "stageset_manager_available 0", 10*time.Second)
 
 	// The process is still the one that started: nothing restarted it, and it
 	// has not exited.
@@ -235,9 +247,7 @@ func TestRun_DegradesWhileTheApiserverIsUnreachable(t *testing.T) {
 	gate.open.Store(true)
 	awaitProbe(t, probeAddr, "/manager", http.StatusOK, 90*time.Second)
 	awaitProbe(t, probeAddr, "/readyz", http.StatusOK, 30*time.Second)
-	if _, body := probeGet(t, metricsAddr, "/metrics"); !strings.Contains(body, "stageset_manager_available 1") {
-		t.Errorf("metrics do not report stageset_manager_available 1 after recovery")
-	}
+	awaitMetric(t, metricsAddr, "stageset_manager_available 1", 10*time.Second)
 
 	cancel()
 	select {
