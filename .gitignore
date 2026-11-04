@@ -29,7 +29,4 @@ cover.out
 cover.html
 docs/data/flags.json
 docs/data/helm-values.json
-.cache/
-.config/
 tmp/.htmltest/
-.local/
