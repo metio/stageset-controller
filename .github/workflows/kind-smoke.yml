@@ -870,7 +870,7 @@ jobs:
           NEEDS_DISCOVER_OUTPUTS_CHART_VERSION: ${{ needs.discover.outputs.chart_version }}
       # After the helm install above, so that step keeps the runner's helm.
       - name: Install the project toolchain (provides cosign)
-        uses: metio/ci/breto@6e8776dc59abdfffa793903f100e89f1aacb9c2e # 2026.11.2023135
+        uses: metio/ci/breto@00adafd0fe1924f57325d9dd264d5d731fb099ad # 2026.11.4082509
         with:
           registries: github:metio/toolchains
       - name: Scenario — cosign signature gate (verify + pin vs held)
