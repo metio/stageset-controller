@@ -15,7 +15,7 @@ jobs:
     # detect job auto-enables envtest and arch-go from this repo's files. Named
     # "Golang" so its checks read "Golang / test", "Golang / lint", …
     name: Golang
-    uses: metio/ci/.github/workflows/golang.yml@d1d58ce5b2b4dbac322bedd78203810def514bcc # 2026.11.15184511
+    uses: metio/ci/.github/workflows/golang.yml@4ffe6343c7dad75502de503165b853f1959afc8c # 2026.11.21090200
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: metio/ci/breto@d1d58ce5b2b4dbac322bedd78203810def514bcc # 2026.11.15184511
+      - uses: metio/ci/breto@4ffe6343c7dad75502de503165b853f1959afc8c # 2026.11.21090200
         with:
           registries: github:metio/toolchains
       - env:
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: metio/ci/breto@d1d58ce5b2b4dbac322bedd78203810def514bcc # 2026.11.15184511
+      - uses: metio/ci/breto@4ffe6343c7dad75502de503165b853f1959afc8c # 2026.11.21090200
         with:
           registries: github:metio/toolchains
       - run: generate
@@ -83,7 +83,7 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: metio/ci/breto@d1d58ce5b2b4dbac322bedd78203810def514bcc # 2026.11.15184511
+      - uses: metio/ci/breto@4ffe6343c7dad75502de503165b853f1959afc8c # 2026.11.21090200
         with:
           registries: github:metio/toolchains
       - name: Generate docs data (flags + chart values)
@@ -119,7 +119,7 @@ jobs:
           push: false
           load: true
           tags: ghcr.io/metio/stageset-controller:${{ github.sha }}
-      - uses: metio/ci/breto@d1d58ce5b2b4dbac322bedd78203810def514bcc # 2026.11.15184511
+      - uses: metio/ci/breto@4ffe6343c7dad75502de503165b853f1959afc8c # 2026.11.21090200
         with:
           registries: github:metio/toolchains
           packages: "@containers"
