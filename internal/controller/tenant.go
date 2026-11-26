@@ -118,7 +118,7 @@ func (b defaultRemoteConfigBuilder) RESTConfig(ctx context.Context, kc *fluxmeta
 		// fluxcd/pkg/auth re-reads the ConfigMap through the client it is given,
 		// so it takes the tenant's too — otherwise the check above would be
 		// bounded by the tenant while the read that matters was not.
-		cfg, err := authutils.GetRESTConfig(ctx, *kc, namespace, tenant)
+		cfg, err := authutils.GetRESTConfig(ctx, *kc, tenant, authutils.WithAuthOptions(withStageSetNamespace(namespace)))
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: cloud-provider kubeConfig configMap %q: %w", errInvalidKubeConfigSpec, kc.ConfigMapRef.Name, err)
 		}
