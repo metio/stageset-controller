@@ -694,6 +694,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// operator promotes. Earlier stages already ran this pass; later stages
 			// are not reached.
 			if prior, ok := priorStages[stage.Name]; ok && rollbackAborted(&ss, stage, prior, ra.Revision) {
+				// A fresh token that did not un-abort the stage is refused here,
+				// since the gate is not evaluated while the stage stays parked.
+				if tv := judgePromoteToken(&ss, stage, prior, ra.Revision, r.now()); tv.ignored != nil {
+					prior.IgnoredPromotion = tv.ignored
+					r.emitPromotionIgnored(&ss, tv.ignored)
+				}
 				stageStatuses = append(stageStatuses, prior)
 				metrics.SetStagePromotionPending(ss.Namespace, ss.Name, stage.Name, true)
 				metrics.SetStagePromotionBlocked(ss.Namespace, ss.Name, stage.Name, true)
@@ -971,12 +977,12 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// exprs when an InProgress expression still holds — so "still coming up"
 			// reads the same however a stage describes its readiness.
 			holdForProgress := func(cause error) (ctrl.Result, error) {
-				stageStatuses = append(stageStatuses, led.stamp(stagesv1.StageStatus{
+				stageStatuses = append(stageStatuses, led.stamp(carryPromoteTokens(stagesv1.StageStatus{
 					Name:            stage.Name,
 					Phase:           stagesv1.StageVerifying,
 					AppliedRevision: ra.Revision,
 					Message:         fmt.Sprintf("verify: %v", cause),
-				}))
+				}, priorStages[stage.Name])))
 				progressHoldMsg = fmt.Sprintf("stage %q is applied and still becoming ready: %v", stage.Name, cause)
 				return ctrl.Result{RequeueAfter: r.retryInterval(&ss)}, errHoldForProgress
 			}
@@ -1033,6 +1039,7 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					LastHandledReconcileAt: lastHandledFor(stage.Name),
 					PromotionState:         prior.PromotionState,
 					LastHandledPromotion:   prior.LastHandledPromotion,
+					IgnoredPromotion:       prior.IgnoredPromotion,
 					BudgetFreeze:           stageBudgetFreeze[stage.Name],
 				}))
 			}
@@ -1084,7 +1091,11 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 				event = ev
 			}
-			promoted, promoState, promoteRequeue, handledPromotion, rollback := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK, restart, event)
+			decision := r.gatePromotion(&ss, stage, ra.Revision, priorStages[stage.Name], r.now(), verdict, fastTrackOK, restart, event)
+			promoted, promoState, promoteRequeue, rollback := decision.promoted, decision.state, decision.requeueAfter, decision.rollback
+			if decision.ignored != nil {
+				r.emitPromotionIgnored(&ss, decision.ignored)
+			}
 			// Carry the restart-gate baseline onto whichever state the gate produced.
 			// A stage that promotes adopts the live totals, so the next window starts
 			// from the state it was last known good in; one that holds keeps measuring
@@ -1139,7 +1150,8 @@ func (r *StageSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				EntriesCount:           int64(len(newRefs)),
 				LastHandledReconcileAt: lastHandledFor(stage.Name),
 				PromotionState:         promoState,
-				LastHandledPromotion:   handledPromotion,
+				LastHandledPromotion:   decision.handled,
+				IgnoredPromotion:       decision.ignoredPromotion(priorStages[stage.Name]),
 				BudgetFreeze:           stageBudgetFreeze[stage.Name],
 			}))
 			metrics.StageAppliedTotal.WithLabelValues(ss.Namespace, ss.Name, stage.Name).Inc()
@@ -1727,12 +1739,12 @@ func (r *StageSetReconciler) failStage(ctx context.Context, helper *fluxpatch.He
 	// processed before the failure, and the stages after the failed one were
 	// never reached — their persisted records (ledgers, lastHandledPromotion)
 	// must survive this write.
-	ss.Status.Stages = mergeStageStatuses(ss, append(prior, led.stamp(stagesv1.StageStatus{
+	ss.Status.Stages = mergeStageStatuses(ss, append(prior, led.stamp(carryPromoteTokens(stagesv1.StageStatus{
 		Name:            stage,
 		Phase:           stagesv1.StageFailed,
 		AppliedRevision: led.revision,
 		Message:         stageMsg,
-	})))
+	}, indexStageStatuses(ss.Status.Stages)[stage]))))
 	publishStageReady(ss)
 	ss.Status.ObservedGeneration = ss.Generation
 	prevReady := readyConditionSnapshot(ss)
@@ -1871,6 +1883,22 @@ func (r *StageSetReconciler) event(ss *stagesv1.StageSet, eventtype, reason, mes
 	if r.Recorder != nil {
 		r.Recorder.Eventf(ss, nil, eventtype, reason, reason, "%s", message)
 	}
+}
+
+// emitPromotionIgnored tells the operator that a promote token was refused and
+// why, since a promotion that silently does nothing reads as one that worked.
+func (r *StageSetReconciler) emitPromotionIgnored(ss *stagesv1.StageSet, ignored *stagesv1.IgnoredPromotion) {
+	r.event(ss, corev1.EventTypeWarning, eventReasonPromotionIgnored, ignored.Message)
+}
+
+// carryPromoteTokens keeps a stage's promote-token bookkeeping on a status
+// written without a gate verdict (a failure, a progress hold). Dropping
+// lastHandledPromotion would make an already-consumed token read as fresh
+// again, and dropping ignoredPromotion would let a refused one be judged anew.
+func carryPromoteTokens(s, prior stagesv1.StageStatus) stagesv1.StageStatus {
+	s.LastHandledPromotion = prior.LastHandledPromotion
+	s.IgnoredPromotion = prior.IgnoredPromotion
+	return s
 }
 
 // eventReasonDriftCorrected is the Event reason for out-of-band drift that the

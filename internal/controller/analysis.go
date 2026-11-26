@@ -146,7 +146,7 @@ func abortCapable(p *stagesv1.StagePromotion) bool {
 // check — all stamp PromotionState.AbortedRevision when they revert, and all
 // must park equally, or the aborted revision is re-applied (and can even
 // promote once the replacement pods' restart counters read clean) on the next
-// reconcile. A fresh manual promote token clears the abort (handled by not
+// reconcile. An applicable manual promote token clears the abort (handled by not
 // skipping, so the gate's break-glass fires); so does a revision change or
 // removing the rollback config.
 func rollbackAborted(ss *stagesv1.StageSet, stage *stagesv1.Stage, prior stagesv1.StageStatus, revision string) bool {
@@ -157,10 +157,9 @@ func rollbackAborted(ss *stagesv1.StageSet, stage *stagesv1.Stage, prior stagesv
 	if st == nil || st.Phase != stagesv1.PromotionBlocked || st.AbortedRevision != revision {
 		return false
 	}
-	if tok := promoteTokenFor(ss, stage.Name); tok != "" && tok != prior.LastHandledPromotion {
-		return false // a fresh promote un-aborts the stage
-	}
-	return true
+	// An applicable promote token un-aborts the stage; one bound to another
+	// revision leaves it parked.
+	return judgePromoteToken(ss, stage, prior, revision, time.Time{}).apply == ""
 }
 
 // rollbackStageToSnapshot reverts a single stage to its last-good revision from

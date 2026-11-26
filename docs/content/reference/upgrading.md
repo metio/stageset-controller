@@ -9,6 +9,32 @@ release that needs action gets a section below, headed by its calendar version; 
 release with no section needs no migration — a plain upgrade (bump the chart's
 `appVersion` or pull the new image tag) suffices.
 
+## After 2026.11.23060648
+
+A `stages.metio.wtf/promote` token now applies only to a stage that is held at
+its promotion gate for the revision being rolled out. A token stamped on a stage
+that already cleared its gate, that the rollout has not reached yet, or that
+failed is ignored, recorded on `status.stages[].ignoredPromotion`, and reported
+as a `PromotionIgnored` Warning Event. Such a token used to stay armed and
+promote the next revision of that stage past its soak, analysis, restart, event
+and manual gates the moment it arrived.
+
+Automation that annotates a stage before the rollout reaches its gate has to
+wait until the stage reports `Soaking`, `Analyzing`, `Blocked` or
+`AwaitingManual` in `status.stages[].promotionState.phase` and stamp the token
+then. `stagesetctl promote` refuses a stage that is not held, and binds the
+token to the held revision with the `stages.metio.wtf/promote-revision`
+annotation; a script annotating with `kubectl` should set it too. Check for a
+token left on a StageSet that is not waiting for one:
+
+```shell
+kubectl get stagesets --all-namespaces \
+  -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PROMOTE:.metadata.annotations.stages\.metio\.wtf/promote'
+```
+
+The first reconcile after the upgrade records such a token as ignored instead of
+acting on it.
+
 ## 2026.9.28202553
 
 A manager that cannot start no longer ends the process. The pod stays `Running`

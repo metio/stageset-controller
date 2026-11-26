@@ -37,6 +37,9 @@ pendingUpdate). Never author it.
   — render manifests to stdout
 - `diff NAME [...]` — server-side dry-run preview; exit 1 on changes (CI gate)
 - `reconcile NAME [--stage] [--with-source] [--update-now] [--force] [--wait]`
+- `promote NAME --stage STAGE [--wait]` — advance a stage held at its promotion
+  gate; refused for a stage that is not held, and the token is bound to the held
+  revision (`stages.metio.wtf/promote-revision`)
 
 ## Runbooks
 
