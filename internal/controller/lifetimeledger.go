@@ -96,7 +96,7 @@ func (r *StageSetReconciler) loadLifetimeLedger(ctx context.Context, ss *stagesv
 		return nil, nil
 	}
 	ledger = stagesv1.StageLedger{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ss.Namespace, Name: ss.Name},
+		Namespace: ss.Namespace, Name: ss.Name,
 	}
 	if err := r.Create(ctx, &ledger); err != nil {
 		return nil, err

@@ -12,7 +12,6 @@ import (
 	"github.com/fluxcd/pkg/apis/meta"
 	appsv1 "k8s.io/api/apps/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -37,7 +36,7 @@ func scopedMapper() apimeta.RESTMapper {
 }
 
 func TestReadyCheckObjects_ConvertsAndDefaultsNamespace(t *testing.T) {
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
+	ss := &stagesv1.StageSet{Namespace: "ssns"}
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
 		{APIVersion: "apps/v1", Kind: "Deployment", Name: "web"},                // empty ns → ss namespace
 		{APIVersion: "v1", Kind: "Service", Name: "svc", Namespace: "explicit"}, // explicit ns kept
@@ -61,7 +60,7 @@ func TestReadyCheckObjects_ConvertsAndDefaultsNamespace(t *testing.T) {
 // the CRDs, a later stage applies the CRs" ordering, which is most of the reason
 // to reach for readyChecks at all.
 func TestReadyCheckObjects_ClusterScopedKindsCarryNoNamespace(t *testing.T) {
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
+	ss := &stagesv1.StageSet{Namespace: "ssns"}
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
 		{APIVersion: "apiextensions.k8s.io/v1", Kind: "CustomResourceDefinition", Name: "clusters.postgresql.cnpg.io"},
 		{APIVersion: "v1", Kind: "Namespace", Name: "team-a"},
@@ -83,7 +82,7 @@ func TestReadyCheckObjects_ClusterScopedKindsCarryNoNamespace(t *testing.T) {
 // redundant: honoring it would build a key nothing can occupy. Admission does
 // not reject it (scope belongs to the target cluster), so the resolve drops it.
 func TestReadyCheckObjects_ClusterScopedIgnoresAnExplicitNamespace(t *testing.T) {
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
+	ss := &stagesv1.StageSet{Namespace: "ssns"}
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
 		{APIVersion: "apiextensions.k8s.io/v1", Kind: "CustomResourceDefinition", Name: "widgets.example.com", Namespace: "wrong"},
 	}})
@@ -98,7 +97,7 @@ func TestReadyCheckObjects_ClusterScopedIgnoresAnExplicitNamespace(t *testing.T)
 // default stands. The check then reports Unknown — the honest answer — rather
 // than gating on a key that could never be occupied either way.
 func TestReadyCheckObjects_UnresolvableKindFallsBackToNamespaced(t *testing.T) {
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ssns"}}
+	ss := &stagesv1.StageSet{Namespace: "ssns"}
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Checks: []meta.NamespacedObjectKindReference{
 		{APIVersion: "nosuch.example.com/v1", Kind: "Mystery", Name: "m"},
 	}})
@@ -147,9 +146,9 @@ func TestValidateReadyChecks(t *testing.T) {
 
 func deploymentWith(name string, replicas, ready, unavailable int32) *appsv1.Deployment {
 	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec:       appsv1.DeploymentSpec{Replicas: new(replicas)},
-		Status:     appsv1.DeploymentStatus{ReadyReplicas: ready, UnavailableReplicas: unavailable},
+		Name: name, Namespace: "default",
+		Spec:   appsv1.DeploymentSpec{Replicas: new(replicas)},
+		Status: appsv1.DeploymentStatus{ReadyReplicas: ready, UnavailableReplicas: unavailable},
 	}
 }
 
@@ -166,7 +165,7 @@ func TestEvalReadyExprs_CurrentSatisfied(t *testing.T) {
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Exprs: []stagesv1.CustomHealthCheck{
 		{APIVersion: "apps/v1", Kind: "Deployment", Current: "status.readyReplicas == spec.replicas"},
 	}})
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	ss := &stagesv1.StageSet{Namespace: "default"}
 	if err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, time.Second); err != nil {
 		t.Fatalf("Current-satisfied check should pass, got %v", err)
 	}
@@ -177,7 +176,7 @@ func TestEvalReadyExprs_CurrentFalseTimesOut(t *testing.T) {
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Exprs: []stagesv1.CustomHealthCheck{
 		{APIVersion: "apps/v1", Kind: "Deployment", Current: "status.readyReplicas == spec.replicas"},
 	}})
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	ss := &stagesv1.StageSet{Namespace: "default"}
 	if err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, 200*time.Millisecond); err == nil {
 		t.Fatal("Current-false check should not become ready, want timeout error")
 	}
@@ -188,7 +187,7 @@ func TestEvalReadyExprs_FailedTrips(t *testing.T) {
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Exprs: []stagesv1.CustomHealthCheck{
 		{APIVersion: "apps/v1", Kind: "Deployment", Current: "status.readyReplicas == spec.replicas", Failed: "status.unavailableReplicas > 0"},
 	}})
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	ss := &stagesv1.StageSet{Namespace: "default"}
 	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, time.Second)
 	if err == nil {
 		t.Fatal("a tripped Failed expression should fail the check, got nil")
@@ -209,7 +208,7 @@ func TestEvalReadyExprs_InProgressTimesOutAsProgressing(t *testing.T) {
 		Current:    "status.readyReplicas == spec.replicas",
 		InProgress: "status.readyReplicas < spec.replicas",
 	}}})
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	ss := &stagesv1.StageSet{Namespace: "default"}
 	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("a not-yet-Current check should not become ready, want a timeout")
@@ -227,7 +226,7 @@ func TestEvalReadyExprs_NoInProgressStaysAFailure(t *testing.T) {
 	stage := readyChecksStage(&stagesv1.ReadyChecks{Exprs: []stagesv1.CustomHealthCheck{
 		{APIVersion: "apps/v1", Kind: "Deployment", Current: "status.readyReplicas == spec.replicas"},
 	}})
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	ss := &stagesv1.StageSet{Namespace: "default"}
 	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("a not-yet-Current check should not become ready, want a timeout")
@@ -247,7 +246,7 @@ func TestEvalReadyExprs_InProgressFalseStaysAFailure(t *testing.T) {
 		Current:    "status.readyReplicas == spec.replicas",
 		InProgress: "status.readyReplicas == 0",
 	}}})
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	ss := &stagesv1.StageSet{Namespace: "default"}
 	err := evalReadyExprs(context.Background(), c, ss, stage, []*unstructured.Unstructured{appliedDeploymentRef("web")}, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("a not-yet-Current check should not become ready, want a timeout")

@@ -23,7 +23,7 @@ import (
 // the object name, so a rejection can only come from the field under test.
 func validationStageSet(ns, name string) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -330,7 +330,7 @@ func TestCRDDefault_ConflictPolicyDefault(t *testing.T) {
 func TestCRDMinItems_StagesRejectsEmpty(t *testing.T) {
 	ns := newNamespace(t, testClient(t))
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "no-stages"},
+		Namespace: ns, Name: "no-stages",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages:   []stagesv1.Stage{},

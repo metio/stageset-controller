@@ -11,7 +11,6 @@ import (
 
 	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -53,8 +52,8 @@ func TestDefaultRemoteConfigBuilder_SecretRef_ReadsAsTheStageSetServiceAccount(t
 	t.Parallel()
 	const ns = "team-a"
 	r := builderWith(t, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "not-mine"},
-		Data:       map[string][]byte{"value": []byte("apiVersion: v1\nkind: Config\n")},
+		Namespace: ns, Name: "not-mine",
+		Data: map[string][]byte{"value": []byte("apiVersion: v1\nkind: Config\n")},
 	})
 	b := defaultRemoteConfigBuilder{r: r}
 
@@ -76,8 +75,8 @@ func TestDefaultRemoteConfigBuilder_SecretRef_OK(t *testing.T) {
 	const ns = "team-a"
 	raw := []byte("apiVersion: v1\nkind: Config\nclusters:\n- name: c\n  cluster:\n    server: https://example.test:6443\ncontexts:\n- name: c\n  context:\n    cluster: c\n    user: u\ncurrent-context: c\nusers:\n- name: u\n  user:\n    token: abc\n")
 	r := builderWith(t, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "kc"},
-		Data:       map[string][]byte{"value": raw},
+		Namespace: ns, Name: "kc",
+		Data: map[string][]byte{"value": raw},
 	})
 	b := defaultRemoteConfigBuilder{r: r}
 	cfg, key, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
@@ -101,8 +100,8 @@ func TestDefaultRemoteConfigBuilder_SecretRef_BadKubeconfig(t *testing.T) {
 	t.Parallel()
 	const ns = "team-a"
 	r := builderWith(t, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "kc"},
-		Data:       map[string][]byte{"value": []byte("not a kubeconfig")},
+		Namespace: ns, Name: "kc",
+		Data: map[string][]byte{"value": []byte("not a kubeconfig")},
 	})
 	b := defaultRemoteConfigBuilder{r: r}
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
@@ -123,8 +122,8 @@ func TestDefaultRemoteConfigBuilder_ConfigMapRef_UnknownProvider(t *testing.T) {
 	t.Parallel()
 	const ns = "team-a"
 	r := builderWith(t, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud"},
-		Data:       map[string]string{"provider": "totally-not-a-cloud"},
+		Namespace: ns, Name: "cloud",
+		Data: map[string]string{"provider": "totally-not-a-cloud"},
 	})
 	b := defaultRemoteConfigBuilder{r: r}
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
@@ -143,8 +142,8 @@ func TestDefaultRemoteConfigBuilder_ConfigMapRef_EmptyProvider(t *testing.T) {
 	t.Parallel()
 	const ns = "team-a"
 	r := builderWith(t, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud"},
-		Data:       map[string]string{"cluster": "some-cluster"},
+		Namespace: ns, Name: "cloud",
+		Data: map[string]string{"cluster": "some-cluster"},
 	})
 	b := defaultRemoteConfigBuilder{r: r}
 	_, _, err := b.RESTConfig(context.Background(), &fluxmeta.KubeConfigReference{
@@ -190,8 +189,8 @@ func TestConfigMapResourceVersion_TracksEdits(t *testing.T) {
 	t.Parallel()
 	const ns = "team-a"
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud"},
-		Data:       map[string]string{"cluster": "one"},
+		Namespace: ns, Name: "cloud",
+		Data: map[string]string{"cluster": "one"},
 	}
 	r := builderWith(t, cm)
 

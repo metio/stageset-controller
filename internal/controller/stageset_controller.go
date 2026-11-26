@@ -2639,7 +2639,7 @@ func (r *StageSetReconciler) mapExternalArtifact(ctx context.Context, obj client
 		ss := &list.Items[i]
 		for j := range ss.Spec.Stages {
 			if sourceRefMatchesEA(ss.Spec.Stages[j].SourceRef, ea) {
-				reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+				reqs = append(reqs, reconcile.Request{Namespace: ss.Namespace, Name: ss.Name})
 				break
 			}
 		}
@@ -2652,7 +2652,7 @@ func (r *StageSetReconciler) mapExternalArtifact(ctx context.Context, obj client
 // mapSameName enqueues the StageSet sharing an object's namespace and name — the
 // StageLedger↔StageSet identity is (namespace, name).
 func mapSameName(_ context.Context, obj client.Object) []reconcile.Request {
-	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}}}
+	return []reconcile.Request{{Namespace: obj.GetNamespace(), Name: obj.GetName()}}
 }
 
 func (r *StageSetReconciler) mapStageSetDependents(ctx context.Context, obj client.Object) []reconcile.Request {
@@ -2673,7 +2673,7 @@ func (r *StageSetReconciler) mapStageSetDependents(ctx context.Context, obj clie
 				dns = ss.Namespace
 			}
 			if d.Name == dep.Name && dns == dep.Namespace {
-				reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+				reqs = append(reqs, reconcile.Request{Namespace: ss.Namespace, Name: ss.Name})
 				break
 			}
 		}
@@ -2825,7 +2825,7 @@ func (r *StageSetReconciler) mapProducer(ctx context.Context, obj client.Object)
 		for j := range ss.Spec.Stages {
 			ref := ss.Spec.Stages[j].SourceRef
 			if isProducerRef(ref) && ref.Name == obj.GetName() && producerGVK(ref) == gvk {
-				reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+				reqs = append(reqs, reconcile.Request{Namespace: ss.Namespace, Name: ss.Name})
 				break
 			}
 		}

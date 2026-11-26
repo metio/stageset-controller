@@ -43,7 +43,7 @@ func (f *fakeWaiter) Stalled(context.Context, object.ObjMetadataSet) bool { retu
 func verifyFixture(t *testing.T, deleting bool, poll time.Duration) (*StageSetReconciler, *stagesv1.StageSet) {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "ss"},
+		Namespace: "ns", Name: "ss",
 		Spec: stagesv1.StageSetSpec{
 			Stages: []stagesv1.Stage{{Name: "one", SourceRef: stagesv1.SourceReference{Name: "src"}}},
 		},
@@ -171,7 +171,7 @@ func TestWatchForDeletion_UnreadableStageSetKeepsWaiting(t *testing.T) {
 	}
 
 	ctx, w := r.watchForDeletion(context.Background(), client.ObjectKeyFromObject(&stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "gone"},
+		Namespace: "ns", Name: "gone",
 	}))
 	defer w.Stop()
 

@@ -72,7 +72,7 @@ func TestReconcile_ErrorBudget_FreezesWhenExhausted(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "budgeted")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "frozen"},
+		Namespace: ns, Name: "frozen",
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"},
@@ -106,7 +106,7 @@ func TestReconcile_ErrorBudget_AllowsWhenHealthy(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "healthy")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "ok"},
+		Namespace: ns, Name: "ok",
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"},
@@ -138,7 +138,7 @@ func TestReconcile_ErrorBudget_RespectsClosedUpdateWindow(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "windowed")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "both-gates"},
+		Namespace: ns, Name: "both-gates",
 		Spec: stagesv1.StageSetSpec{
 			Interval:      metav1.Duration{Duration: time.Minute},
 			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeDeny, From: tm("2020-01-01T00:00:00Z"), To: tm("2030-01-01T00:00:00Z")}},
@@ -171,7 +171,7 @@ func TestReconcile_ErrorBudget_FreezesInsideOpenWindow(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "openwin")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "open-but-frozen"},
+		Namespace: ns, Name: "open-but-frozen",
 		Spec: stagesv1.StageSetSpec{
 			Interval:      metav1.Duration{Duration: time.Minute},
 			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeAllow, From: tm("2020-01-01T00:00:00Z"), To: tm("2030-01-01T00:00:00Z")}},
@@ -200,7 +200,7 @@ func TestReconcile_ErrorBudget_Hysteresis(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "hyst")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "hysteresis"},
+		Namespace: ns, Name: "hysteresis",
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0", ResumeThreshold: "0.05"},
@@ -242,7 +242,7 @@ func TestReconcile_ErrorBudget_DryRunRecordsButProceeds(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "dry")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dryrun"},
+		Namespace: ns, Name: "dryrun",
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1", DryRun: true},
@@ -273,7 +273,7 @@ func TestReconcile_ErrorBudget_SourceErrorAllowProceeds(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "srcerr-allow")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "src-allow"},
+		Namespace: ns, Name: "src-allow",
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"}, // onSourceError defaults Allow
@@ -301,7 +301,7 @@ func TestReconcile_ErrorBudget_SourceErrorHoldBlocks(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "srcerr-hold")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "src-hold"},
+		Namespace: ns, Name: "src-hold",
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1", OnSourceError: "Hold"},
@@ -328,11 +328,9 @@ func TestReconcile_ErrorBudget_OverrideForcesApply(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "overridden")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   ns,
-			Name:        "budget-override",
-			Annotations: map[string]string{budgetOverrideAnnotation: "tok-1"},
-		},
+		Namespace:   ns,
+		Name:        "budget-override",
+		Annotations: map[string]string{budgetOverrideAnnotation: "tok-1"},
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"},
@@ -365,7 +363,7 @@ func TestReconcile_ErrorBudget_DeployedStaysReadyWhenFrozen(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": cmValManifest(ns, "rolling-budget", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "deployed-frozen"},
+		Namespace: ns, Name: "deployed-frozen",
 		Spec: stagesv1.StageSetSpec{
 			Interval:    metav1.Duration{Duration: time.Minute},
 			ErrorBudget: &stagesv1.ErrorBudget{Source: promSource(), FreezeThreshold: "0.1"},
@@ -406,7 +404,7 @@ func TestReconcile_StageErrorBudget_FreezesEntryThenResumes(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "stg-b")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "stage-budget"},
+		Namespace: ns, Name: "stage-budget",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -467,7 +465,7 @@ func TestReconcile_StageErrorBudget_SourceErrorAllowClearsFrozenGauge(t *testing
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "clr-b")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "stage-budget-clear"},
+		Namespace: ns, Name: "stage-budget-clear",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -510,11 +508,9 @@ func TestReconcile_StageErrorBudget_OverrideShipsOnce(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "ov-b")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   ns,
-			Name:        "stage-budget-ov",
-			Annotations: map[string]string{budgetOverrideAnnotation: "tok-1"},
-		},
+		Namespace:   ns,
+		Name:        "stage-budget-ov",
+		Annotations: map[string]string{budgetOverrideAnnotation: "tok-1"},
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{

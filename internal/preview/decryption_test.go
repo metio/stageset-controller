@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -29,7 +28,7 @@ data:
 
 func decryptionStageSet(ns string) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "enc"},
+		Namespace: ns, Name: "enc",
 		Spec: stagesv1.StageSetSpec{
 			Decryption: &stagesv1.Decryption{
 				Provider:  "sops",
@@ -157,8 +156,8 @@ func TestBuildDecryptor(t *testing.T) {
 		t.Parallel()
 		identity, recipient := decryptortest.NewAgeKey(t)
 		sec := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "sops-keys"},
-			Data:       map[string][]byte{"identity.agekey": []byte(identity)},
+			Namespace: "ns", Name: "sops-keys",
+			Data: map[string][]byte{"identity.agekey": []byte(identity)},
 		}
 		c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(sec).Build()
 		ss := decryptionStageSet("ns")

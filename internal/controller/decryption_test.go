@@ -69,14 +69,14 @@ func TestReconcile_Decryption_AppliesDecryptedSecret(t *testing.T) {
 
 	// the age key Secret the controller reads
 	if err := c.Create(context.Background(), &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sops-age"},
-		Data:       map[string][]byte{"keys.agekey": []byte(id.String())},
+		Namespace: ns, Name: "sops-age",
+		Data: map[string][]byte{"keys.agekey": []byte(id.String())},
 	}); err != nil {
 		t.Fatalf("create key secret: %v", err)
 	}
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "with-sops"},
+		Namespace: ns, Name: "with-sops",
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: time.Minute},
 			Decryption: &stagesv1.Decryption{Provider: "sops", SecretRef: &meta.LocalObjectReference{Name: "sops-age"}},
@@ -104,7 +104,7 @@ func TestReconcile_Decryption_MissingKeySecretFails(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "no-key"},
+		Namespace: ns, Name: "no-key",
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: time.Minute},
 			Decryption: &stagesv1.Decryption{Provider: "sops", SecretRef: &meta.LocalObjectReference{Name: "absent"}},

@@ -9,7 +9,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -27,13 +26,13 @@ func cmRef(name string) (inventory.ObjectRef, *corev1.ConfigMap) {
 	// A live object stageset applied carries the StageSet's owner labels
 	// (ssa SetOwnerLabels), which the real Delete rechecks; the fixtures stamp
 	// them so the preview's owner-label recheck sees a genuinely-owned object.
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+	cm := &corev1.ConfigMap{
 		Namespace: "ns", Name: name,
 		Labels: map[string]string{
 			stagesv1.GroupVersion.Group + "/name":      "app",
 			stagesv1.GroupVersion.Group + "/namespace": "ns",
 		},
-	}}
+	}
 	return ref, cm
 }
 

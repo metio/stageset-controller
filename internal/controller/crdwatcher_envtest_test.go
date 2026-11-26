@@ -17,7 +17,6 @@ import (
 	"time"
 
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -180,7 +179,7 @@ func pollFor(t *testing.T, timeout time.Duration, cond func() (bool, string)) {
 func producerStubCRD(plural, group, kind string) *apiextv1.CustomResourceDefinition {
 	preserve := true
 	return &apiextv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: plural + "." + group},
+		Name: plural + "." + group,
 		Spec: apiextv1.CustomResourceDefinitionSpec{
 			Group: group,
 			Names: apiextv1.CustomResourceDefinitionNames{

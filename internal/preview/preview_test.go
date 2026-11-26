@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -31,7 +30,7 @@ func testScheme(t *testing.T) *runtime.Scheme {
 }
 
 func stageSet(stageNames ...string) *stagesv1.StageSet {
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "app"}}
+	ss := &stagesv1.StageSet{Namespace: "ns", Name: "app"}
 	for _, n := range stageNames {
 		ss.Spec.Stages = append(ss.Spec.Stages, stagesv1.Stage{Name: n})
 	}
@@ -95,12 +94,12 @@ func TestReadDirFiles_EmptyIsError(t *testing.T) {
 
 func TestResolvePostBuildVars(t *testing.T) {
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "cfg"},
-		Data:       map[string]string{"REGION": "eu", "TIER": "free"},
+		Namespace: "ns", Name: "cfg",
+		Data: map[string]string{"REGION": "eu", "TIER": "free"},
 	}
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "sec"},
-		Data:       map[string][]byte{"TOKEN": []byte("abc")},
+		Namespace: "ns", Name: "sec",
+		Data: map[string][]byte{"TOKEN": []byte("abc")},
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(cm, sec).Build()
 

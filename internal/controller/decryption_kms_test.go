@@ -16,7 +16,6 @@ import (
 	"github.com/getsops/sops/v3/config"
 	sopskms "github.com/getsops/sops/v3/kms"
 	"golang.org/x/oauth2"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
@@ -98,7 +97,7 @@ func TestBuildDecryptor_ObjectLevelKMS_On_UsesPerTenantSource(t *testing.T) {
 	r.credentialSource = rec
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "ss"},
+		Namespace: ns, Name: "ss",
 		Spec: stagesv1.StageSetSpec{
 			ServiceAccountName: "tenant-sa",
 			Decryption:         &stagesv1.Decryption{Provider: "sops"},
@@ -128,7 +127,7 @@ func TestBuildDecryptor_ObjectLevelKMS_Off_IsAmbient(t *testing.T) {
 	r.credentialSource = rec
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "ss"},
+		Namespace: ns, Name: "ss",
 		Spec: stagesv1.StageSetSpec{
 			ServiceAccountName: "tenant-sa",
 			Decryption:         &stagesv1.Decryption{Provider: "sops"},
@@ -155,7 +154,7 @@ func TestBuildDecryptor_ObjectLevelKMS_On_NoSA_FallsBackToAmbient(t *testing.T) 
 	r.credentialSource = rec
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "ss"},
+		Namespace: ns, Name: "ss",
 		Spec: stagesv1.StageSetSpec{
 			Decryption: &stagesv1.Decryption{Provider: "sops"},
 		},

@@ -175,8 +175,8 @@ func TestEncodeObject_YAMLMarshalError(t *testing.T) {
 
 func TestWriteDetail_SuspendedAndNoCondition(t *testing.T) {
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team", Name: "svc"},
-		Spec:       stagesv1.StageSetSpec{Suspend: true},
+		Namespace: "team", Name: "svc",
+		Spec: stagesv1.StageSetSpec{Suspend: true},
 	}
 	var buf bytes.Buffer
 	writeDetail(&buf, ss)
@@ -192,7 +192,7 @@ func TestWriteDetail_SuspendedAndNoCondition(t *testing.T) {
 
 func TestWriteDetail_PendingMigrationsAndLastHandled(t *testing.T) {
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team", Name: "svc"},
+		Namespace: "team", Name: "svc",
 	}
 	ss.Status.PendingMigrations = []stagesv1.PendingMigration{
 		{Name: "m1"}, {Name: "m2"},
@@ -475,12 +475,10 @@ func TestReconcileSources_MissingSourceWarns(t *testing.T) {
 // live apiserver.
 func brokenConfig() *rest.Config {
 	return &rest.Config{
-		Host: "https://127.0.0.1:1",
-		TLSClientConfig: rest.TLSClientConfig{
-			CAData:   []byte("not-a-pem"),
-			CAFile:   "/nonexistent/ca.pem", // CAData + CAFile together is rejected
-			Insecure: false,
-		},
+		Host:     "https://127.0.0.1:1",
+		CAData:   []byte("not-a-pem"),
+		CAFile:   "/nonexistent/ca.pem", // CAData + CAFile together is rejected
+		Insecure: false,
 	}
 }
 

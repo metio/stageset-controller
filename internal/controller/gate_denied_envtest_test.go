@@ -13,7 +13,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -50,7 +49,7 @@ func TestReconcile_Promotion_PermanentGateDenial_SetsRBACDenied(t *testing.T) {
 	})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "gate-denied"},
+		Namespace: ns, Name: "gate-denied",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -80,7 +79,7 @@ func TestReconcile_Promotion_PermanentGateDenial_SetsRBACDenied(t *testing.T) {
 			Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		}
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "gate-denied"}}
+	req := ctrl.Request{Namespace: ns, Name: "gate-denied"}
 
 	// Baseline: gate reads cleanly, the stage promotes, Ready=True.
 	if _, err := driveReconcile(newReconciler(), req); err != nil {

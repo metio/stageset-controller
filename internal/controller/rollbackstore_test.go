@@ -51,7 +51,7 @@ func TestReconcile_RollbackStore_StoresOnSuccess(t *testing.T) {
 	store := newFakeStore()
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "store-ok"},
+		Namespace: ns, Name: "store-ok",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -83,7 +83,7 @@ func TestAttemptRollback_StoreSurvivesProducerGC(t *testing.T) {
 	store := newFakeStore()
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "store-gc"},
+		Namespace: ns, Name: "store-gc",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,

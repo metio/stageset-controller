@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"strconv"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -133,10 +132,10 @@ func (r *Recorder) Write(ctx context.Context, ss *stagesv1.StageSet, stage strin
 		return fmt.Errorf("plan shards: %w", err)
 	}
 	for i, shard := range shards {
-		si := &stagesv1.StageInventory{ObjectMeta: metav1.ObjectMeta{
+		si := &stagesv1.StageInventory{
 			Name:      inventory.ShardName(ss.Name, stage, i),
 			Namespace: ss.Namespace,
-		}}
+		}
 		shardIndex := i
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, si, func() error {
 			si.Labels = map[string]string{

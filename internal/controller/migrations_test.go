@@ -64,7 +64,7 @@ func TestReconcile_Migration_RequireCoverageBlocksMajor(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 	mk := func(version string) *stagesv1.StageSet {
 		return &stagesv1.StageSet{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "coverage"},
+			Namespace: ns, Name: "coverage",
 			Spec: stagesv1.StageSetSpec{
 				Interval: metav1.Duration{Duration: time.Minute},
 				Version:  &stagesv1.VersionSource{Value: version, RequireMigrationCoverage: true},
@@ -100,7 +100,7 @@ func TestReconcile_Migration_RequireApprovalHoldsThenProceeds(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
-	legacy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}
+	legacy := &corev1.ConfigMap{Namespace: ns, Name: "legacy"}
 	if err := c.Create(context.Background(), legacy); err != nil {
 		t.Fatalf("create legacy: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestReconcile_Migration_RequireApprovalHoldsThenProceeds(t *testing.T) {
 		return &stagesv1.VersionSource{Value: version, ApprovalMode: stagesv1.ApprovalOnMigrations}
 	}
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "approval"},
+		Namespace: ns, Name: "approval",
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: time.Minute},
 			Version:    versioned("1.0.0"),
@@ -171,7 +171,7 @@ func TestReconcile_Version_ApprovalAlwaysHoldsMigrationFreeAdvance(t *testing.T)
 		return &stagesv1.VersionSource{Value: version, ApprovalMode: stagesv1.ApprovalAlways}
 	}
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "fleet-member"},
+		Namespace: ns, Name: "fleet-member",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  versioned("1.0.0"),
@@ -234,7 +234,7 @@ func deleteMigration(name, to, stage, targetName, ns string) stagesv1.Migration 
 
 func versionedStageSet(ns, name, eaName, version string, migs []stagesv1.Migration) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: time.Minute},
 			Version:    &stagesv1.VersionSource{Value: version},
@@ -259,7 +259,7 @@ func TestReconcile_Migration_BaselinesWithoutRunning(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
-	legacy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}
+	legacy := &corev1.ConfigMap{Namespace: ns, Name: "legacy"}
 	if err := c.Create(context.Background(), legacy); err != nil {
 		t.Fatalf("create legacy: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestReconcile_Migration_RunsOnUpgrade(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
-	legacy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}
+	legacy := &corev1.ConfigMap{Namespace: ns, Name: "legacy"}
 	if err := c.Create(context.Background(), legacy); err != nil {
 		t.Fatalf("create legacy: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestReconcile_Migration_VersionFromArtifact(t *testing.T) {
 	})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "from-artifact"},
+		Namespace: ns, Name: "from-artifact",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  &stagesv1.VersionSource{FromArtifact: &stagesv1.ArtifactVersionRef{Stage: "stage-a", Path: "VERSION"}},
@@ -373,7 +373,7 @@ func TestReconcile_Migration_VersionFromObject(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": labeled})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "from-object"},
+		Namespace: ns, Name: "from-object",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version: &stagesv1.VersionSource{FromObject: &stagesv1.ObjectVersionRef{
@@ -399,7 +399,7 @@ func TestReconcile_Migration_MissingVersionFileIsInvalid(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "no-version-file"},
+		Namespace: ns, Name: "no-version-file",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  &stagesv1.VersionSource{FromArtifact: &stagesv1.ArtifactVersionRef{Stage: "stage-a", Path: "VERSION"}},

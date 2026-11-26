@@ -19,7 +19,7 @@ import (
 func twoCMStageSet(t *testing.T, c client.Client, ns, name, eaName string, policy *stagesv1.ConflictPolicy) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{

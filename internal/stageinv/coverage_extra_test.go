@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,14 +56,12 @@ func TestStageRecords_ListErrorPropagates(t *testing.T) {
 func TestStageRecords_SkipsMalformedEntries(t *testing.T) {
 	t.Parallel()
 	si := &stagesv1.StageInventory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-deploy-00",
-			Namespace: "ns",
-			Labels: map[string]string{
-				stagesv1.StageSetLabel: "app",
-				stagesv1.StageLabel:    "deploy",
-				stagesv1.ShardLabel:    "0",
-			},
+		Name:      "app-deploy-00",
+		Namespace: "ns",
+		Labels: map[string]string{
+			stagesv1.StageSetLabel: "app",
+			stagesv1.StageLabel:    "deploy",
+			stagesv1.ShardLabel:    "0",
 		},
 		Spec: stagesv1.StageInventorySpec{
 			StagePosition: 4,
@@ -120,14 +117,12 @@ func TestDeleteObsoleteShards_DeleteErrorPropagates(t *testing.T) {
 	// A surplus shard (index >= keep) present in the store, with Delete forced to
 	// fail with a non-NotFound error, drives the delete-error branch.
 	surplus := &stagesv1.StageInventory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-deploy-05",
-			Namespace: "ns",
-			Labels: map[string]string{
-				stagesv1.StageSetLabel: "app",
-				stagesv1.StageLabel:    "deploy",
-				stagesv1.ShardLabel:    "5",
-			},
+		Name:      "app-deploy-05",
+		Namespace: "ns",
+		Labels: map[string]string{
+			stagesv1.StageSetLabel: "app",
+			stagesv1.StageLabel:    "deploy",
+			stagesv1.ShardLabel:    "5",
 		},
 	}
 	c := errClient(t, interceptor.Funcs{
@@ -147,14 +142,12 @@ func TestDeleteObsoleteShards_DeleteErrorPropagates(t *testing.T) {
 func TestDeleteObsoleteShards_SweepsUnparsableShardIndex(t *testing.T) {
 	t.Parallel()
 	weird := &stagesv1.StageInventory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-deploy-x",
-			Namespace: "ns",
-			Labels: map[string]string{
-				stagesv1.StageSetLabel: "app",
-				stagesv1.StageLabel:    "deploy",
-				stagesv1.ShardLabel:    "not-a-number",
-			},
+		Name:      "app-deploy-x",
+		Namespace: "ns",
+		Labels: map[string]string{
+			stagesv1.StageSetLabel: "app",
+			stagesv1.StageLabel:    "deploy",
+			stagesv1.ShardLabel:    "not-a-number",
 		},
 	}
 	r := newRecorder(t, 2, weird)
@@ -186,14 +179,12 @@ func TestDeleteStageShards_ListErrorPropagates(t *testing.T) {
 func TestDeleteStageShards_DeleteErrorPropagates(t *testing.T) {
 	t.Parallel()
 	shard := &stagesv1.StageInventory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-deploy-00",
-			Namespace: "ns",
-			Labels: map[string]string{
-				stagesv1.StageSetLabel: "app",
-				stagesv1.StageLabel:    "deploy",
-				stagesv1.ShardLabel:    "0",
-			},
+		Name:      "app-deploy-00",
+		Namespace: "ns",
+		Labels: map[string]string{
+			stagesv1.StageSetLabel: "app",
+			stagesv1.StageLabel:    "deploy",
+			stagesv1.ShardLabel:    "0",
 		},
 	}
 	c := errClient(t, interceptor.Funcs{

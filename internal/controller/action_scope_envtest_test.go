@@ -22,7 +22,7 @@ import (
 // counter, at an inline pinned version.
 func scopedLadderStageSet(ns, name, version, revEndpoint, verEndpoint string) *stagesv1.StageSet {
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{

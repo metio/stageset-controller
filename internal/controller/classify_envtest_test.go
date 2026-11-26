@@ -49,7 +49,7 @@ func newClassifyReconciler(t *testing.T) (*StageSetReconciler, func(ns, name str
 func createStageSetFor(t *testing.T, r *StageSetReconciler, ns, name string) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages:   []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "ea"}}},

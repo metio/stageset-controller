@@ -70,8 +70,8 @@ func TestRenewer_RenewOnce_DualCARotation(t *testing.T) {
 	}
 	oldCA := oldBundle.CABundle
 	fake := &recordingVWCClient{
-		fakeVWCClient: fakeVWCClient{vwc: makeVWC("vjsonnet", 1, oldCA)},
-		certPath:      filepath.Join(dir, "tls.crt"),
+		vwc:      makeVWC("vjsonnet", 1, oldCA),
+		certPath: filepath.Join(dir, "tls.crt"),
 	}
 
 	r := &Renewer{
@@ -125,8 +125,8 @@ func TestRenewer_RenewOnce_PreservesPeerCA(t *testing.T) {
 	// The VWC already trusts this pod's CA and a peer replica's CA.
 	seeded := append(append([]byte{}, mine.CABundle...), peer.CABundle...)
 	fake := &recordingVWCClient{
-		fakeVWCClient: fakeVWCClient{vwc: makeVWC("vjsonnet", 1, seeded)},
-		certPath:      filepath.Join(dir, "tls.crt"),
+		vwc:      makeVWC("vjsonnet", 1, seeded),
+		certPath: filepath.Join(dir, "tls.crt"),
 	}
 	r := &Renewer{
 		Input:      Input{Namespace: "stageset-system"},

@@ -30,7 +30,7 @@ func TestDependenciesReady_HeldNewRevisionGatesDependents(t *testing.T) {
 	const ns = "team"
 	readyDep := func(name string, pending *stagesv1.PendingUpdate) *stagesv1.StageSet {
 		return &stagesv1.StageSet{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Generation: 1},
+			Namespace: ns, Name: name, Generation: 1,
 			Status: stagesv1.StageSetStatus{
 				ObservedGeneration: 1,
 				PendingUpdate:      pending,
@@ -46,8 +46,8 @@ func TestDependenciesReady_HeldNewRevisionGatesDependents(t *testing.T) {
 	}
 	dependent := func(dep string) *stagesv1.StageSet {
 		return &stagesv1.StageSet{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dependent", Generation: 1},
-			Spec:       stagesv1.StageSetSpec{DependsOn: []stagesv1.Dependency{{Name: dep}}},
+			Namespace: ns, Name: "dependent", Generation: 1,
+			Spec: stagesv1.StageSetSpec{DependsOn: []stagesv1.Dependency{{Name: dep}}},
 		}
 	}
 	newReconciler := func(dep *stagesv1.StageSet) *StageSetReconciler {
@@ -93,7 +93,7 @@ func stageSetDependsOn(t *testing.T, c client.Client, ns, name, eaName string, d
 		depRefs = append(depRefs, stagesv1.Dependency{Name: d})
 	}
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval:  metav1.Duration{Duration: time.Minute},
 			DependsOn: depRefs,
@@ -164,7 +164,7 @@ func TestReconcile_DependencyVersionGate(t *testing.T) {
 	// The dependent needs the dependency at >= 2.0.0.
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"b.yaml": configMapManifest(ns, "app-obj")})
 	b := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval:  metav1.Duration{Duration: time.Minute},
 			DependsOn: []stagesv1.Dependency{{Name: "db", MinVersion: "2.0.0"}},
@@ -235,7 +235,7 @@ func TestReconcile_TerminalReasonRequeuesForRecovery(t *testing.T) {
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
 	res, err := driveReconcile(r, ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: ns, Name: y.Name},
+		Namespace: ns, Name: y.Name,
 	})
 	if err != nil {
 		t.Fatalf("a terminal reason must not return an error (no backoff): %v", err)
@@ -275,7 +275,7 @@ func (s *scopedCacheClient) Get(ctx context.Context, key client.ObjectKey, obj c
 func TestDependenciesReady_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
 	scheme := watchScheme(t)
 	dep := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "platform", Name: "dep", Generation: 1},
+		Namespace: "platform", Name: "dep", Generation: 1,
 		Status: stagesv1.StageSetStatus{
 			ObservedGeneration: 1,
 			Conditions: []metav1.Condition{{
@@ -290,7 +290,7 @@ func TestDependenciesReady_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
 	r := &StageSetReconciler{Client: cached, APIReader: full}
 
 	dependent := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "dependent", Generation: 1},
+		Namespace: "team-a", Name: "dependent", Generation: 1,
 		Spec: stagesv1.StageSetSpec{
 			DependsOn: []stagesv1.Dependency{{Namespace: "platform", Name: "dep"}},
 		},
@@ -310,7 +310,7 @@ func TestDependenciesReady_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
 func TestHasDependencyCycle_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
 	scheme := watchScheme(t)
 	dep := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "platform", Name: "dep", Generation: 1},
+		Namespace: "platform", Name: "dep", Generation: 1,
 		// dep has no further dependsOn — a clean leaf, so no cycle.
 	}
 	full := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep).Build()
@@ -319,7 +319,7 @@ func TestHasDependencyCycle_UsesAPIReaderForOutOfScopeDep(t *testing.T) {
 	r := &StageSetReconciler{Client: cached, APIReader: full}
 
 	dependent := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "dependent"},
+		Namespace: "team-a", Name: "dependent",
 		Spec: stagesv1.StageSetSpec{
 			DependsOn: []stagesv1.Dependency{{Namespace: "platform", Name: "dep"}},
 		},

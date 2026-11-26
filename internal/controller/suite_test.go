@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -133,7 +132,7 @@ func testClient(t testing.TB) client.Client {
 func externalArtifactStubCRD() *apiextv1.CustomResourceDefinition {
 	preserve := true
 	return &apiextv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: "externalartifacts." + externalArtifactGVK.Group},
+		Name: "externalartifacts." + externalArtifactGVK.Group,
 		Spec: apiextv1.CustomResourceDefinitionSpec{
 			Group: externalArtifactGVK.Group,
 			Names: apiextv1.CustomResourceDefinitionNames{

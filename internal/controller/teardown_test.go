@@ -26,12 +26,10 @@ import (
 func TestTeardownFailure_ForceDropMetricCountsOnceAcrossFailedUpdate(t *testing.T) {
 	now := time.Now()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         "team-a",
-			Name:              "ss-forcedrop-once",
-			Finalizers:        []string{FinalizerName},
-			DeletionTimestamp: &metav1.Time{Time: now.Add(-2 * time.Hour)},
-		},
+		Namespace:         "team-a",
+		Name:              "ss-forcedrop-once",
+		Finalizers:        []string{FinalizerName},
+		DeletionTimestamp: &metav1.Time{Time: now.Add(-2 * time.Hour)},
 	}
 	var updateCalls int
 	c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(ss).
@@ -107,12 +105,10 @@ func TestTeardownTimedOut(t *testing.T) {
 func TestTeardownFailure_WithinWait_RetriesAndKeepsFinalizer(t *testing.T) {
 	now := time.Now()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         "team-a",
-			Name:              "ss",
-			Finalizers:        []string{FinalizerName},
-			DeletionTimestamp: &metav1.Time{Time: now.Add(-1 * time.Minute)},
-		},
+		Namespace:         "team-a",
+		Name:              "ss",
+		Finalizers:        []string{FinalizerName},
+		DeletionTimestamp: &metav1.Time{Time: now.Add(-1 * time.Minute)},
 	}
 	c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(ss).Build()
 	rec := &capturingRecorder{}
@@ -136,12 +132,10 @@ func TestTeardownFailure_WithinWait_RetriesAndKeepsFinalizer(t *testing.T) {
 func TestTeardownFailure_PastWait_ForceDrops(t *testing.T) {
 	now := time.Now()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         "team-a",
-			Name:              "ss",
-			Finalizers:        []string{FinalizerName},
-			DeletionTimestamp: &metav1.Time{Time: now.Add(-2 * time.Hour)},
-		},
+		Namespace:         "team-a",
+		Name:              "ss",
+		Finalizers:        []string{FinalizerName},
+		DeletionTimestamp: &metav1.Time{Time: now.Add(-2 * time.Hour)},
 	}
 	c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(ss).Build()
 	rec := &capturingRecorder{}
@@ -184,12 +178,10 @@ func TestTeardownFailure_UnclearableCauseDropsWithoutWaitingOutTheBound(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Now()
 			ss := &stagesv1.StageSet{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace:         "team-a",
-					Name:              "ss-" + tc.want,
-					Finalizers:        []string{FinalizerName},
-					DeletionTimestamp: &metav1.Time{Time: now.Add(-1 * time.Minute)},
-				},
+				Namespace:         "team-a",
+				Name:              "ss-" + tc.want,
+				Finalizers:        []string{FinalizerName},
+				DeletionTimestamp: &metav1.Time{Time: now.Add(-1 * time.Minute)},
 			}
 			c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(ss).Build()
 			rec := &capturingRecorder{}
@@ -218,9 +210,9 @@ func TestTeardownFailure_UnclearableCauseDropsWithoutWaitingOutTheBound(t *testi
 func TestTeardownDropDecision_TransientCauseWaitsOutTheBound(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{
+	ss := &stagesv1.StageSet{
 		DeletionTimestamp: &metav1.Time{Time: now.Add(-1 * time.Minute)},
-	}}
+	}
 	r := &StageSetReconciler{MaxTeardownWait: time.Hour, Now: func() time.Time { return now }}
 
 	if drop, reason, _ := r.teardownDropDecision(ss, errors.New("dial target: no route to host")); drop {
