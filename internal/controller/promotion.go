@@ -22,6 +22,18 @@ import (
 // fires exactly once per new token. Mirrors reconcileStageAnnotation.
 const promoteAnnotation = "stages.metio.wtf/promote"
 
+// promoteRevisionAnnotation optionally binds the promote token to the revision
+// the operator inspected. When set, the token is honored only while the stage
+// is held at its gate for exactly that revision, which closes the window in
+// which a reconcile moves the stage on to a newer revision between the
+// operator reading the status and stamping the token. stagesetctl promote
+// writes it in the same update as the token.
+const promoteRevisionAnnotation = "stages.metio.wtf/promote-revision"
+
+// eventReasonPromotionIgnored is the Event reason for a promote token the
+// controller refused, so an operator learns their promotion did not happen.
+const eventReasonPromotionIgnored = "PromotionIgnored"
+
 // errHoldForPromotion is the stage-loop sentinel meaning "this stage is applied
 // and healthy but its promotion gate is holding the rollout here." It is NOT a
 // failure: no rollback, no backoff — the reconciler persists the stage statuses
@@ -68,6 +80,77 @@ func promoteTokenFor(ss *stagesv1.StageSet, stageName string) string {
 	return token
 }
 
+// promoteVerdict is the judgement of the promote annotation for one stage at
+// one gate evaluation. apply carries the token to consume; ignored carries a
+// refused token to record. Both are empty when no fresh token is addressed to
+// the stage.
+type promoteVerdict struct {
+	apply   string
+	ignored *stagesv1.IgnoredPromotion
+}
+
+// judgePromoteToken decides what the promote annotation means for stage at
+// revision, against the stage's status from before this reconcile.
+//
+// A token is fresh when it is neither the last one handled nor the last one
+// refused. A fresh token applies only while prior shows the stage held at its
+// promotion gate for revision, and, when the promote-revision annotation is
+// set, only when it names that revision. Every other fresh token is refused
+// and recorded as ignored, so it never matches again: a token stamped on a
+// stage that already cleared its gate, or that the rollout has not reached,
+// would otherwise stay armed and promote a later revision past its soak,
+// analysis, restart, event and manual gates the moment it arrived.
+func judgePromoteToken(ss *stagesv1.StageSet, stage *stagesv1.Stage, prior stagesv1.StageStatus, revision string, now time.Time) promoteVerdict {
+	tok := promoteTokenFor(ss, stage.Name)
+	if tok == "" || tok == prior.LastHandledPromotion {
+		return promoteVerdict{}
+	}
+	if prior.IgnoredPromotion != nil && prior.IgnoredPromotion.Token == tok {
+		return promoteVerdict{}
+	}
+	ignore := func(reason stagesv1.IgnoredPromotionReason, msg string) promoteVerdict {
+		return promoteVerdict{ignored: &stagesv1.IgnoredPromotion{
+			Token:    tok,
+			Reason:   reason,
+			Revision: revision,
+			Message:  msg,
+			Time:     &metav1.Time{Time: now},
+		}}
+	}
+	if stage.Promotion == nil {
+		return ignore(stagesv1.PromoteIgnoredNoGate,
+			fmt.Sprintf("promote token %q for stage %q ignored: the stage has no promotion gate", tok, stage.Name))
+	}
+	st := prior.PromotionState
+	if st != nil && st.Phase == stagesv1.PromotionPromoted && prior.AppliedRevision == revision {
+		return ignore(stagesv1.PromoteIgnoredAlreadyPromoted,
+			fmt.Sprintf("promote token %q for stage %q ignored: the stage already cleared its gate at revision %s", tok, stage.Name, revision))
+	}
+	held := prior.HeldRevision()
+	if held == "" || held != revision {
+		return ignore(stagesv1.PromoteIgnoredNotHeld,
+			fmt.Sprintf("promote token %q for stage %q ignored: the stage was not held at its promotion gate for revision %s (%s); promote it once it is", tok, stage.Name, revision, describeGateState(prior)))
+	}
+	if bound := ss.Annotations[promoteRevisionAnnotation]; bound != "" && bound != revision {
+		return ignore(stagesv1.PromoteIgnoredRevisionMismatch,
+			fmt.Sprintf("promote token %q for stage %q ignored: it was issued for revision %s, but the stage is held at revision %s", tok, stage.Name, bound, revision))
+	}
+	return promoteVerdict{apply: tok}
+}
+
+// describeGateState summarizes where a stage stood before this reconcile, for
+// the message of a refused promote token.
+func describeGateState(prior stagesv1.StageStatus) string {
+	switch {
+	case prior.PromotionState != nil && prior.PromotionState.Phase != "":
+		return fmt.Sprintf("it was %s at revision %q", prior.PromotionState.Phase, prior.AppliedRevision)
+	case prior.Phase != "":
+		return fmt.Sprintf("it was %s at revision %q", prior.Phase, prior.AppliedRevision)
+	default:
+		return "the rollout had not reached it"
+	}
+}
+
 // promoteRequestedPredicate wakes the controller when the promote annotation
 // changes. A manual promotion is a metadata-only edit — it bumps neither
 // metadata.generation nor the Flux reconcile.fluxcd.io/requestedAt token, so
@@ -90,9 +173,7 @@ func (promoteRequestedPredicate) Update(e event.UpdateEvent) bool {
 // rollout. It evaluates, in order: a manual break-glass promote, an analysis
 // hard-failure (onFailure), the soak window, an in-progress analysis (must
 // currently pass after the soak), and finally the manual gate. It returns
-// whether the stage is promoted, the promotion state to record on its status,
-// how long to requeue while holding, the promote token to record as handled, and
-// whether an analysis failure with onFailure=Rollback wants the stage reverted.
+// a promotionDecision.
 //
 // State is keyed to the stage's applied revision: a new revision restarts the
 // soak and the analysis failure count from scratch, and a stage already Promoted
@@ -101,10 +182,22 @@ func (promoteRequestedPredicate) Update(e event.UpdateEvent) bool {
 // design's self-review): if status is lost the soak restarts, which is
 // acceptable. verdict carries the metric-analysis evaluation for this reconcile,
 // or nil when the stage has no analysis.
-func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict, fastTrackOK bool, restart *restartVerdict, event *eventVerdict) (promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, handled string, rollback bool) {
+func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv1.Stage, revision string, prior stagesv1.StageStatus, now time.Time, verdict *analysisVerdict, fastTrackOK bool, restart *restartVerdict, event *eventVerdict) promotionDecision {
+	tv := judgePromoteToken(ss, stage, prior, revision, now)
+	decide := func(promoted bool, state *stagesv1.PromotionState, requeueAfter time.Duration, rollback bool) promotionDecision {
+		return promotionDecision{
+			promoted:     promoted,
+			state:        state,
+			requeueAfter: requeueAfter,
+			handled:      prior.LastHandledPromotion,
+			ignored:      tv.ignored,
+			rollback:     rollback,
+		}
+	}
+
 	p := stage.Promotion
 	if p == nil {
-		return true, nil, 0, prior.LastHandledPromotion, false
+		return decide(true, nil, 0, false)
 	}
 
 	sameRevision := prior.AppliedRevision == revision
@@ -112,16 +205,20 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 
 	// Already cleared the gate for this revision — don't re-gate a promoted stage
 	// on every drift-correction reconcile.
+	// A fresh token addressed to it is refused (judgePromoteToken) and recorded.
 	if sameRevision && priorState != nil && priorState.Phase == stagesv1.PromotionPromoted {
-		return true, priorState, 0, prior.LastHandledPromotion, false
+		return decide(true, priorState, 0, false)
 	}
 
-	// Manual promote (break-glass): a fresh token addressed to this stage
-	// advances it immediately, ending a soak early, satisfying a manual gate, or
-	// overriding a blocked analysis. Checked first so `stagesetctl promote` is a
-	// universal "advance this stage now," whatever is currently holding it.
-	if tok := promoteTokenFor(ss, stage.Name); tok != "" && tok != prior.LastHandledPromotion {
-		return true, &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}, 0, tok, false
+	// Manual promote (break-glass): a fresh token addressed to this stage while
+	// it is held at this gate for this revision advances it immediately, ending
+	// a soak early, satisfying a manual gate, or overriding a blocked analysis.
+	// Checked first so `stagesetctl promote` is a universal "advance this stage
+	// now," whatever is currently holding it.
+	if tv.apply != "" {
+		d := decide(true, &stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}, 0, false)
+		d.handled = tv.apply
+		return d
 	}
 
 	// Restart gate: a watched pod group has restarted more than its check allows.
@@ -135,7 +232,7 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 			RestartCheck:     restart.check,
 			ObservedRestarts: restart.observed,
 		}, priorState, sameRevision)
-		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, restart.rollback
+		return decide(false, s, r.retryInterval(ss), restart.rollback)
 	}
 
 	// Event gate: a watched pod group has accumulated too many Warning events.
@@ -147,7 +244,7 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 			EventCheck:     event.check,
 			ObservedEvents: event.observed,
 		}, priorState, sameRevision)
-		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, event.rollback
+		return decide(false, s, r.retryInterval(ss), event.rollback)
 	}
 
 	// Analysis bookkeeping: count consecutive failing evaluations for this
@@ -189,7 +286,7 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 	// Rollback signals the caller to revert this stage).
 	if failed {
 		s := withAnalysis(carrySoakUntil(&stagesv1.PromotionState{Phase: stagesv1.PromotionBlocked, Since: phaseSince(priorState, sameRevision, stagesv1.PromotionBlocked, now)}, priorState, sameRevision))
-		return false, s, r.analysisInterval(ss, p.Analysis), prior.LastHandledPromotion, p.Analysis.OnFailure == "Rollback"
+		return decide(false, s, r.analysisInterval(ss, p.Analysis), p.Analysis.OnFailure == "Rollback")
 	}
 
 	// Soak — hold until the stage has stayed healthy for the whole window. Skip
@@ -217,7 +314,7 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 				Since:     &metav1.Time{Time: since},
 				SoakUntil: &metav1.Time{Time: soakUntil},
 			})
-			return false, s, requeueForWindow(soakUntil, now, r.retryInterval(ss)), prior.LastHandledPromotion, false
+			return decide(false, s, requeueForWindow(soakUntil, now, r.retryInterval(ss)), false)
 		}
 	}
 
@@ -225,11 +322,12 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 	// never promote on a momentarily-failing check still within failureLimit.
 	if verdict != nil && !passing && !p.Analysis.DryRun {
 		s := withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionAnalyzing, Since: phaseSince(priorState, sameRevision, stagesv1.PromotionAnalyzing, now)})
-		return false, s, r.analysisInterval(ss, p.Analysis), prior.LastHandledPromotion, false
+		return decide(false, s, r.analysisInterval(ss, p.Analysis), false)
 	}
 
-	// Manual gate — hold until an operator promotes the stage. A fresh promote
-	// token was already consumed above, so reaching here means none is pending.
+	// Manual gate — hold until an operator promotes the stage. An applicable
+	// promote token was already consumed above, so reaching here means none is
+	// pending.
 	if p.RequireManualPromotion {
 		since := now
 		if sameRevision && priorState != nil &&
@@ -237,12 +335,35 @@ func (r *StageSetReconciler) gatePromotion(ss *stagesv1.StageSet, stage *stagesv
 			since = priorState.Since.Time
 		}
 		s := withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionAwaitingManual, Since: &metav1.Time{Time: since}})
-		return false, s, r.retryInterval(ss), prior.LastHandledPromotion, false
+		return decide(false, s, r.retryInterval(ss), false)
 	}
 
 	// Soak elapsed (or none), analysis passing (or none), no manual gate —
 	// promote.
-	return true, withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}), 0, prior.LastHandledPromotion, false
+	return decide(true, withAnalysis(&stagesv1.PromotionState{Phase: stagesv1.PromotionPromoted, Since: &metav1.Time{Time: now}}), 0, false)
+}
+
+// promotionDecision is gatePromotion's verdict for one stage: whether it is
+// promoted, the promotion state to record on its status, how long to requeue
+// while holding, the promote token to record as handled, a promote token
+// refused this evaluation (nil when none), and whether a gate with
+// onFailure=Rollback wants the stage reverted.
+type promotionDecision struct {
+	promoted     bool
+	state        *stagesv1.PromotionState
+	requeueAfter time.Duration
+	handled      string
+	ignored      *stagesv1.IgnoredPromotion
+	rollback     bool
+}
+
+// ignoredPromotion is the IgnoredPromotion to record on the stage status: the
+// token refused this evaluation, else the one recorded before.
+func (d promotionDecision) ignoredPromotion(prior stagesv1.StageStatus) *stagesv1.IgnoredPromotion {
+	if d.ignored != nil {
+		return d.ignored
+	}
+	return prior.IgnoredPromotion
 }
 
 // promotionHoldCondition maps a held promotion phase to the Ready reason and

@@ -1548,10 +1548,82 @@ type StageStatus struct {
 	// +optional
 	LastHandledPromotion string `json:"lastHandledPromotion,omitempty"`
 
+	// IgnoredPromotion records the most recent stages.metio.wtf/promote token
+	// addressed to this stage that the controller refused to act on, and why. A
+	// token is honored only while the stage is held at its promotion gate for the
+	// revision being rolled out; a refused token never matches again, so it
+	// cannot promote a later revision.
+	// +optional
+	IgnoredPromotion *IgnoredPromotion `json:"ignoredPromotion,omitempty"`
+
 	// BudgetFreeze is set while this stage's own errorBudget is holding a
 	// new-revision entry into the stage (or, under dryRun, would hold it).
 	// +optional
 	BudgetFreeze *BudgetFreeze `json:"budgetFreeze,omitempty"`
+}
+
+// HeldRevision returns the revision this stage is held at its promotion gate
+// for, or "" when the stage is not held. A stage is held while its promotion
+// phase is Soaking, Analyzing, Blocked or AwaitingManual. A stage that an
+// onFailure=Rollback reverted is held for the revision it aborted, not for the
+// last-good revision it runs meanwhile.
+func (s *StageStatus) HeldRevision() string {
+	st := s.PromotionState
+	if st == nil {
+		return ""
+	}
+	switch st.Phase {
+	case PromotionSoaking, PromotionAnalyzing, PromotionBlocked, PromotionAwaitingManual:
+	default:
+		return ""
+	}
+	if st.AbortedRevision != "" {
+		return st.AbortedRevision
+	}
+	return s.AppliedRevision
+}
+
+// IgnoredPromotionReason says why a promote token was not applied.
+// +kubebuilder:validation:Enum=NoPromotionGate;AlreadyPromoted;NotHeld;RevisionMismatch
+type IgnoredPromotionReason string
+
+const (
+	// PromoteIgnoredNoGate means the stage has no promotion gate.
+	PromoteIgnoredNoGate IgnoredPromotionReason = "NoPromotionGate"
+	// PromoteIgnoredAlreadyPromoted means the stage had already cleared its gate
+	// for the revision being rolled out.
+	PromoteIgnoredAlreadyPromoted IgnoredPromotionReason = "AlreadyPromoted"
+	// PromoteIgnoredNotHeld means the stage was not held at its gate for the
+	// revision being rolled out: the rollout had not reached it, a new revision
+	// arrived, or the stage failed or was still becoming ready.
+	PromoteIgnoredNotHeld IgnoredPromotionReason = "NotHeld"
+	// PromoteIgnoredRevisionMismatch means the stages.metio.wtf/promote-revision
+	// annotation names a different revision from the one the stage is held for.
+	PromoteIgnoredRevisionMismatch IgnoredPromotionReason = "RevisionMismatch"
+)
+
+// IgnoredPromotion is a promote token the controller refused to act on.
+type IgnoredPromotion struct {
+	// Token is the refused stages.metio.wtf/promote token.
+	// +required
+	Token string `json:"token"`
+
+	// Reason says why the token was refused.
+	// +required
+	Reason IgnoredPromotionReason `json:"reason"`
+
+	// Revision is the revision the stage was being rolled out at when the token
+	// was refused.
+	// +optional
+	Revision string `json:"revision,omitempty"`
+
+	// Message is a human-readable explanation.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Time is when the token was refused.
+	// +optional
+	Time *metav1.Time `json:"time,omitempty"`
 }
 
 // PromotionPhase is where a stage stands against its promotion gate.

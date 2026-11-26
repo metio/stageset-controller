@@ -34,7 +34,10 @@ This stamps a one-shot `stages.metio.wtf/promote` annotation that advances the n
 
 ```shell
 kubectl --namespace <namespace> annotate --overwrite stageset <name> \
-  stages.metio.wtf/promote="<stage>@$(date +%s)"
+  stages.metio.wtf/promote="<stage>@$(date +%s)" \
+  stages.metio.wtf/promote-revision="<appliedRevision of the stage>"
 ```
+
+The controller honors the token only while the stage is held at its gate for the revision `promote-revision` names. A token it ignores is recorded on `status.stages[].ignoredPromotion` with the reason, and reported as a `PromotionIgnored` Warning Event.
 
 A manual gate that is always rubber-stamped is theatre — it earns its keep when the operator actually checks the stage's behavior (in a later release, paired with promotion analysis) before promoting.
