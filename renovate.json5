@@ -7,5 +7,12 @@
   ],
   "git-submodules": {
     "enabled": true
-  }
+  },
+  "packageRules": [
+    {
+      "description": "cel-go v0.32.0 renames its module to cel.dev/cel-go, while Kubernetes, controller-runtime and fluxcd/pkg/runtime still import github.com/google/cel-go; moving before them would compile two CEL runtimes into the binary",
+      "matchPackageNames": ["github.com/google/cel-go"],
+      "allowedVersions": "<0.32.0"
+    }
+  ]
 }
