@@ -31,16 +31,14 @@ func TestStageSetWatchPredicate_WakesOnDeletion(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "deletion-event"}}
+	ns := &corev1.Namespace{Name: "deletion-event"}
 	if err := c.Create(ctx, ns); err != nil {
 		t.Fatalf("create namespace: %v", err)
 	}
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:  ns.Name,
-			Name:       "held",
-			Finalizers: []string{FinalizerName},
-		},
+		Namespace:  ns.Name,
+		Name:       "held",
+		Finalizers: []string{FinalizerName},
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{

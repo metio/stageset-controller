@@ -24,7 +24,7 @@ import (
 func perStageStageSet(t *testing.T, c client.Client, ns, name, specSA, stageSA, eaName string) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval:           metav1.Duration{Duration: 5 * time.Minute},
 			ServiceAccountName: specSA,
@@ -44,9 +44,9 @@ func perStageStageSet(t *testing.T, c client.Client, ns, name, specSA, stageSA, 
 // a stage SA narrowed to ConfigMaps alone is provably tighter than this one.
 func grantConfigMapsAndSecrets(t *testing.T, c client.Client, ns, sa string) {
 	t.Helper()
-	mustCreate(t, c, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: sa}})
+	mustCreate(t, c, &corev1.ServiceAccount{Namespace: ns, Name: sa})
 	mustCreate(t, c, &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: sa + "-cm-secrets"},
+		Namespace: ns, Name: sa + "-cm-secrets",
 		Rules: []rbacv1.PolicyRule{{
 			APIGroups: []string{""},
 			Resources: []string{"configmaps", "secrets"},
@@ -54,9 +54,9 @@ func grantConfigMapsAndSecrets(t *testing.T, c client.Client, ns, sa string) {
 		}},
 	})
 	mustCreate(t, c, &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: sa + "-cm-secrets"},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: sa + "-cm-secrets"},
-		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: sa}},
+		Namespace: ns, Name: sa + "-cm-secrets",
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: sa + "-cm-secrets"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: sa}},
 	})
 }
 
@@ -136,7 +136,7 @@ func TestEffectiveServiceAccount(t *testing.T) {
 func TestStageRuntime_CachePerSA(t *testing.T) {
 	c := testClient(t)
 	r := &StageSetReconciler{Client: c, RESTMapper: c.RESTMapper(), SkipImpersonation: true}
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "x"}}
+	ss := &stagesv1.StageSet{Namespace: "team-a", Name: "x"}
 	fetcher := &artifact.Fetcher{}
 	cache := map[string]*stageRuntime{}
 

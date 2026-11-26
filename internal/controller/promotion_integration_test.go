@@ -21,7 +21,7 @@ func TestReconcile_Promotion_ManualHoldsThenPromotes(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "manual")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "manual-gate"},
+		Namespace: ns, Name: "manual-gate",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -75,7 +75,7 @@ func TestReconcile_Promotion_SoakHoldsThenElapses(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "soaked")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "soak-gate"},
+		Namespace: ns, Name: "soak-gate",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{

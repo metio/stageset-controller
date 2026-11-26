@@ -29,9 +29,9 @@ func TestWatchPredicate_WakesOnExpectedChanges(t *testing.T) {
 	pred := stageSetWatchPredicate()
 
 	base := func() *stagesv1.StageSet {
-		return &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{
+		return &stagesv1.StageSet{
 			Name: "ss", Namespace: "ns", Generation: 1,
-		}}
+		}
 	}
 	withGen := func(g int64) *stagesv1.StageSet { s := base(); s.Generation = g; return s }
 	withAnn := func(k, v string) *stagesv1.StageSet {
@@ -112,7 +112,7 @@ func TestReconcile_ForceStageRerunsActions(t *testing.T) {
 
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj")})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "forcer"},
+		Namespace: ns, Name: "forcer",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{

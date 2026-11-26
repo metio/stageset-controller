@@ -483,8 +483,8 @@ func TestHTTPAction_BodyFromSecret(t *testing.T) {
 		t.Fatalf("corev1 AddToScheme: %v", err)
 	}
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "payload", Namespace: "ns"},
-		Data:       map[string][]byte{"body": []byte("hello-from-secret")},
+		Name: "payload", Namespace: "ns",
+		Data: map[string][]byte{"body": []byte("hello-from-secret")},
 	}
 	e := &Executor{
 		Client:       fake.NewClientBuilder().WithScheme(s).WithObjects(sec).Build(),
@@ -588,8 +588,8 @@ func TestHTTPAction_SameHostRedirectFollowsWithSecret(t *testing.T) {
 		t.Fatalf("corev1 AddToScheme: %v", err)
 	}
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "ns"},
-		Data:       map[string][]byte{"X-Api-Key": []byte("SECRET")},
+		Name: "creds", Namespace: "ns",
+		Data: map[string][]byte{"X-Api-Key": []byte("SECRET")},
 	}
 	srvHost := hostOf(t, srv.URL)
 	e := &Executor{

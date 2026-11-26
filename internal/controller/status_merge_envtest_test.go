@@ -32,7 +32,7 @@ func TestReconcile_PromotionHold_PreservesLaterStageStatus(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-2", "", map[string]string{"cm.yaml": cmValManifest(ns, "hold-2", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "hold-preserve"},
+		Namespace: ns, Name: "hold-preserve",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -81,7 +81,7 @@ func TestReconcile_BudgetHold_PreservesLaterStageStatus(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-2", "", map[string]string{"cm.yaml": cmValManifest(ns, "bh-2", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "budget-preserve"},
+		Namespace: ns, Name: "budget-preserve",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -130,7 +130,7 @@ func TestReconcile_StageFailure_PreservesLaterStageStatus(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-2", "", map[string]string{"cm.yaml": cmValManifest(ns, "sf-2", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "fail-preserve"},
+		Namespace: ns, Name: "fail-preserve",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -183,7 +183,7 @@ func TestReconcile_PromotionHold_StalePromoteTokenDoesNotReplay(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-3", "", map[string]string{"cm.yaml": cmValManifest(ns, "replay-3", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "replay"},
+		Namespace: ns, Name: "replay",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{

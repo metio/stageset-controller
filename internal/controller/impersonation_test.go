@@ -40,7 +40,7 @@ func reconcileWithConfig(t *testing.T, c client.Client, ss *stagesv1.StageSet) {
 	}
 	wireRealMinter(t, r)
 	_, _ = driveReconcile(r, ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
+		Namespace: ss.Namespace, Name: ss.Name,
 	})
 }
 
@@ -66,9 +66,9 @@ func wireRealMinter(t *testing.T, r *StageSetReconciler) {
 // apply, health-check, and prune a ConfigMap under it, but nothing else.
 func grantConfigMaps(t *testing.T, c client.Client, ns, sa string) {
 	t.Helper()
-	mustCreate(t, c, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: sa}})
+	mustCreate(t, c, &corev1.ServiceAccount{Namespace: ns, Name: sa})
 	mustCreate(t, c, &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: sa + "-configmaps"},
+		Namespace: ns, Name: sa + "-configmaps",
 		Rules: []rbacv1.PolicyRule{{
 			APIGroups: []string{""},
 			Resources: []string{"configmaps"},
@@ -76,9 +76,9 @@ func grantConfigMaps(t *testing.T, c client.Client, ns, sa string) {
 		}},
 	})
 	mustCreate(t, c, &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: sa + "-configmaps"},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: sa + "-configmaps"},
-		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: sa}},
+		Namespace: ns, Name: sa + "-configmaps",
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: sa + "-configmaps"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: sa}},
 	})
 }
 
@@ -96,7 +96,7 @@ func secretManifest(ns, name string) string {
 func impersonatingStageSet(t *testing.T, c client.Client, ns, name, sa, eaName string) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval:           metav1.Duration{Duration: 5 * time.Minute},
 			ServiceAccountName: sa,

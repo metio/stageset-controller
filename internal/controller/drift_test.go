@@ -63,7 +63,7 @@ func TestReconcile_DriftCorrected(t *testing.T) {
 	servedArtifact(t, c, ns, "art", "", map[string]string{"cm.yaml": configMapManifest(ns, "managed")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "drifter"},
+		Namespace: ns, Name: "drifter",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages:   []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "art"}}},
@@ -104,7 +104,7 @@ func TestReconcile_NewRevisionIsNotDrift(t *testing.T) {
 	servedArtifact(t, c, ns, "art", "", map[string]string{"cm.yaml": immutableConfigMapManifest(ns, "rolling", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "roller"},
+		Namespace: ns, Name: "roller",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{

@@ -31,13 +31,11 @@ func captureInventory(t *testing.T, c client.Client, ns, ssName string) []stages
 	for i := range list.Items {
 		src := &list.Items[i]
 		out = append(out, stagesv1.StageInventory{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   src.Namespace,
-				Name:        src.Name,
-				Labels:      src.Labels,
-				Annotations: src.Annotations,
-			},
-			Spec: *src.Spec.DeepCopy(),
+			Namespace:   src.Namespace,
+			Name:        src.Name,
+			Labels:      src.Labels,
+			Annotations: src.Annotations,
+			Spec:        *src.Spec.DeepCopy(),
 		})
 	}
 	return out
@@ -192,7 +190,7 @@ func TestStageSet_RejectsUpperCaseStageName(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "uppercase-stage"},
+		Namespace: ns, Name: "uppercase-stage",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{

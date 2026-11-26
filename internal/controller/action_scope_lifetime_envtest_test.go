@@ -21,7 +21,7 @@ import (
 // action hitting a counter.
 func lifetimeStageSet(ns, name, endpoint string) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  &stagesv1.VersionSource{Value: "1.0.0"},
@@ -119,8 +119,8 @@ func TestActionScope_LifetimeBaselineSuppresses(t *testing.T) {
 	}
 	// Pre-declare the ledger with a baseline assertion (adoption).
 	ledger := &stagesv1.StageLedger{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "adopt"},
-		Spec:       stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "install-database"}}},
+		Namespace: ns, Name: "adopt",
+		Spec: stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "install-database"}}},
 	}
 	if err := c.Create(context.Background(), ledger); err != nil {
 		t.Fatalf("create ledger: %v", err)

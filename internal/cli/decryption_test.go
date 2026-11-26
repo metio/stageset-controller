@@ -28,8 +28,8 @@ func sopsFixture(t *testing.T, c client.Client, ns, name string) (dir string) {
 	t.Helper()
 	identity, recipient := decryptortest.NewAgeKey(t)
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sops-keys"},
-		Data:       map[string][]byte{"identity.agekey": []byte(identity)},
+		Namespace: ns, Name: "sops-keys",
+		Data: map[string][]byte{"identity.agekey": []byte(identity)},
 	}
 	if err := c.Create(context.Background(), sec); err != nil {
 		t.Fatalf("create key secret: %v", err)
@@ -41,7 +41,7 @@ func sopsFixture(t *testing.T, c client.Client, ns, name string) (dir string) {
 	}
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Decryption: &stagesv1.Decryption{
@@ -126,7 +126,7 @@ func TestBuild_MissingKeySecretFailsClosed(t *testing.T) {
 	ns := makeNamespace(t, c, "sopsmissing")
 	dir := sopsFixture(t, c, ns, "enc")
 	// Remove the key secret out from under the StageSet.
-	if err := c.Delete(context.Background(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sops-keys"}}); err != nil {
+	if err := c.Delete(context.Background(), &corev1.Secret{Namespace: ns, Name: "sops-keys"}); err != nil {
 		t.Fatalf("delete key secret: %v", err)
 	}
 

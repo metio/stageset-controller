@@ -19,14 +19,14 @@ func TestEvaluateRestartChecks(t *testing.T) {
 	const ns = "apps"
 	pod := func(name string, labels map[string]string, restarts int32) *corev1.Pod {
 		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
+			Name: name, Namespace: ns, Labels: labels,
 			Status: corev1.PodStatus{
 				InitContainerStatuses: []corev1.ContainerStatus{{Name: "init", RestartCount: 0}},
 				ContainerStatuses:     []corev1.ContainerStatus{{Name: "app", RestartCount: restarts}},
 			},
 		}
 	}
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: ns}}
+	ss := &stagesv1.StageSet{Name: "app", Namespace: ns}
 	stageWith := func(checks ...stagesv1.RestartCheck) *stagesv1.Stage {
 		return &stagesv1.Stage{Name: "staging", Promotion: &stagesv1.StagePromotion{RestartGate: &stagesv1.RestartGate{Checks: checks}}}
 	}
