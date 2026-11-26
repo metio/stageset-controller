@@ -22,8 +22,8 @@ const testRunbookBase = "https://stageset.projects.metio.wtf/runbooks/"
 
 func newStageSet(namespace, name string, suspend bool, ready metav1.ConditionStatus, reason, message string) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
-		Spec:       stagesv1.StageSetSpec{Suspend: suspend},
+		Namespace: namespace, Name: name,
+		Spec: stagesv1.StageSetSpec{Suspend: suspend},
 		Status: stagesv1.StageSetStatus{
 			ObservedGeneration:   2,
 			Version:              "1.2.3",

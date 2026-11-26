@@ -25,7 +25,7 @@ import (
 // namespaceSelector can be exercised.
 func labeledNamespace(t *testing.T, c client.Client, labels map[string]string) string {
 	t.Helper()
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "fleet-ns-", Labels: labels}}
+	ns := &corev1.Namespace{GenerateName: "fleet-ns-", Labels: labels}
 	if err := c.Create(context.Background(), ns); err != nil {
 		t.Fatalf("create namespace: %v", err)
 	}
@@ -43,7 +43,7 @@ func labeledNamespace(t *testing.T, c client.Client, labels map[string]string) s
 func fleetMember(t *testing.T, c client.Client, ns, name, app, ring string) {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: map[string]string{"app": app, "ring": ring}},
+		Namespace: ns, Name: name, Labels: map[string]string{"app": app, "ring": ring},
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  &stagesv1.VersionSource{Value: "1.0.0", ApprovalMode: stagesv1.ApprovalAlways},
@@ -107,7 +107,7 @@ func unsettleMember(t *testing.T, c client.Client, ns, name string) {
 func reconcileFleet(t *testing.T, c client.Client, name string) ctrl.Result {
 	t.Helper()
 	r := &FleetRolloutReconciler{Client: c}
-	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name}})
+	res, err := r.Reconcile(context.Background(), ctrl.Request{Name: name})
 	if err != nil {
 		t.Fatalf("fleet reconcile: %v", err)
 	}
@@ -119,7 +119,7 @@ func reconcileFleet(t *testing.T, c client.Client, name string) ctrl.Result {
 func reconcileFleetAt(t *testing.T, c client.Client, name string, now time.Time, q metricsource.Querier) {
 	t.Helper()
 	r := &FleetRolloutReconciler{Client: c, Now: func() time.Time { return now }, MetricQuerier: q}
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{Name: name}); err != nil {
 		t.Fatalf("fleet reconcile: %v", err)
 	}
 }
@@ -160,7 +160,7 @@ func TestFleetRollout_OpensWavesInOrder(t *testing.T) {
 	fleetMember(t, c, ns, "app1a", app, "1")
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-order"},
+		Name: "fleet-order",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
 			Selector:      appSelector(app),
@@ -226,7 +226,7 @@ func TestFleetRollout_DerivedTargetFromPendingVersion(t *testing.T) {
 	holdMember(t, c, ns, "w1", "2.0.0")
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-derived"},
+		Name: "fleet-derived",
 		Spec: stagesv1.FleetRolloutSpec{
 			// No TargetVersion — derived.
 			Selector: appSelector(app),
@@ -275,7 +275,7 @@ func TestFleetRollout_SoakHoldsThenAdvances(t *testing.T) {
 
 	soak := metav1.Duration{Duration: 30 * time.Minute}
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-soak"},
+		Name: "fleet-soak",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
 			Selector:      appSelector(app),
@@ -318,7 +318,7 @@ func TestFleetRollout_GateFailureHalts(t *testing.T) {
 	fleetMember(t, c, ns, "w1", app, "1")
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-gate"},
+		Name: "fleet-gate",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
 			Selector:      appSelector(app),
@@ -365,7 +365,7 @@ func TestFleetRollout_MemberRegressionHalts(t *testing.T) {
 
 	soak := metav1.Duration{Duration: 30 * time.Minute}
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-regress"},
+		Name: "fleet-regress",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
 			Selector:      appSelector(app),
@@ -408,7 +408,7 @@ func TestFleetRollout_OnRegressionRollbackStampsMembers(t *testing.T) {
 
 	soak := metav1.Duration{Duration: 30 * time.Minute}
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-rollback"},
+		Name: "fleet-rollback",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion:   "2.0.0",
 			PreviousVersion: "1.0.0",
@@ -444,7 +444,7 @@ func TestFleetRollout_OnRegressionRollbackStampsMembers(t *testing.T) {
 func TestFleetRollout_RollbackRequiresPreviousVersion(t *testing.T) {
 	c := testClient(t)
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-badrollback"},
+		Name: "fleet-badrollback",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
 			OnRegression:  "Rollback", // no previousVersion
@@ -469,7 +469,7 @@ func TestFleetRollout_NamespaceSelectorBounds(t *testing.T) {
 	fleetMember(t, c, outScope, "app", app, "0")
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-nssel"},
+		Name: "fleet-nssel",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion:     "2.0.0",
 			Selector:          appSelector(app),
@@ -504,7 +504,7 @@ func TestFleetRollout_ContestedMembersRefused(t *testing.T) {
 
 	mkFleet := func(name, target string) *stagesv1.FleetRollout {
 		return &stagesv1.FleetRollout{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Name: name,
 			Spec: stagesv1.FleetRolloutSpec{
 				TargetVersion: target,
 				Selector:      appSelector(app),
@@ -539,7 +539,7 @@ func TestFleetRollout_UnassignedMemberIsFlagged(t *testing.T) {
 	fleetMember(t, c, ns, "orphan", app, "") // no ring label
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-orphan"},
+		Name: "fleet-orphan",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
 			Selector:      appSelector(app),
@@ -572,7 +572,7 @@ func TestFleetRollout_GateSecretRefRefused(t *testing.T) {
 	fleetMember(t, c, ns, "w0", app, "0")
 
 	fr := &stagesv1.FleetRollout{
-		ObjectMeta: metav1.ObjectMeta{Name: "fleet-gate-secret"},
+		Name: "fleet-gate-secret",
 		Spec: stagesv1.FleetRolloutSpec{
 			TargetVersion: "2.0.0",
 			Selector:      appSelector(app),

@@ -47,7 +47,7 @@ func TestReconcile_UpdateWindow_DeniesRollout(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "gated")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "denied"},
+		Namespace: ns, Name: "denied",
 		Spec: stagesv1.StageSetSpec{
 			Interval:      metav1.Duration{Duration: time.Minute},
 			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeDeny, From: tm("2020-01-01T00:00:00Z"), To: tm("2030-01-01T00:00:00Z")}},
@@ -78,7 +78,7 @@ func TestReconcile_UpdateWindow_DeferCountedOncePerDeferral(t *testing.T) {
 	ns := newNamespace(t, c)
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "gated-dedup")})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dedup"},
+		Namespace: ns, Name: "dedup",
 		Spec: stagesv1.StageSetSpec{
 			Interval:      metav1.Duration{Duration: time.Minute},
 			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeDeny, From: tm("2020-01-01T00:00:00Z"), To: tm("2030-01-01T00:00:00Z")}},
@@ -104,7 +104,7 @@ func TestReconcile_UpdateWindow_AllowsWhenOpen(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "open")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "allowed"},
+		Namespace: ns, Name: "allowed",
 		Spec: stagesv1.StageSetSpec{
 			Interval:      metav1.Duration{Duration: time.Minute},
 			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeAllow, From: tm("2020-01-01T00:00:00Z"), To: tm("2030-01-01T00:00:00Z")}},
@@ -131,11 +131,9 @@ func TestReconcile_UpdateWindow_OverrideForcesApply(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "forced")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   ns,
-			Name:        "override",
-			Annotations: map[string]string{updateNowAnnotation: "tok-1"},
-		},
+		Namespace:   ns,
+		Name:        "override",
+		Annotations: map[string]string{updateNowAnnotation: "tok-1"},
 		Spec: stagesv1.StageSetSpec{
 			Interval:      metav1.Duration{Duration: time.Minute},
 			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeDeny, From: tm("2020-01-01T00:00:00Z"), To: tm("2030-01-01T00:00:00Z")}},
@@ -163,7 +161,7 @@ func TestReconcile_UpdateWindow_DeployedStaysReadyWhenHeld(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": cmValManifest(ns, "rolling", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "held"},
+		Namespace: ns, Name: "held",
 		Spec: stagesv1.StageSetSpec{
 			Interval:      metav1.Duration{Duration: time.Minute},
 			UpdateWindows: []stagesv1.UpdateWindow{{Type: window.TypeAllow, From: tm("2020-01-01T00:00:00Z"), To: tm("2024-01-01T00:00:00Z")}},

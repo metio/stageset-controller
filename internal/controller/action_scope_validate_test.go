@@ -6,8 +6,6 @@ package controller
 import (
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
 )
 
@@ -15,8 +13,8 @@ import (
 // valid StageSet so ValidateSpec exercises only the scope rules.
 func scopeSpec(version string, stage stagesv1.Stage, onRollback ...stagesv1.Action) *stagesv1.StageSet {
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "s"},
-		Spec:       stagesv1.StageSetSpec{Stages: []stagesv1.Stage{stage}, OnRollback: onRollback},
+		Namespace: "ns", Name: "s",
+		Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{stage}, OnRollback: onRollback},
 	}
 	if version != "" {
 		ss.Spec.Version = &stagesv1.VersionSource{Value: version}

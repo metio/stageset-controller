@@ -245,15 +245,15 @@ func TestMintsTokenFor(t *testing.T) {
 func TestForgetDeletedTenants_EvictsUnsharedServiceAccounts(t *testing.T) {
 	scheme := watchScheme(t)
 	going := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "tenant", Name: "going"},
+		Namespace: "tenant", Name: "going",
 		Spec: stagesv1.StageSetSpec{
 			ServiceAccountName: "shared",
 			Stages:             []stagesv1.Stage{{Name: "one", ServiceAccountName: "solo"}},
 		},
 	}
 	staying := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "tenant", Name: "staying"},
-		Spec:       stagesv1.StageSetSpec{ServiceAccountName: "shared"},
+		Namespace: "tenant", Name: "staying",
+		Spec: stagesv1.StageSetSpec{ServiceAccountName: "shared"},
 	}
 	fm := &fakeMinter{token: "t1", expires: time.Now().Add(time.Hour)}
 	r := &StageSetReconciler{
@@ -278,16 +278,14 @@ func TestForgetDeletedTenants_EvictsUnsharedServiceAccounts(t *testing.T) {
 func TestForgetDeletedTenants_IgnoresStageSetsAlreadyDeleting(t *testing.T) {
 	scheme := watchScheme(t)
 	deleting := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "tenant", Name: "also-going",
-			DeletionTimestamp: &metav1.Time{Time: time.Now()},
-			Finalizers:        []string{FinalizerName},
-		},
-		Spec: stagesv1.StageSetSpec{ServiceAccountName: "shared"},
+		Namespace: "tenant", Name: "also-going",
+		DeletionTimestamp: &metav1.Time{Time: time.Now()},
+		Finalizers:        []string{FinalizerName},
+		Spec:              stagesv1.StageSetSpec{ServiceAccountName: "shared"},
 	}
 	going := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "tenant", Name: "going"},
-		Spec:       stagesv1.StageSetSpec{ServiceAccountName: "shared"},
+		Namespace: "tenant", Name: "going",
+		Spec: stagesv1.StageSetSpec{ServiceAccountName: "shared"},
 	}
 	r := &StageSetReconciler{
 		Client:  fake.NewClientBuilder().WithScheme(scheme).WithObjects(deleting, going).Build(),

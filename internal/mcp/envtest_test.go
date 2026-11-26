@@ -64,7 +64,7 @@ func TestEnvtest_ToolsAgainstRealAPIServer(t *testing.T) {
 	// The "default" namespace exists in a fresh envtest; create a schema-valid
 	// StageSet there (stages requires MinItems=1 with a SourceRef).
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "envtest-demo"},
+		Namespace: "default", Name: "envtest-demo",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{

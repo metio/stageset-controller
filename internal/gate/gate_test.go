@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -31,8 +30,8 @@ func gateClient(t *testing.T, objs ...client.Object) client.Client {
 
 func stageSet(ns, name string, stages ...stagesv1.StageStatus) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
-		Status:     stagesv1.StageSetStatus{Stages: stages},
+		Namespace: ns, Name: name,
+		Status: stagesv1.StageSetStatus{Stages: stages},
 	}
 }
 

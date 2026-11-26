@@ -11,7 +11,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -33,7 +32,7 @@ func neverReadyManifest(ns, name string) string {
 
 func progressHoldStageSet(ns, name, onTimeout string) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Hour},
 			RetryInterval:     &metav1.Duration{Duration: 90 * time.Second},
@@ -70,7 +69,7 @@ func TestReconcile_VerifyTimeout_HoldsAsProgressing(t *testing.T) {
 		Client: base, APIReader: base, RESTMapper: base.RESTMapper(), Recorder: rec,
 		Fetcher: &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "slow"}}
+	req := ctrl.Request{Namespace: ns, Name: "slow"}
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
 		t.Fatalf("finalizer pass: %v", err)
 	}
@@ -127,7 +126,7 @@ func TestReconcile_VerifyTimeout_RollbackOptIn(t *testing.T) {
 		Client: base, APIReader: base, RESTMapper: base.RESTMapper(), Recorder: &capturingRecorder{},
 		Fetcher: &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "strict"}}
+	req := ctrl.Request{Namespace: ns, Name: "strict"}
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
 		t.Fatalf("finalizer pass: %v", err)
 	}

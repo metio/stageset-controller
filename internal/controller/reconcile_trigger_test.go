@@ -23,11 +23,9 @@ func TestReconcile_RecordsHandledReconcileRequest(t *testing.T) {
 	servedArtifact(t, c, ns, "art", "", map[string]string{"cm.yaml": configMapManifest(ns, "applied")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   ns,
-			Name:        "triggered",
-			Annotations: map[string]string{fluxmeta.ReconcileRequestAnnotation: "token-1"},
-		},
+		Namespace:   ns,
+		Name:        "triggered",
+		Annotations: map[string]string{fluxmeta.ReconcileRequestAnnotation: "token-1"},
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages:   []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "art"}}},
@@ -61,11 +59,9 @@ func TestReconcile_SuspendedDoesNotRecordReconcileRequest(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   ns,
-			Name:        "paused",
-			Annotations: map[string]string{fluxmeta.ReconcileRequestAnnotation: "token-1"},
-		},
+		Namespace:   ns,
+		Name:        "paused",
+		Annotations: map[string]string{fluxmeta.ReconcileRequestAnnotation: "token-1"},
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Suspend:  true,

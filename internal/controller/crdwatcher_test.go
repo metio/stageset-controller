@@ -27,7 +27,7 @@ func establishedCRD(name, group, kind string, servedVersions ...string) *apiextv
 		vers = append(vers, apiextv1.CustomResourceDefinitionVersion{Name: v, Served: true})
 	}
 	return &apiextv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Spec: apiextv1.CustomResourceDefinitionSpec{
 			Group:    group,
 			Names:    apiextv1.CustomResourceDefinitionNames{Kind: kind},

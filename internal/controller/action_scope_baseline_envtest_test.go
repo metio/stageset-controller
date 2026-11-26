@@ -12,7 +12,6 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -33,14 +32,14 @@ func reconcileWithRecorder(t *testing.T, c client.Client, ss *stagesv1.StageSet,
 		ActionIPValidator:  actions.PermissiveIP,
 		Recorder:           rec,
 	}
-	_, err := driveReconcile(r, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+	_, err := driveReconcile(r, ctrl.Request{Namespace: ss.Namespace, Name: ss.Name})
 	return err
 }
 
 // namedLifetimeStageSet is lifetimeStageSet with a caller-chosen action name.
 func namedLifetimeStageSet(ns, name, action, endpoint string) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  &stagesv1.VersionSource{Value: "1.0.0"},
@@ -78,8 +77,8 @@ func TestActionScope_BaselineUnresolvable_HeldAndSurfaced(t *testing.T) {
 	}
 	// Baseline names an action that does not exist in the spec.
 	ledger := &stagesv1.StageLedger{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "typo"},
-		Spec:       stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "no-such-action"}}},
+		Namespace: ns, Name: "typo",
+		Spec: stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "no-such-action"}}},
 	}
 	if err := c.Create(context.Background(), ledger); err != nil {
 		t.Fatalf("create ledger: %v", err)
@@ -122,8 +121,8 @@ func TestActionScope_BaselineAutoPromotesWhenResolvable(t *testing.T) {
 		t.Fatalf("create StageSet: %v", err)
 	}
 	ledger := &stagesv1.StageLedger{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "heal"},
-		Spec:       stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "install-database"}}},
+		Namespace: ns, Name: "heal",
+		Spec: stagesv1.StageLedgerSpec{Baseline: []stagesv1.LedgerRef{{Stage: "app", Action: "install-database"}}},
 	}
 	if err := c.Create(context.Background(), ledger); err != nil {
 		t.Fatalf("create ledger: %v", err)

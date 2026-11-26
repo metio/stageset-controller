@@ -87,8 +87,8 @@ func makeVWC(name string, n int, existingCABundle []byte) *admissionv1.Validatin
 		}
 	}
 	return &admissionv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{Name: name, ResourceVersion: "1"},
-		Webhooks:   whs,
+		Name: name, ResourceVersion: "1",
+		Webhooks: whs,
 	}
 }
 

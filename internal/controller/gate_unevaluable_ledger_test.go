@@ -15,7 +15,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -45,7 +44,7 @@ func TestReconcile_GateUnevaluable_PersistsLedgers(t *testing.T) {
 	// (re-)execution.
 	mkVictim := func(name string) {
 		t.Helper()
-		if err := base.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}); err != nil {
+		if err := base.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: name}); err != nil {
 			t.Fatalf("create %s: %v", name, err)
 		}
 	}
@@ -72,7 +71,7 @@ func TestReconcile_GateUnevaluable_PersistsLedgers(t *testing.T) {
 	}
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "gate-ledger"},
+		Namespace: ns, Name: "gate-ledger",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Version:  &stagesv1.VersionSource{Value: "1.0.0"},
@@ -107,7 +106,7 @@ func TestReconcile_GateUnevaluable_PersistsLedgers(t *testing.T) {
 			Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		}
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "gate-ledger"}}
+	req := ctrl.Request{Namespace: ns, Name: "gate-ledger"}
 
 	// Pass 1 (gate healthy): baseline at 1.0.0. The pre-action runs (deletes
 	// action-victim), no migration runs at baseline, gate promotes, Synced.

@@ -16,7 +16,7 @@ import (
 
 func readyStageSet() *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "web"},
+		Namespace: "team-a", Name: "web",
 		Spec: stagesv1.StageSetSpec{
 			Stages: []stagesv1.Stage{{Name: "canary"}, {Name: "prod"}},
 		},

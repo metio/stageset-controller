@@ -163,7 +163,7 @@ func TestRun_SelfSignedWebhook_BootsAndPatchesVWC(t *testing.T) {
 	sideEffects := admissionv1.SideEffectClassNone
 	const vwcName = "vstageset-test"
 	vwc := &admissionv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{Name: vwcName},
+		Name: vwcName,
 		Webhooks: []admissionv1.ValidatingWebhook{{
 			Name:                    "vstageset.stages.metio.wtf",
 			AdmissionReviewVersions: []string{"v1"},
@@ -174,12 +174,10 @@ func TestRun_SelfSignedWebhook_BootsAndPatchesVWC(t *testing.T) {
 				// CABundle deliberately empty — provisionSelfSignedWebhookCert fills it.
 			},
 			Rules: []admissionv1.RuleWithOperations{{
-				Operations: []admissionv1.OperationType{admissionv1.Create},
-				Rule: admissionv1.Rule{
-					APIGroups:   []string{"stages.metio.wtf"},
-					APIVersions: []string{"v1"},
-					Resources:   []string{"stagesets"},
-				},
+				Operations:  []admissionv1.OperationType{admissionv1.Create},
+				APIGroups:   []string{"stages.metio.wtf"},
+				APIVersions: []string{"v1"},
+				Resources:   []string{"stagesets"},
 			}},
 		}},
 	}

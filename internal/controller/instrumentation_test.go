@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -40,7 +39,7 @@ func reconcileOnceTraced(t *testing.T, c client.Client, ss *stagesv1.StageSet) [
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
 	if _, err := driveReconcile(r, ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
+		Namespace: ss.Namespace, Name: ss.Name,
 	}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}

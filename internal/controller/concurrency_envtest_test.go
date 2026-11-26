@@ -12,7 +12,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,7 +46,7 @@ func TestReconcile_ConcurrentStageSetsAreRaceFree(t *testing.T) {
 			"cm.yaml": configMapManifest(ns, name),
 		})
 		ss := &stagesv1.StageSet{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+			Namespace: ns, Name: name,
 			Spec: stagesv1.StageSetSpec{
 				Interval: metav1.Duration{Duration: time.Minute},
 				Stages: []stagesv1.Stage{{
@@ -59,7 +58,7 @@ func TestReconcile_ConcurrentStageSetsAreRaceFree(t *testing.T) {
 		if err := base.Create(context.Background(), ss); err != nil {
 			t.Fatalf("create %s/%s: %v", ns, name, err)
 		}
-		reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}})
+		reqs = append(reqs, ctrl.Request{Namespace: ns, Name: name})
 	}
 
 	// One reconciler for every goroutine, as the manager wires it.

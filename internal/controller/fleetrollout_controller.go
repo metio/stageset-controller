@@ -15,7 +15,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -550,7 +549,7 @@ func (r *FleetRolloutReconciler) mapStageSetToFleets(ctx context.Context, obj cl
 			continue
 		}
 		if sel.Matches(labels.Set(ss.Labels)) {
-			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: fleets.Items[i].Name}})
+			reqs = append(reqs, reconcile.Request{Name: fleets.Items[i].Name})
 		}
 	}
 	return reqs

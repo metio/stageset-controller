@@ -58,7 +58,7 @@ func deleteSentinel(ns, name string) stagesv1.Action {
 
 func createSentinel(t *testing.T, c client.Client, ns, name string) {
 	t.Helper()
-	if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}); err != nil {
+	if err := c.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: name}); err != nil {
 		t.Fatalf("create sentinel %q: %v", name, err)
 	}
 }
@@ -82,7 +82,7 @@ func TestReconcile_OnRollback_NotFiredWithoutSnapshot(t *testing.T) {
 	createSentinel(t, c, ns, "maintenance")
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-nosnap"},
+		Namespace: ns, Name: "rb-nosnap",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -111,7 +111,7 @@ func TestReconcile_OnRollback_NotFiredOnSuccess(t *testing.T) {
 	createSentinel(t, c, ns, "maintenance")
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-success"},
+		Namespace: ns, Name: "rb-success",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -142,7 +142,7 @@ func TestReconcile_OnRollback_FiresOnGateRollback(t *testing.T) {
 	createSentinel(t, c, ns, "maintenance")
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-gate"},
+		Namespace: ns, Name: "rb-gate",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -165,7 +165,7 @@ func TestReconcile_OnRollback_FiresOnGateRollback(t *testing.T) {
 		t.Fatalf("create StageSet: %v", err)
 	}
 	rec := &capturingRecorder{}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rb-gate"}}
+	req := ctrl.Request{Namespace: ns, Name: "rb-gate"}
 
 	// Pass 1: no breaching pods, v1 promotes, snapshot records v1.
 	if _, err := driveReconcile(onRollbackReconciler(c, rec, nil), req); err != nil {
@@ -206,7 +206,7 @@ func TestReconcile_OnRollback_UngatedByLedger_FiresEveryRollback(t *testing.T) {
 	url := countingServer(t, http.StatusOK, &hits)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-ledger"},
+		Namespace: ns, Name: "rb-ledger",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -227,7 +227,7 @@ func TestReconcile_OnRollback_UngatedByLedger_FiresEveryRollback(t *testing.T) {
 
 	// Success first so a snapshot exists, then break stage-b so every following
 	// reconcile fails and rolls back the same pinned revision.
-	if _, err := driveReconcile(onRollbackReconciler(c, nil, allowed), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rb-ledger"}}); err != nil {
+	if _, err := driveReconcile(onRollbackReconciler(c, nil, allowed), ctrl.Request{Namespace: ns, Name: "rb-ledger"}); err != nil {
 		t.Fatalf("initial success: %v", err)
 	}
 	if n := atomic.LoadInt32(&hits); n != 0 {
@@ -235,7 +235,7 @@ func TestReconcile_OnRollback_UngatedByLedger_FiresEveryRollback(t *testing.T) {
 	}
 	repointArtifact(t, c, ns, "ea-b", map[string]string{"cm.yaml": cmValManifest(ns, "Bad_Name", "x")})
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rb-ledger"}}
+	req := ctrl.Request{Namespace: ns, Name: "rb-ledger"}
 	for pass := 1; pass <= 2; pass++ {
 		// The failing reconcile rolls back (and runs onRollback) before returning
 		// the stage failure, so the error is expected and discarded.
@@ -260,7 +260,7 @@ func TestReconcile_OnRollback_BestEffortFailureEmitsWarning(t *testing.T) {
 	url := countingServer(t, http.StatusOK, &hits)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-besteffort"},
+		Namespace: ns, Name: "rb-besteffort",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -278,7 +278,7 @@ func TestReconcile_OnRollback_BestEffortFailureEmitsWarning(t *testing.T) {
 		t.Fatalf("create StageSet: %v", err)
 	}
 	rec := &capturingRecorder{}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rb-besteffort"}}
+	req := ctrl.Request{Namespace: ns, Name: "rb-besteffort"}
 
 	if _, err := driveReconcile(onRollbackReconciler(c, rec, nil), req); err != nil {
 		t.Fatalf("initial success: %v", err)
@@ -322,7 +322,7 @@ func TestReconcile_OnRollback_ActionsRunInListOrder(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-order"},
+		Namespace: ns, Name: "rb-order",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -340,7 +340,7 @@ func TestReconcile_OnRollback_ActionsRunInListOrder(t *testing.T) {
 		t.Fatalf("create StageSet: %v", err)
 	}
 	allowed := []string{actionHost(t, srv.URL)}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rb-order"}}
+	req := ctrl.Request{Namespace: ns, Name: "rb-order"}
 
 	if _, err := driveReconcile(onRollbackReconciler(c, nil, allowed), req); err != nil {
 		t.Fatalf("initial success: %v", err)

@@ -55,7 +55,7 @@ func TestReconcile_RollbackOnFailure_RestoresPreviousRevision(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj-b")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb"},
+		Namespace: ns, Name: "rb",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -110,13 +110,13 @@ func TestReconcile_OnRollback_RunsAfterRestore(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj-b")})
 
 	// The maintenance sentinel a pre-upgrade step would have created.
-	sentinel := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "maintenance"}}
+	sentinel := &corev1.ConfigMap{Namespace: ns, Name: "maintenance"}
 	if err := c.Create(context.Background(), sentinel); err != nil {
 		t.Fatalf("create sentinel: %v", err)
 	}
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-onrollback"},
+		Namespace: ns, Name: "rb-onrollback",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -160,7 +160,7 @@ func TestReconcile_RollbackOnFailure_FirstRunHasNothingToRestore(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": cmValManifest(ns, "Bad_Name", "x")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-first"},
+		Namespace: ns, Name: "rb-first",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,

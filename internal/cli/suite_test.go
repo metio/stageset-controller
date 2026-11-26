@@ -101,7 +101,7 @@ func externalArtifactStubCRD() *apiextv1.CustomResourceDefinition {
 	gvk := artifact.ExternalArtifactGVK
 	preserve := true
 	return &apiextv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: "externalartifacts." + gvk.Group},
+		Name: "externalartifacts." + gvk.Group,
 		Spec: apiextv1.CustomResourceDefinitionSpec{
 			Group: gvk.Group,
 			Names: apiextv1.CustomResourceDefinitionNames{
@@ -137,7 +137,7 @@ func externalArtifactStubCRD() *apiextv1.CustomResourceDefinition {
 func producerStubCRD() *apiextv1.CustomResourceDefinition {
 	preserve := true
 	return &apiextv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: "jsonnetsnippets.jaas.metio.wtf"},
+		Name: "jsonnetsnippets.jaas.metio.wtf",
 		Spec: apiextv1.CustomResourceDefinitionSpec{
 			Group: "jaas.metio.wtf",
 			Names: apiextv1.CustomResourceDefinitionNames{
@@ -207,7 +207,7 @@ func makeNamespace(t testing.TB, c client.Client, base string) string {
 func makeStageSet(t testing.TB, c client.Client, ns, name string) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{

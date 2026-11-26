@@ -53,7 +53,7 @@ func kubeconfigFor(t *testing.T, cfg *rest.Config) []byte {
 func kubeConfigStageSet(t *testing.T, c client.Client, ns, name, secretName, eaName string) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: 5 * time.Minute},
 			KubeConfig: &fluxmeta.KubeConfigReference{SecretRef: &fluxmeta.SecretKeyReference{Name: secretName}},
@@ -70,8 +70,8 @@ func TestReconcile_KubeConfig_AppliesToTargetCluster(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	mustCreate(t, c, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "remote-kubeconfig"},
-		Data:       map[string][]byte{"value": kubeconfigFor(t, envtestConfig(t))},
+		Namespace: ns, Name: "remote-kubeconfig",
+		Data: map[string][]byte{"value": kubeconfigFor(t, envtestConfig(t))},
 	})
 	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "remote-cm")})
 
@@ -98,13 +98,13 @@ func TestReconcile_KubeConfig_ComposesWithImpersonation(t *testing.T) {
 	ns := newNamespace(t, c)
 	grantConfigMaps(t, c, ns, "deployer")
 	mustCreate(t, c, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "remote-kubeconfig"},
-		Data:       map[string][]byte{"value": kubeconfigFor(t, envtestConfig(t))},
+		Namespace: ns, Name: "remote-kubeconfig",
+		Data: map[string][]byte{"value": kubeconfigFor(t, envtestConfig(t))},
 	})
 	servedArtifact(t, c, ns, "secret-art", "", map[string]string{"s.yaml": secretManifest(ns, "blocked")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "combo"},
+		Namespace: ns, Name: "combo",
 		Spec: stagesv1.StageSetSpec{
 			Interval:           metav1.Duration{Duration: 5 * time.Minute},
 			ServiceAccountName: "deployer",
@@ -130,8 +130,8 @@ func TestReconcile_KubeConfig_InvalidKubeconfigFails(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	mustCreate(t, c, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "bad-kubeconfig"},
-		Data:       map[string][]byte{"value": []byte("not a kubeconfig")},
+		Namespace: ns, Name: "bad-kubeconfig",
+		Data: map[string][]byte{"value": []byte("not a kubeconfig")},
 	})
 	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "never")})
 
@@ -187,7 +187,7 @@ func reconcileWithRemoteBuilder(t *testing.T, c client.Client, ss *stagesv1.Stag
 	}
 	wireRealMinter(t, r)
 	_, _ = driveReconcile(r, ctrl.Request{
-		NamespacedName: apitypes.NamespacedName{Namespace: ss.Namespace, Name: ss.Name},
+		Namespace: ss.Namespace, Name: ss.Name,
 	})
 }
 
@@ -201,7 +201,7 @@ func TestReconcile_KubeConfig_ConfigMapRef_AppliesToTargetCluster(t *testing.T) 
 	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "cloud-cm")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud"},
+		Namespace: ns, Name: "cloud",
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: 5 * time.Minute},
 			KubeConfig: &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud-auth"}},
@@ -236,12 +236,12 @@ func TestReconcile_KubeConfig_ConfigMapRef_InvalidProvider(t *testing.T) {
 	ns := newNamespace(t, c)
 	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "never")})
 	mustCreate(t, c, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cloud-auth"},
-		Data:       map[string]string{"provider": "nonsense"},
+		Namespace: ns, Name: "cloud-auth",
+		Data: map[string]string{"provider": "nonsense"},
 	})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "badprovider"},
+		Namespace: ns, Name: "badprovider",
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: 5 * time.Minute},
 			KubeConfig: &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "cloud-auth"}},
@@ -268,7 +268,7 @@ func TestReconcile_KubeConfig_ConfigMapRef_MissingConfigMap(t *testing.T) {
 	servedArtifact(t, c, ns, "cm-art", "", map[string]string{"cm.yaml": configMapManifest(ns, "never")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "missingcm"},
+		Namespace: ns, Name: "missingcm",
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: 5 * time.Minute},
 			KubeConfig: &fluxmeta.KubeConfigReference{ConfigMapRef: &fluxmeta.LocalObjectReference{Name: "absent"}},

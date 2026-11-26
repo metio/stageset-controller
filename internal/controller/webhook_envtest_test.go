@@ -81,7 +81,7 @@ func TestWebhook_RejectsInvalidAction(t *testing.T) {
 
 	valid := func(name string) *stagesv1.StageSet {
 		return &stagesv1.StageSet{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+			Namespace: ns, Name: name,
 			Spec: stagesv1.StageSetSpec{
 				Interval: metav1.Duration{Duration: time.Minute},
 				Stages: []stagesv1.Stage{{

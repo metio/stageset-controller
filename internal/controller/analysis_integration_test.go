@@ -27,7 +27,7 @@ func analysisCheck(max string) *stagesv1.PromotionAnalysis {
 
 func twoStage(ns, name string, promo *stagesv1.StagePromotion) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -140,7 +140,7 @@ func TestReconcile_Promotion_AnalysisRollbackReverts(t *testing.T) {
 	an := analysisCheck("0.01")
 	an.OnFailure = "Rollback"
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "analysis-rollback"},
+		Namespace: ns, Name: "analysis-rollback",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true, // records the last-good snapshot to revert to
@@ -198,7 +198,7 @@ func TestReconcile_Promotion_AnalysisRollbackWithoutSnapshotHolds(t *testing.T) 
 	an := analysisCheck("0.01")
 	an.OnFailure = "Rollback"
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rollback-nosnap"},
+		Namespace: ns, Name: "rollback-nosnap",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
