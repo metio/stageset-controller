@@ -186,7 +186,20 @@ stagesetctl promote web --namespace apps --stage prod
 
 `promote` stamps a one-shot `stages.metio.wtf/promote` annotation that advances
 the named stage exactly once; the rollout then continues. Add `--wait` to block
-until the controller records the promotion. A manual gate that is always
+until the controller records the promotion.
+
+A promotion applies only to a stage that is held at its gate (`Soaking`,
+`Analyzing`, `Blocked` or `AwaitingManual`), and only to the revision it is held
+at. `promote` refuses a stage that is not held, and stamps the held revision as
+`stages.metio.wtf/promote-revision` next to the token. The controller ignores a
+token addressed to a stage that is not held for the revision being rolled out,
+whether that stage already cleared its gate, has not been reached yet, failed, or
+moved on to a newer revision, and it ignores a token whose `promote-revision`
+names a different revision. An ignored token is recorded on
+`status.stages[].ignoredPromotion` with its reason, reported as a Warning Event
+with reason `PromotionIgnored`, and never applies later, so it cannot advance a
+future revision past its gates. `promote --wait` fails as soon as the controller
+ignores the token. A manual gate that is always
 rubber-stamped is theatre — it earns its keep when the operator actually checks
 the stage's behavior before promoting. `requireManualPromotion` defaults to
 `false`, and is distinct from a migration's [`requireApproval`](/gating/versioned-migrations/),

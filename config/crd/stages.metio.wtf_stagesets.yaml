@@ -4324,6 +4324,42 @@ spec:
                       items:
                         type: string
                       type: array
+                    ignoredPromotion:
+                      description: |-
+                        IgnoredPromotion records the most recent stages.metio.wtf/promote token
+                        addressed to this stage that the controller refused to act on, and why. A
+                        token is honored only while the stage is held at its promotion gate for the
+                        revision being rolled out; a refused token never matches again, so it
+                        cannot promote a later revision.
+                      properties:
+                        message:
+                          description: Message is a human-readable explanation.
+                          type: string
+                        reason:
+                          description: Reason says why the token was refused.
+                          enum:
+                          - NoPromotionGate
+                          - AlreadyPromoted
+                          - NotHeld
+                          - RevisionMismatch
+                          type: string
+                        revision:
+                          description: |-
+                            Revision is the revision the stage was being rolled out at when the token
+                            was refused.
+                          type: string
+                        time:
+                          description: Time is when the token was refused.
+                          format: date-time
+                          type: string
+                        token:
+                          description: Token is the refused stages.metio.wtf/promote
+                            token.
+                          type: string
+                      required:
+                      - reason
+                      - token
+                      type: object
                     lastHandledPromotion:
                       description: |-
                         LastHandledPromotion is the stages.metio.wtf/promote token this stage most
