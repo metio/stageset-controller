@@ -13,8 +13,10 @@ import (
 	authazure "github.com/fluxcd/pkg/auth/azure"
 	authgcp "github.com/fluxcd/pkg/auth/gcp"
 	"golang.org/x/oauth2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	stagesv1 "github.com/metio/stageset-controller/api/v1"
 	"github.com/metio/stageset-controller/internal/decryptor"
 )
 
@@ -41,8 +43,19 @@ func (s *tenantCredentialSource) opts() []auth.Option {
 	return []auth.Option{
 		auth.WithClient(s.client),
 		auth.WithServiceAccountName(s.saName),
-		auth.WithServiceAccountNamespace(s.namespace),
+		withStageSetNamespace(s.namespace),
 	}
+}
+
+// withStageSetNamespace binds pkg/auth to a StageSet's namespace. pkg/auth
+// resolves the ServiceAccount, and the kubeConfig ConfigMap, in the namespace
+// of the object reference it is given, so the reference carries only the
+// namespace: no token cache or SPIFFE broker is configured that would read its
+// name or UID.
+func withStageSetNamespace(namespace string) auth.Option {
+	return auth.WithObject(stagesv1.GroupVersion.Group, "StageSet", &metav1.PartialObjectMetadata{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+	})
 }
 
 func (s *tenantCredentialSource) AWS(ctx context.Context) awssdk.CredentialsProvider {
