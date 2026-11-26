@@ -7,7 +7,6 @@ import (
 	"context"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -45,8 +44,8 @@ func ea(ns, name, snippet string) *unstructured.Unstructured {
 
 func ssReferencing(ns, name string, ref stagesv1.SourceReference) *stagesv1.StageSet {
 	return &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
-		Spec:       stagesv1.StageSetSpec{Stages: []stagesv1.Stage{{Name: "s", SourceRef: ref}}},
+		Namespace: ns, Name: name,
+		Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{{Name: "s", SourceRef: ref}}},
 	}
 }
 
@@ -136,10 +135,10 @@ func TestProducerGVK_And_IsProducerRef(t *testing.T) {
 
 func TestMapStageSetDependents(t *testing.T) {
 	t.Parallel()
-	a := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "dep-a"}}
+	a := &stagesv1.StageSet{Namespace: "ns", Name: "dep-a"}
 	b := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "dep-b"},
-		Spec:       stagesv1.StageSetSpec{DependsOn: []stagesv1.Dependency{{Name: "dep-a"}}},
+		Namespace: "ns", Name: "dep-b",
+		Spec: stagesv1.StageSetSpec{DependsOn: []stagesv1.Dependency{{Name: "dep-a"}}},
 	}
 	c := fake.NewClientBuilder().WithScheme(watchScheme(t)).WithObjects(a, b).Build()
 	r := &StageSetReconciler{Client: c}

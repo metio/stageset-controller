@@ -68,7 +68,7 @@ func TestMigEntryName_Variants(t *testing.T) {
 func TestDependsOnKeys_DefaultsNamespace(t *testing.T) {
 	t.Parallel()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "web"},
+		Namespace: "team-a", Name: "web",
 		Spec: stagesv1.StageSetSpec{
 			DependsOn: []stagesv1.Dependency{
 				{Name: "db"},
@@ -303,18 +303,18 @@ func TestResolvePostBuildVars_MergeAndPrecedence(t *testing.T) {
 	r := builderWith(
 		t,
 		&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cm"},
-			Data:       map[string]string{"region": "eu", "shared": "from-cm"},
+			Namespace: ns, Name: "cm",
+			Data: map[string]string{"region": "eu", "shared": "from-cm"},
 		},
 		&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sec"},
-			Data:       map[string][]byte{"token": []byte("xyz")},
+			Namespace: ns, Name: "sec",
+			Data: map[string][]byte{"token": []byte("xyz")},
 		},
 	)
 
 	// No serviceAccountName: targetCluster hands back the controller's client,
 	// which is the single-tenant path this harness exercises.
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"}}
+	ss := &stagesv1.StageSet{Namespace: ns, Name: "app"}
 
 	if vars, err := r.resolvePostBuildVars(context.Background(), ss, nil); err != nil || vars != nil {
 		t.Fatalf("nil PostBuild = (%v,%v), want (nil,nil)", vars, err)
@@ -345,7 +345,7 @@ func TestResolvePostBuildVars_MissingSource(t *testing.T) {
 	t.Parallel()
 	const ns = "team-a"
 	r := builderWith(t)
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"}}
+	ss := &stagesv1.StageSet{Namespace: ns, Name: "app"}
 
 	hard := &stagesv1.PostBuild{SubstituteFrom: []stagesv1.SubstituteReference{
 		{Kind: "ConfigMap", Name: "absent"},
@@ -379,12 +379,12 @@ func TestResolvePostBuildVars_SubstituteFromReadsAsTheStageSetServiceAccount(t *
 	t.Parallel()
 	const ns = "team-a"
 	r := builderWith(t, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "not-mine"},
-		Data:       map[string][]byte{"token": []byte("xyz")},
+		Namespace: ns, Name: "not-mine",
+		Data: map[string][]byte{"token": []byte("xyz")},
 	})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
-		Spec:       stagesv1.StageSetSpec{ServiceAccountName: "tenant-sa"},
+		Namespace: ns, Name: "app",
+		Spec: stagesv1.StageSetSpec{ServiceAccountName: "tenant-sa"},
 	}
 	pb := &stagesv1.PostBuild{SubstituteFrom: []stagesv1.SubstituteReference{
 		{Kind: "Secret", Name: "not-mine"},
@@ -406,8 +406,8 @@ func TestResolvePostBuildVars_InlineSubstituteNeedsNoClient(t *testing.T) {
 	t.Parallel()
 	r := builderWith(t)
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "app"},
-		Spec:       stagesv1.StageSetSpec{ServiceAccountName: "tenant-sa"},
+		Namespace: "team-a", Name: "app",
+		Spec: stagesv1.StageSetSpec{ServiceAccountName: "tenant-sa"},
 	}
 	pb := &stagesv1.PostBuild{Substitute: map[string]string{"region": "eu"}}
 
@@ -428,16 +428,16 @@ func TestKubeconfigBytes_KeyHandling(t *testing.T) {
 	r := builderWith(
 		t,
 		&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "default-key"},
-			Data:       map[string][]byte{"value": []byte("kc-default")},
+			Namespace: ns, Name: "default-key",
+			Data: map[string][]byte{"value": []byte("kc-default")},
 		},
 		&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "custom-key"},
-			Data:       map[string][]byte{"config": []byte("kc-custom")},
+			Namespace: ns, Name: "custom-key",
+			Data: map[string][]byte{"config": []byte("kc-custom")},
 		},
 		&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "empty-key"},
-			Data:       map[string][]byte{"value": {}},
+			Namespace: ns, Name: "empty-key",
+			Data: map[string][]byte{"value": {}},
 		},
 	)
 

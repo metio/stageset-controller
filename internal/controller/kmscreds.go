@@ -54,7 +54,7 @@ func (s *tenantCredentialSource) opts() []auth.Option {
 // name or UID.
 func withStageSetNamespace(namespace string) auth.Option {
 	return auth.WithObject(stagesv1.GroupVersion.Group, "StageSet", &metav1.PartialObjectMetadata{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+		Namespace: namespace,
 	})
 }
 

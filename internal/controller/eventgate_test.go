@@ -19,18 +19,18 @@ import (
 func TestEvaluateEventChecks(t *testing.T) {
 	const ns = "apps"
 	pod := func(name, uid string, labels map[string]string) *corev1.Pod {
-		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: types.UID(uid), Labels: labels}}
+		return &corev1.Pod{Name: name, Namespace: ns, UID: types.UID(uid), Labels: labels}
 	}
 	evt := func(name, podUID, reason, typ string, count int32) *corev1.Event {
 		return &corev1.Event{
-			ObjectMeta:     metav1.ObjectMeta{Name: name, Namespace: ns},
+			Name: name, Namespace: ns,
 			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Namespace: ns, UID: types.UID(podUID)},
 			Reason:         reason,
 			Type:           typ,
 			Count:          count,
 		}
 	}
-	ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: ns}}
+	ss := &stagesv1.StageSet{Name: "app", Namespace: ns}
 	gateStage := func(gate *stagesv1.EventGate) *stagesv1.Stage {
 		return &stagesv1.Stage{Name: "staging", Promotion: &stagesv1.StagePromotion{EventGate: gate}}
 	}

@@ -39,7 +39,7 @@ func (c *capturingRecorder) countEvents(reason, substr string) int {
 func breachingPod(t *testing.T, c client.Client, ns, name string, restarts int32) {
 	t.Helper()
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: map[string]string{"app": "api"}},
+		Namespace: ns, Name: name, Labels: map[string]string{"app": "api"},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{
 			Name: "app", Image: "registry.example/app:1",
 		}}},
@@ -70,7 +70,7 @@ func TestReconcile_GateRollback_ParksAbortedRevision(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": cmValManifest(ns, "parked", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "gate-park"},
+		Namespace: ns, Name: "gate-park",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -100,7 +100,7 @@ func TestReconcile_GateRollback_ParksAbortedRevision(t *testing.T) {
 			Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		}
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "gate-park"}}
+	req := ctrl.Request{Namespace: ns, Name: "gate-park"}
 
 	// Pass 1: no pods → the gate is clean, v1 promotes, the snapshot records v1.
 	if _, err := driveReconcile(newReconciler(), req); err != nil {
@@ -199,7 +199,7 @@ func TestReconcile_EventGateRollback_ParksAbortedRevision(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": cmValManifest(ns, "ev-parked", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "event-park"},
+		Namespace: ns, Name: "event-park",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -230,7 +230,7 @@ func TestReconcile_EventGateRollback_ParksAbortedRevision(t *testing.T) {
 			Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		}
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "event-park"}}
+	req := ctrl.Request{Namespace: ns, Name: "event-park"}
 
 	// Pass 1: clean, v1 lands, snapshot recorded.
 	if _, err := driveReconcile(newReconciler(), req); err != nil {
@@ -245,7 +245,7 @@ func TestReconcile_EventGateRollback_ParksAbortedRevision(t *testing.T) {
 		t.Fatalf("get pod: %v", err)
 	}
 	ev := &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "api-noisy.warn1"},
+		Namespace: ns, Name: "api-noisy.warn1",
 		InvolvedObject: corev1.ObjectReference{
 			APIVersion: "v1", Kind: "Pod", Namespace: ns, Name: "api-noisy", UID: noisy.UID,
 		},

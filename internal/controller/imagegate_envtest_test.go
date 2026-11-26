@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -65,7 +64,7 @@ func imagePolicy(t *testing.T, c client.Client, name string, imageGlob string) {
 func imagePolicyWithSkip(t *testing.T, c client.Client, name, imageGlob string, skip []string) {
 	t.Helper()
 	p := &stagesv1.ImageVerificationPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Spec: stagesv1.ImageVerificationPolicySpec{
 			Images:      []string{imageGlob},
 			Skip:        skip,
@@ -117,7 +116,7 @@ func TestReconcile_ImageVerification_SkipIsPerPolicy(t *testing.T) {
 func newStageSetNoWait(t *testing.T, c client.Client, ns, name string, ref stagesv1.SourceReference) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -142,7 +141,7 @@ func reconcileWithImageVerifier(t *testing.T, c client.Client, ss *stagesv1.Stag
 		ImageVerifier:            v,
 		RequireImageVerification: require,
 	}
-	if _, err := driveReconcile(r, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}}); err != nil {
+	if _, err := driveReconcile(r, ctrl.Request{Namespace: ss.Namespace, Name: ss.Name}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 }
@@ -160,7 +159,7 @@ func TestReconcile_ImageVerification_GatesRollback(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj-b")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "rb-verify"},
+		Namespace: ns, Name: "rb-verify",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: 5 * time.Minute},
 			RollbackOnFailure: true,
@@ -298,7 +297,7 @@ func TestReconcile_ImageVerification_SkipExempts(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	p := &stagesv1.ImageVerificationPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "skip-pol"},
+		Name: "skip-pol",
 		Spec: stagesv1.ImageVerificationPolicySpec{
 			Images:      []string{"regskip.io/**"},
 			Skip:        []string{"regskip.io/vendored/**"},

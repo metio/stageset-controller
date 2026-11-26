@@ -31,7 +31,7 @@ import (
 
 func newNamespace(t *testing.T, c client.Client) string {
 	t.Helper()
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "stageset-test-"}}
+	ns := &corev1.Namespace{GenerateName: "stageset-test-"}
 	if err := c.Create(context.Background(), ns); err != nil {
 		t.Fatalf("create namespace: %v", err)
 	}
@@ -78,7 +78,7 @@ func plantExternalArtifact(t *testing.T, c client.Client, ns, name, snippet, rev
 func newStageSet(t *testing.T, c client.Client, ns, name string, ref stagesv1.SourceReference) *stagesv1.StageSet {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages:   []stagesv1.Stage{{Name: "stage-a", SourceRef: ref}},
@@ -98,7 +98,7 @@ func reconcileOnce(t *testing.T, c client.Client, ss *stagesv1.StageSet) {
 		// Permissive fetcher so the artifact's httptest loopback URL is reachable.
 		Fetcher: &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}}
+	req := ctrl.Request{Namespace: ss.Namespace, Name: ss.Name}
 	if _, err := driveReconcile(r, req); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestReconcile_FinalizerAddRequeues(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "fresh"},
+		Namespace: ns, Name: "fresh",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages:   []stagesv1.Stage{{Name: "stage-a", SourceRef: stagesv1.SourceReference{Name: "missing"}}},
@@ -152,7 +152,7 @@ func TestReconcile_FinalizerAddRequeues(t *testing.T) {
 		RESTMapper: c.RESTMapper(),
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "fresh"}}
+	req := ctrl.Request{Namespace: ns, Name: "fresh"}
 
 	res, err := r.Reconcile(context.Background(), req)
 	if err != nil {
@@ -282,7 +282,7 @@ func TestReconcile_Migration_BaselineEmitsEvent(t *testing.T) {
 		Recorder:   rec,
 		Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "baseline-ev"}}
+	req := ctrl.Request{Namespace: ns, Name: "baseline-ev"}
 	if _, err := driveReconcile(r, req); err != nil {
 		t.Fatalf("baseline reconcile: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestReconcile_OrphanStageTeardown(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"b.yaml": configMapManifest(ns, "obj-b")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "multi"},
+		Namespace: ns, Name: "multi",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -541,7 +541,7 @@ func TestReconcile_CrossStageOwnershipTransfer(t *testing.T) {
 	servedArtifact(t, c, ns, "ea-b", "", map[string]string{"b.yaml": configMapManifest(ns, "cm-b")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "mover"},
+		Namespace: ns, Name: "mover",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{
@@ -605,7 +605,7 @@ func TestReconcile_Suspended(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "paused"},
+		Namespace: ns, Name: "paused",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Suspend:  true,

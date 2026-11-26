@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -52,7 +51,7 @@ func TestReconcile_Promotion_TransientGateErrorDoesNotRollBack(t *testing.T) {
 	})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "gate-transient"},
+		Namespace: ns, Name: "gate-transient",
 		Spec: stagesv1.StageSetSpec{
 			Interval:          metav1.Duration{Duration: time.Minute},
 			RollbackOnFailure: true,
@@ -83,7 +82,7 @@ func TestReconcile_Promotion_TransientGateErrorDoesNotRollBack(t *testing.T) {
 			Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 		}
 	}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "gate-transient"}}
+	req := ctrl.Request{Namespace: ns, Name: "gate-transient"}
 
 	// Baseline: the gate reads pods cleanly (none match → within tolerance), the
 	// stage promotes, and rollbackOnFailure records a snapshot to revert to.

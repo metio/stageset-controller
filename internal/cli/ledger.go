@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	stagesv1 "github.com/metio/stageset-controller/api/v1"
@@ -84,7 +83,7 @@ func runBaselineAdd(ctx context.Context, o *options, opts baselineOptions) error
 	var ledger stagesv1.StageLedger
 	switch lErr := c.Get(ctx, key, &ledger); {
 	case apierrors.IsNotFound(lErr):
-		ledger = stagesv1.StageLedger{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: opts.name}}
+		ledger = stagesv1.StageLedger{Namespace: ns, Name: opts.name}
 		ledger.Spec.Baseline = []stagesv1.LedgerRef{ref}
 		if err := c.Create(ctx, &ledger, client.FieldOwner(reconcileFieldManager)); err != nil {
 			return err
@@ -117,7 +116,7 @@ func runBaselineExport(ctx context.Context, o *options, opts baselineOptions) er
 		return err
 	}
 
-	out := stagesv1.StageLedger{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: opts.name}}
+	out := stagesv1.StageLedger{Namespace: ns, Name: opts.name}
 	out.SetGroupVersionKind(stagesv1.GroupVersion.WithKind("StageLedger"))
 	for i := range ledger.Status.CompletedActions {
 		comp := &ledger.Status.CompletedActions[i]

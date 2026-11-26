@@ -206,7 +206,7 @@ func TestDiff_ShowsStageActions(t *testing.T) {
 	ns := makeNamespace(t, c, "diffact")
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -240,7 +240,7 @@ func TestDiff_ShowsPendingMigrations(t *testing.T) {
 	ns := makeNamespace(t, c, "diffmig")
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages:   []stagesv1.Stage{{Name: "first", SourceRef: stagesv1.SourceReference{Name: "app-artifact"}}},

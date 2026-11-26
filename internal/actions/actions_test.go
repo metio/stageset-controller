@@ -218,8 +218,8 @@ func TestHTTPAction_CrossHostRedirectDoesNotLeakSecretHeader(t *testing.T) {
 		t.Fatalf("corev1 AddToScheme: %v", err)
 	}
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "ns"},
-		Data:       map[string][]byte{"X-Api-Key": []byte("SECRET-TOKEN")},
+		Name: "creds", Namespace: "ns",
+		Data: map[string][]byte{"X-Api-Key": []byte("SECRET-TOKEN")},
 	}
 	e := &Executor{
 		Client:       fake.NewClientBuilder().WithScheme(scheme).WithObjects(sec).Build(),
@@ -412,8 +412,8 @@ func TestSecretValue(t *testing.T) {
 		t.Fatalf("corev1 AddToScheme: %v", err)
 	}
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "gate-token", Namespace: "ns"},
-		Data:       map[string][]byte{"token": []byte("s3cr3t")},
+		Name: "gate-token", Namespace: "ns",
+		Data: map[string][]byte{"token": []byte("s3cr3t")},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(sec).Build()
 	e := &Executor{Client: c}
@@ -448,8 +448,8 @@ func dynScheme(t *testing.T) *runtime.Scheme {
 func configMap(t *testing.T, ns, name string) *corev1.ConfigMap {
 	t.Helper()
 	return &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
-		Data:       map[string]string{"k": "v"},
+		Namespace: ns, Name: name,
+		Data: map[string]string{"k": "v"},
 	}
 }
 
@@ -567,8 +567,8 @@ func TestRun_PatchAction_Selector(t *testing.T) {
 	t.Parallel()
 	cm := func(name, app string) *corev1.ConfigMap {
 		return &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name, Labels: map[string]string{"app": app}},
-			Data:       map[string]string{"k": "old"},
+			Namespace: "ns", Name: name, Labels: map[string]string{"app": app},
+			Data: map[string]string{"k": "old"},
 		}
 	}
 	c := fake.NewClientBuilder().WithScheme(dynScheme(t)).

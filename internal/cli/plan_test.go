@@ -26,7 +26,7 @@ import (
 func planStageSet(t testing.TB, c client.Client, ns, name string) {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -71,7 +71,7 @@ func TestPlan_ExitZeroWhenNothingRuns(t *testing.T) {
 	ns := makeNamespace(t, c, "planzero")
 	// A stage whose only action is a completed Lifetime one: nothing would run.
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -205,7 +205,7 @@ func downgradeStageSet(t testing.TB, c client.Client, ns, name string, reversibl
 		mig.Down = []stagesv1.Action{{Name: "undo", Wait: &stagesv1.WaitAction{Expr: "true"}}}
 	}
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: 5 * time.Minute},
 			Version:    &stagesv1.VersionSource{Value: "1.0.0", AllowDowngrade: allow},
@@ -281,7 +281,7 @@ func TestPlan_ResolvesVersionFromArtifact(t *testing.T) {
 	ns := makeNamespace(t, c, "planver")
 	// A StageSet whose version is read from a file in the stage's source tree.
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Version:  &stagesv1.VersionSource{FromArtifact: &stagesv1.ArtifactVersionRef{Stage: "first", Path: "VERSION"}},
@@ -406,7 +406,7 @@ func TestPlan_FanOutRecordsBrokenStageSet(t *testing.T) {
 	planStageSet(t, c, ns, "good")
 	// A StageSet whose decryption key Secret does not exist cannot be planned.
 	broken := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "broken"},
+		Namespace: ns, Name: "broken",
 		Spec: stagesv1.StageSetSpec{
 			Interval:   metav1.Duration{Duration: 5 * time.Minute},
 			Decryption: &stagesv1.Decryption{Provider: "sops", SecretRef: &meta.LocalObjectReference{Name: "missing-keys"}},
@@ -482,10 +482,8 @@ func TestPlan_FlagsStateBearingPrune(t *testing.T) {
 	// owner labels) and recorded it in its inventory; the current render no longer
 	// contains it, so the next reconcile would prune it.
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: ns, Name: "app-db",
-			Labels: map[string]string{"stages.metio.wtf/name": "app", "stages.metio.wtf/namespace": ns},
-		},
+		Namespace: ns, Name: "app-db",
+		Labels: map[string]string{"stages.metio.wtf/name": "app", "stages.metio.wtf/namespace": ns},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},

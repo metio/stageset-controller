@@ -22,7 +22,7 @@ func placeholderVWC(name, webhookName string) *admissionv1.ValidatingWebhookConf
 	failurePolicy := admissionv1.Fail
 	sideEffects := admissionv1.SideEffectClassNone
 	return &admissionv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Webhooks: []admissionv1.ValidatingWebhook{{
 			Name:                    webhookName,
 			AdmissionReviewVersions: []string{"v1"},
@@ -32,12 +32,10 @@ func placeholderVWC(name, webhookName string) *admissionv1.ValidatingWebhookConf
 				Service: &admissionv1.ServiceReference{Name: "stageset-controller-webhook", Namespace: "default"},
 			},
 			Rules: []admissionv1.RuleWithOperations{{
-				Operations: []admissionv1.OperationType{admissionv1.Create},
-				Rule: admissionv1.Rule{
-					APIGroups:   []string{"stages.metio.wtf"},
-					APIVersions: []string{"v1"},
-					Resources:   []string{"stagesets"},
-				},
+				Operations:  []admissionv1.OperationType{admissionv1.Create},
+				APIGroups:   []string{"stages.metio.wtf"},
+				APIVersions: []string{"v1"},
+				Resources:   []string{"stagesets"},
 			}},
 		}},
 	}

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -47,11 +46,11 @@ func newRecorder(t *testing.T, shardCap int, objs ...client.Object) *Recorder {
 }
 
 func stageSet(name, namespace string) *stagesv1.StageSet {
-	return &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{
+	return &stagesv1.StageSet{
 		Name:      name,
 		Namespace: namespace,
 		UID:       types.UID("uid-" + name),
-	}}
+	}
 }
 
 // refs builds n distinct ConfigMap refs with stable, sortable names.
@@ -239,14 +238,12 @@ func TestWrite_MigratesNonCanonicalShardName(t *testing.T) {
 	t.Parallel()
 	ss := stageSet("app", "ns")
 	stale := &stagesv1.StageInventory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-deploy-00", // the pre-injective name for shard 0
-			Namespace: "ns",
-			Labels: map[string]string{
-				stagesv1.StageSetLabel: "app",
-				stagesv1.StageLabel:    "deploy",
-				stagesv1.ShardLabel:    "0",
-			},
+		Name:      "app-deploy-00", // the pre-injective name for shard 0
+		Namespace: "ns",
+		Labels: map[string]string{
+			stagesv1.StageSetLabel: "app",
+			stagesv1.StageLabel:    "deploy",
+			stagesv1.ShardLabel:    "0",
 		},
 		Spec: stagesv1.StageInventorySpec{Entries: []stagesv1.InventoryEntry{{ID: ref("old").ID(), V: "v1"}}},
 	}
@@ -275,14 +272,12 @@ func TestWrite_SweepsShardWithUnparseableIndex(t *testing.T) {
 	t.Parallel()
 	ss := stageSet("app", "ns")
 	bad := &stagesv1.StageInventory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-deploy-xx",
-			Namespace: "ns",
-			Labels: map[string]string{
-				stagesv1.StageSetLabel: "app",
-				stagesv1.StageLabel:    "deploy",
-				stagesv1.ShardLabel:    "not-a-number",
-			},
+		Name:      "app-deploy-xx",
+		Namespace: "ns",
+		Labels: map[string]string{
+			stagesv1.StageSetLabel: "app",
+			stagesv1.StageLabel:    "deploy",
+			stagesv1.ShardLabel:    "not-a-number",
 		},
 		Spec: stagesv1.StageInventorySpec{Entries: []stagesv1.InventoryEntry{{ID: ref("orphan").ID(), V: "v1"}}},
 	}
@@ -314,14 +309,12 @@ func mustStored(t *testing.T, r *Recorder, ssName, ns, stage string) []inventory
 func TestStored_SkipsMalformedEntries(t *testing.T) {
 	t.Parallel()
 	si := &stagesv1.StageInventory{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-deploy-00",
-			Namespace: "ns",
-			Labels: map[string]string{
-				stagesv1.StageSetLabel: "app",
-				stagesv1.StageLabel:    "deploy",
-				stagesv1.ShardLabel:    "0",
-			},
+		Name:      "app-deploy-00",
+		Namespace: "ns",
+		Labels: map[string]string{
+			stagesv1.StageSetLabel: "app",
+			stagesv1.StageLabel:    "deploy",
+			stagesv1.ShardLabel:    "0",
 		},
 		Spec: stagesv1.StageInventorySpec{Entries: []stagesv1.InventoryEntry{
 			{ID: "ns_good_" + "_ConfigMap", V: "v1"}, // valid (core group → empty)

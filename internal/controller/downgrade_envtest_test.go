@@ -96,7 +96,7 @@ func TestReconcile_Downgrade_RunsDownActionsAndLowersVersion(t *testing.T) {
 
 	// The up action deletes up-victim; the down action deletes down-victim.
 	for _, n := range []string{"up-victim", "down-victim"} {
-		if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: n}}); err != nil {
+		if err := c.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: n}); err != nil {
 			t.Fatalf("create %s: %v", n, err)
 		}
 	}
@@ -104,7 +104,7 @@ func TestReconcile_Downgrade_RunsDownActionsAndLowersVersion(t *testing.T) {
 	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": reversibleLadder(ns, "up-victim", "down-victim")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
@@ -183,14 +183,14 @@ func TestReconcile_Downgrade_UnwindsEveryCrossedBoundary(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	for _, n := range []string{"marker-2", "marker-3"} {
-		if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: n}}); err != nil {
+		if err := c.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: n}); err != nil {
 			t.Fatalf("create %s: %v", n, err)
 		}
 	}
 	servedArtifact(t, c, ns, "stage-ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": twoBoundaryLadder(ns)})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
@@ -245,14 +245,14 @@ func TestReconcile_RollbackToAnnotation_TriggersDowngrade(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	for _, n := range []string{"up-victim", "down-victim"} {
-		if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: n}}); err != nil {
+		if err := c.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: n}); err != nil {
 			t.Fatalf("create %s: %v", n, err)
 		}
 	}
 	servedArtifact(t, c, ns, "stage-ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": reversibleLadder(ns, "up-victim", "down-victim")})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
@@ -308,14 +308,14 @@ func TestReconcile_Downgrade_RefusedWithoutAllowDowngrade(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 	for _, n := range []string{"up-victim", "down-victim"} {
-		if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: n}}); err != nil {
+		if err := c.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: n}); err != nil {
 			t.Fatalf("create %s: %v", n, err)
 		}
 	}
 	servedArtifact(t, c, ns, "stage-ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": reversibleLadder(ns, "up-victim", "down-victim")})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
@@ -354,13 +354,13 @@ func TestReconcile_Downgrade_RefusedWithoutAllowDowngrade(t *testing.T) {
 func TestReconcile_Downgrade_IrreversibleBoundaryRefused(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
-	if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "up-victim"}}); err != nil {
+	if err := c.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: "up-victim"}); err != nil {
 		t.Fatalf("create up-victim: %v", err)
 	}
 	servedArtifact(t, c, ns, "stage-ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": irreversibleLadder(ns, "up-victim")})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},

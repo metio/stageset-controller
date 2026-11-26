@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
@@ -38,8 +37,8 @@ func TestImpersonatedClient_RBACTakesEffect(t *testing.T) {
 	ctx := context.Background()
 
 	probe := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "probe"},
-		Data:       map[string]string{"k": "v"},
+		Namespace: ns, Name: "probe",
+		Data: map[string]string{"k": "v"},
 	}
 	if err := c.Create(ctx, probe); err != nil {
 		t.Fatalf("create probe ConfigMap: %v", err)
@@ -49,7 +48,7 @@ func TestImpersonatedClient_RBACTakesEffect(t *testing.T) {
 	createSA(t, c, ns, "reader")
 	createSA(t, c, ns, "noperms")
 	role := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cm-reader"},
+		Namespace: ns, Name: "cm-reader",
 		Rules: []rbacv1.PolicyRule{{
 			APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get"},
 		}},
@@ -58,9 +57,9 @@ func TestImpersonatedClient_RBACTakesEffect(t *testing.T) {
 		t.Fatalf("create Role: %v", err)
 	}
 	rb := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "cm-reader"},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "cm-reader"},
-		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: "reader"}},
+		Namespace: ns, Name: "cm-reader",
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "cm-reader"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: "reader"}},
 	}
 	if err := c.Create(ctx, rb); err != nil {
 		t.Fatalf("create RoleBinding: %v", err)
@@ -99,9 +98,9 @@ func TestBuild_AsTenant_RendersUnderServiceAccount(t *testing.T) {
 
 	createSA(t, c, ns, "renderer")
 	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "astenant-renderer-" + ns},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: "renderer"}},
+		Name:     "astenant-renderer-" + ns,
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: "renderer"}},
 	}
 	if err := c.Create(ctx, crb); err != nil {
 		t.Fatalf("create ClusterRoleBinding: %v", err)
@@ -138,9 +137,9 @@ func TestBuild_AsTenant_UsesPerStageServiceAccount(t *testing.T) {
 
 	createSA(t, c, ns, "stage-renderer")
 	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "astenant-stage-renderer-" + ns},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: "stage-renderer"}},
+		Name:     "astenant-stage-renderer-" + ns,
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: ns, Name: "stage-renderer"}},
 	}
 	if err := c.Create(ctx, crb); err != nil {
 		t.Fatalf("create ClusterRoleBinding: %v", err)
@@ -190,7 +189,7 @@ func TestBuild_AsTenant_NoServiceAccountIsNoop(t *testing.T) {
 
 func createSA(t *testing.T, c client.Client, ns, name string) {
 	t.Helper()
-	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	sa := &corev1.ServiceAccount{Namespace: ns, Name: name}
 	if err := c.Create(context.Background(), sa); err != nil {
 		t.Fatalf("create ServiceAccount %s: %v", name, err)
 	}
@@ -213,8 +212,8 @@ func TestBuild_AsTenant_ReadsSubstituteFromAsCaller(t *testing.T) {
 
 	// A substitution ConfigMap only the caller (envtest admin) can read.
 	vars := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "vars"},
-		Data:       map[string]string{"greeting": "from-caller"},
+		Namespace: ns, Name: "vars",
+		Data: map[string]string{"greeting": "from-caller"},
 	}
 	if err := c.Create(ctx, vars); err != nil {
 		t.Fatalf("create vars ConfigMap: %v", err)

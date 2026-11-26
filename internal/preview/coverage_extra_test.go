@@ -17,7 +17,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -78,8 +77,8 @@ func TestResolvePostBuildVars_RequiredSecretMissingIsError(t *testing.T) {
 // folded in as strings.
 func TestResolvePostBuildVars_SecretValuesDecoded(t *testing.T) {
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "creds"},
-		Data:       map[string][]byte{"PASSWORD": []byte("s3cr3t")},
+		Namespace: "ns", Name: "creds",
+		Data: map[string][]byte{"PASSWORD": []byte("s3cr3t")},
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(sec).Build()
 	pb := &stagesv1.PostBuild{

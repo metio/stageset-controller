@@ -36,7 +36,7 @@ func reconcileWith(t *testing.T, c client.Client, ss *stagesv1.StageSet, allowed
 		// would reject them, so opt the test path into a permissive validator.
 		ActionIPValidator: actions.PermissiveIP,
 	}
-	_, err := driveReconcile(r, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ss.Namespace, Name: ss.Name}})
+	_, err := driveReconcile(r, ctrl.Request{Namespace: ss.Namespace, Name: ss.Name})
 	return err
 }
 
@@ -65,8 +65,8 @@ func TestReconcile_PreActionPatch(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	target := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "maintenance"},
-		Data:       map[string]string{"state": "off"},
+		Namespace: ns, Name: "maintenance",
+		Data: map[string]string{"state": "off"},
 	}
 	if err := c.Create(context.Background(), target); err != nil {
 		t.Fatalf("create target: %v", err)
@@ -74,7 +74,7 @@ func TestReconcile_PreActionPatch(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "with-pre"},
+		Namespace: ns, Name: "with-pre",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -118,14 +118,14 @@ func TestReconcile_DeleteAction(t *testing.T) {
 	c := testClient(t)
 	ns := newNamespace(t, c)
 
-	victim := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "obsolete"}}
+	victim := &corev1.ConfigMap{Namespace: ns, Name: "obsolete"}
 	if err := c.Create(context.Background(), victim); err != nil {
 		t.Fatalf("create victim: %v", err)
 	}
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "stage-obj")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "deleter"},
+		Namespace: ns, Name: "deleter",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -170,7 +170,7 @@ func TestReconcile_ApplyAction_AppliesTransientObject(t *testing.T) {
 	servedArtifact(t, c, ns, "maint", "", map[string]string{"m.yaml": configMapManifest(ns, "maintenance-page")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "with-apply"},
+		Namespace: ns, Name: "with-apply",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -216,7 +216,7 @@ func TestReconcile_ApplyThenDelete_TransientLifecycle(t *testing.T) {
 	servedArtifact(t, c, ns, "maint", "", map[string]string{"m.yaml": configMapManifest(ns, "maintenance-page")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "maint-cycle"},
+		Namespace: ns, Name: "maint-cycle",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -260,7 +260,7 @@ func TestReconcile_ActionLedgerIdempotent(t *testing.T) {
 
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj")})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "ledger"},
+		Namespace: ns, Name: "ledger",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -292,7 +292,7 @@ func TestReconcile_WaitExprAction(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	target := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "drainable", Labels: map[string]string{"ready": "yes"}},
+		Namespace: ns, Name: "drainable", Labels: map[string]string{"ready": "yes"},
 	}
 	if err := c.Create(context.Background(), target); err != nil {
 		t.Fatalf("create target: %v", err)
@@ -300,7 +300,7 @@ func TestReconcile_WaitExprAction(t *testing.T) {
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "waiter"},
+		Namespace: ns, Name: "waiter",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -338,7 +338,7 @@ func TestReconcile_OnFailureRuns(t *testing.T) {
 
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": configMapManifest(ns, "obj")})
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "onfail"},
+		Namespace: ns, Name: "onfail",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{

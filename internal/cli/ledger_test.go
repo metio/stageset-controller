@@ -18,7 +18,7 @@ import (
 func makeLifetimeStageSet(t testing.TB, c client.Client, ns, name, action string) {
 	t.Helper()
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -37,7 +37,7 @@ func makeLifetimeStageSet(t testing.TB, c client.Client, ns, name, action string
 
 func makeLedgerWithCompletion(t testing.TB, c client.Client, ns, name, stage, action string, origin stagesv1.LedgerOrigin) {
 	t.Helper()
-	l := &stagesv1.StageLedger{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	l := &stagesv1.StageLedger{Namespace: ns, Name: name}
 	if origin == stagesv1.OriginBaselined {
 		l.Spec.Baseline = []stagesv1.LedgerRef{{Stage: stage, Action: action}}
 	}
@@ -86,7 +86,7 @@ func TestBaseline_RejectsNonLifetimeAction(t *testing.T) {
 	ns := makeNamespace(t, c, "baselinerev")
 	// A StageSet whose action is Revision-scoped, not Lifetime.
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"},
+		Namespace: ns, Name: "app",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{

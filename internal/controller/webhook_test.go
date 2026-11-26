@@ -237,7 +237,7 @@ func TestReconcile_InvalidActionFallback(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "bad-action"},
+		Namespace: ns, Name: "bad-action",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: 5 * time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -359,7 +359,7 @@ func TestValidateUpdate_DeletingObjectIsAdmitted(t *testing.T) {
 	v := &StageSetValidator{}
 	now := metav1.Now()
 	invalid := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now, Finalizers: []string{"x"}},
+		DeletionTimestamp: &now, Finalizers: []string{"x"},
 		Spec: stagesv1.StageSetSpec{Stages: []stagesv1.Stage{
 			{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-1"}},
 			{Name: "app", SourceRef: stagesv1.SourceReference{Name: "ea-2"}},

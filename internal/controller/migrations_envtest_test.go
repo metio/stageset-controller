@@ -43,7 +43,7 @@ func TestReconcile_SourcedMigration_RunsAndAdvancesVersion(t *testing.T) {
 	ns := newNamespace(t, c)
 
 	// The victim the sourced migration will delete.
-	victim := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}
+	victim := &corev1.ConfigMap{Namespace: ns, Name: "legacy"}
 	if err := c.Create(context.Background(), victim); err != nil {
 		t.Fatalf("create victim: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestReconcile_SourcedMigration_RunsAndAdvancesVersion(t *testing.T) {
 	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": deleteLadder(ns, "legacy")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "migrator"},
+		Namespace: ns, Name: "migrator",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
@@ -139,7 +139,7 @@ func TestReconcile_SourcedMigration_LedgerPersistsAndSkipsDestructiveRetry(t *te
 	c := testClient(t)
 	ns := newNamespace(t, c)
 
-	victim := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}
+	victim := &corev1.ConfigMap{Namespace: ns, Name: "legacy"}
 	if err := c.Create(context.Background(), victim); err != nil {
 		t.Fatalf("create victim: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestReconcile_SourcedMigration_LedgerPersistsAndSkipsDestructiveRetry(t *te
 	servedArtifact(t, c, ns, "ladder-ea", "", map[string]string{"ladder.yaml": deleteThenPatchLadder(ns, "legacy")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "migrator"},
+		Namespace: ns, Name: "migrator",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
@@ -193,7 +193,7 @@ func TestReconcile_SourcedMigration_LedgerPersistsAndSkipsDestructiveRetry(t *te
 	// Recreate the victim and retry: the ledger (read back from the apiserver)
 	// must skip delete-legacy, so the recreated victim SURVIVES — the migration
 	// does not re-run the destructive action.
-	if err := c.Create(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "legacy"}}); err != nil {
+	if err := c.Create(context.Background(), &corev1.ConfigMap{Namespace: ns, Name: "legacy"}); err != nil {
 		t.Fatalf("recreate victim: %v", err)
 	}
 	_ = reconcileWith(t, c, getStageSet(t, c, ns, "migrator"), nil)
@@ -225,7 +225,7 @@ func TestReconcile_SourcedMigration_InvalidArtifactFailsClosed(t *testing.T) {
 	})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "broken"},
+		Namespace: ns, Name: "broken",
 		Spec: stagesv1.StageSetSpec{
 			Interval:            metav1.Duration{Duration: time.Minute},
 			Version:             &stagesv1.VersionSource{Value: "1.0.0"},
