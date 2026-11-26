@@ -104,6 +104,15 @@ stagesetctl reconcile my-app --wait    # force an out-of-band reconcile
 `diff` follows the diff(1) convention (exit 1 on changes), so it gates CI. Use
 `stagesetctl reconcile --update-now` to push a window-held rollout through.
 
+`stagesetctl promote my-app -n apps --stage prod --wait` advances a stage past
+its promotion gate. It works only while the stage is held there
+(`status.stages[].promotionState.phase` is `Soaking`, `Analyzing`, `Blocked` or
+`AwaitingManual`), and binds the token to the revision the stage is held at. The
+controller ignores any other token, records it on
+`status.stages[].ignoredPromotion` and emits a `PromotionIgnored` Event, so read
+those before retrying a promotion that did nothing. Never pre-stamp
+`stages.metio.wtf/promote` for a stage the rollout has not reached.
+
 ## Debugging a failed StageSet
 
 `status.conditions[Ready].reason` names the failure; each reason has a runbook at

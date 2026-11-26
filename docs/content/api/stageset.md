@@ -492,6 +492,19 @@ status:
       message: ""
       executedActions: []
       ledgerRevision: sha256:9f3c
+    - name: production
+      phase: Ready
+      appliedRevision: sha256:1a2b
+      promotionState:
+        phase: Promoted         # Soaking|Analyzing|Blocked|AwaitingManual|Promoted
+        since: "2026-06-15T09:25:00Z"
+      lastHandledPromotion: "1718443200"
+      ignoredPromotion:         # the last promote token the controller refused
+        token: "1718443500"
+        reason: AlreadyPromoted # NoPromotionGate|AlreadyPromoted|NotHeld|RevisionMismatch
+        revision: sha256:1a2b
+        message: 'promote token "1718443500" for stage "production" ignored: ...'
+        time: "2026-06-15T09:30:00Z"
   lastAppliedSnapshot:
     - stage: infrastructure
       url: http://source-controller.../infra.tar.gz
