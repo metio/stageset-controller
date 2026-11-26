@@ -10,7 +10,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -46,7 +45,7 @@ func TestReconcile_Promotion_TokenOnPromotedStageDoesNotCarryOver(t *testing.T) 
 	servedArtifact(t, c, ns, "ea", "", map[string]string{"cm.yaml": cmValManifest(ns, "gated", "v1")})
 
 	ss := &stagesv1.StageSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "carry"},
+		Namespace: ns, Name: "carry",
 		Spec: stagesv1.StageSetSpec{
 			Interval: metav1.Duration{Duration: time.Minute},
 			Stages: []stagesv1.Stage{{
@@ -70,7 +69,7 @@ func TestReconcile_Promotion_TokenOnPromotedStageDoesNotCarryOver(t *testing.T) 
 			Fetcher:    &artifact.Fetcher{HTTPClient: http.DefaultClient, URLValidator: artifact.PermissiveHTTPURL, IPValidator: artifact.PermissiveIP},
 			Now:        func() time.Time { return at },
 		}
-		_, _ = driveReconcile(r, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "carry"}})
+		_, _ = driveReconcile(r, ctrl.Request{Namespace: ns, Name: "carry"})
 	}
 
 	// Revision 1 holds at the manual gate, and a token for the held stage

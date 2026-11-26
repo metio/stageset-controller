@@ -139,7 +139,7 @@ func TestWaitForPromote(t *testing.T) {
 		st := heldStatus(stagesv1.PromotionPromoted, "rev1")
 		st.LastHandledPromotion = "tok"
 		setStageStatus(t, c, ns, "app", st)
-		ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"}}
+		ss := &stagesv1.StageSet{Namespace: ns, Name: "app"}
 		if err := waitForPromote(context.Background(), c, ss, opts, "tok"); err != nil {
 			t.Fatalf("waitForPromote: %v", err)
 		}
@@ -150,7 +150,7 @@ func TestWaitForPromote(t *testing.T) {
 		st := heldStatus(stagesv1.PromotionSoaking, "rev2")
 		st.IgnoredPromotion = &stagesv1.IgnoredPromotion{Token: "tok", Reason: stagesv1.PromoteIgnoredRevisionMismatch, Message: "issued for rev1"}
 		setStageStatus(t, c, ns, "app", st)
-		ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"}}
+		ss := &stagesv1.StageSet{Namespace: ns, Name: "app"}
 		err := waitForPromote(context.Background(), c, ss, opts, "tok")
 		if !errors.Is(err, errPromotionIgnored) || !strings.Contains(err.Error(), "issued for rev1") {
 			t.Fatalf("err = %v, want the controller's refusal", err)
@@ -162,7 +162,7 @@ func TestWaitForPromote(t *testing.T) {
 		st := heldStatus(stagesv1.PromotionSoaking, "rev2")
 		st.IgnoredPromotion = &stagesv1.IgnoredPromotion{Token: "older", Reason: stagesv1.PromoteIgnoredNotHeld}
 		setStageStatus(t, c, ns, "app", st)
-		ss := &stagesv1.StageSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "app"}}
+		ss := &stagesv1.StageSet{Namespace: ns, Name: "app"}
 		short := opts
 		short.timeout = 2 * time.Second
 		err := waitForPromote(context.Background(), c, ss, short, "tok")
